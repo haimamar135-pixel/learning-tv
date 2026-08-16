@@ -1,7 +1,4 @@
-
-
-App · JSX
-import { useState, useEffect, useRef, useMemo } from "react";
+ import { useState, useEffect, useRef, useMemo } from "react";
  
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
