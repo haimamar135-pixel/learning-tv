@@ -1,4 +1,4 @@
-  import { useState, useEffect, useRef, useMemo } from "react";
+   import { useState, useEffect, useRef, useMemo } from "react";
  
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
@@ -1226,8 +1226,8 @@ export default function LearningTV() {
           </label>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
-              <span className="key-num">⏏</span>
-              <span className="key-label">לספרייה</span>
+              <span className="key-num">↩</span>
+              <span className="key-label">חזרה לספרייה</span>
             </button>
           )}
         </div>
@@ -1252,16 +1252,16 @@ export default function LearningTV() {
             })}
           </div>
           <div className="deck">
-            <button className="ch-key newtext" onClick={backToGuide} disabled={loading}>
-              <span className="key-num">↩</span>
-              <span className="key-label">חזרה ללוח השידורים</span>
-            </button>
             {!book.progress?.[chIdx]?.done && (
               <button className="ch-key newtext" onClick={() => markDone(chIdx)} disabled={loading}>
                 <span className="key-num">✓</span>
                 <span className="key-label">סמן כהושלם</span>
               </button>
             )}
+            <button className="ch-key newtext" onClick={backToGuide} disabled={loading}>
+              <span className="key-num">↩</span>
+              <span className="key-label">חזרה ללוח השידורים</span>
+            </button>
           </div>
         </>
       )}
@@ -1338,8 +1338,8 @@ export default function LearningTV() {
               </button>
             )}
             <button className="ch-key newtext" onClick={backToGuide}>
-              <span className="key-num">⏏</span>
-              <span className="key-label">לוח שידורים</span>
+              <span className="key-num">↩</span>
+              <span className="key-label">חזרה ללוח השידורים</span>
             </button>
           </div>
         </>
@@ -1700,4 +1700,3 @@ const css = `
 }
 `;
   
- 
