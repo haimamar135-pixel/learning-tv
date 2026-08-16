@@ -58,11 +58,20 @@ async function askClaude(prompt) {
     throw new Error("בעיית רשת — הבקשה לא הגיעה לשרת");
   }
  
-  const data = await res.json();
-  console.log("API status:", res.status);
+  const raw = await res.text();
+  console.log("API status:", res.status, raw.slice(0, 300));
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(`השרת החזיר תשובה לא תקינה [${res.status}]: ${raw.slice(0, 160)}`);
+  }
  
   if (data.type === "error" || data.error) {
     throw new Error(`שגיאת API [${res.status}]: ${data.error?.message || ""}`);
+  }
+  if (data.errorMessage) {
+    throw new Error(`שגיאת שרת [${res.status}]: ${data.errorMessage}`);
   }
  
   const text = (data.content || [])
@@ -70,7 +79,7 @@ async function askClaude(prompt) {
     .map((b) => b.text)
     .join("\n");
  
-  if (!text.trim()) throw new Error("התקבלה תשובה ריקה");
+  if (!text.trim()) throw new Error(`התקבלה תשובה ריקה [${res.status}]: ${raw.slice(0, 160)}`);
  
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -207,32 +216,6 @@ const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf
 const MAMMOTH_SRC = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const TESS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.5/tesseract.min.js";
  
-/* המרת צילום ל-PNG בתוך הדפדפן — פותר צילומי HEIC מאייפון ומקטין צילומים ענקיים */
-async function imageToPng(file, maxDim = 2200) {
-  const url = URL.createObjectURL(file);
-  try {
-    const img = await new Promise((resolve, reject) => {
-      const im = new Image();
-      im.onload = () => resolve(im);
-      im.onerror = () => reject(new Error("לא הצלחתי לקרוא את הצילום " + file.name + ". נסה לייצא אותו כ-JPEG ולהעלות שוב."));
-      im.src = url;
-    });
-    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.round(img.naturalWidth * scale);
-    const h = Math.round(img.naturalHeight * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return canvas.toDataURL("image/png");
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 /* OCR עברית לצילומים — רץ במחשב של המשתמש, הצילומים לא נשלחים לשום מקום */
 async function ocrImages(files, onProgress) {
   await loadScript(TESS_SRC);
@@ -243,13 +226,10 @@ async function ocrImages(files, onProgress) {
   try {
     for (let i = 0; i < files.length; i++) {
       onProgress?.(i + 1, files.length);
-      const png = await imageToPng(files[i]);
-      const { data } = await worker.recognize(png);
+      const { data } = await worker.recognize(files[i]);
       const t = (data?.text || "").trim();
       if (t) out += t + "\n\n";
     }
-  } catch (err) {
-    throw new Error("שגיאה בפענוח: " + (err?.message || String(err)));
   } finally {
     await worker.terminate();
   }
@@ -575,6 +555,16 @@ export default function LearningTV() {
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const photoRef = useRef(null);
+  const [fontScale, setFontScale] = useState(() => {
+    try { const v = parseFloat(localStorage.getItem("lomedtv-fontscale")); return v >= 0.7 && v <= 1.8 ? v : 1; } catch { return 1; }
+  });
+  const bumpFont = (d) => {
+    setFontScale((s) => {
+      const v = Math.min(1.8, Math.max(0.7, Math.round((s + d) * 10) / 10));
+      try { localStorage.setItem("lomedtv-fontscale", String(v)); } catch {}
+      return v;
+    });
+  };
  
   /* כל טקסט הספר כפסקאות — למצב המגילה */
   const paragraphs = useMemo(() => {
@@ -914,6 +904,10 @@ export default function LearningTV() {
                 {barTitle}
                 {(view === "tv" || view === "scroll") && book ? ` · ${book.title}` : ""}
               </span>
+              <span className="font-btns">
+                <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
+                <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
+              </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
             </div>
  
@@ -935,7 +929,7 @@ export default function LearningTV() {
               </div>
             )}
  
-            <div className="screen-body">
+            <div className="screen-body" style={{ zoom: fontScale }}>
               {view === "boot" && (
                 <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את הספרייה…</p></div>
               )}
@@ -1232,8 +1226,8 @@ export default function LearningTV() {
           </div>
           <div className="deck">
             <button className="ch-key newtext" onClick={backToGuide} disabled={loading}>
-              <span className="key-num">⏏</span>
-              <span className="key-label">לוח שידורים</span>
+              <span className="key-num">↩</span>
+              <span className="key-label">חזרה ללוח השידורים</span>
             </button>
             {!book.progress?.[chIdx]?.done && (
               <button className="ch-key newtext" onClick={() => markDone(chIdx)} disabled={loading}>
@@ -1258,8 +1252,8 @@ export default function LearningTV() {
             <span className="key-label">מגילה — לימוד גמיש</span>
           </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
-            <span className="key-num">⏏</span>
-            <span className="key-label">לספרייה</span>
+            <span className="key-num">↩</span>
+            <span className="key-label">חזרה לספרייה</span>
           </button>
         </div>
       )}
@@ -1399,6 +1393,9 @@ const css = `
 .chapter-tab.ok{color:var(--teal)}
 .chapter-tab.on.ok{border-color:var(--teal)}
  
+.font-btns{display:flex;gap:6px;margin-inline-start:auto;margin-inline-end:10px}
+.font-btn{background:#1b2a4a;color:#cfd3e6;border:1px solid #3a4a72;border-radius:8px;min-width:34px;height:26px;font-size:.85rem;cursor:pointer;line-height:1}
+.font-btn:hover{border-color:#f2a33c;color:#fff}
 .screen-body{
   flex:1;background:var(--paper);color:var(--ink);padding:26px 30px;overflow-y:auto;max-height:560px;
   background-image:radial-gradient(rgba(0,0,0,.03) 1px,transparent 1px);background-size:5px 5px;
@@ -1674,4 +1671,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
- 
+  
