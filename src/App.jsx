@@ -928,11 +928,12 @@ export default function LearningTV() {
                     onChange={onFilePicked}
                   />
                   <input
+                    id="photo-ocr-input"
                     ref={photoRef}
                     type="file"
                     multiple
                     accept="image/*"
-                    style={{ display: "none" }}
+                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
                     onChange={onPhotosPicked}
                   />
                   <div className="upload-box">
@@ -1169,10 +1170,10 @@ export default function LearningTV() {
             <span className="key-num">⬆</span>
             <span className="key-label">קבצים</span>
           </button>
-          <button className="ch-key green" onClick={() => photoRef.current?.click()} disabled={!!fileBusy}>
+          <label htmlFor="photo-ocr-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
             <span className="key-label">צילומים OCR</span>
-          </button>
+          </label>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
               <span className="key-num">⏏</span>
@@ -1644,4 +1645,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
- 
+  
