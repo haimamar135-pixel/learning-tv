@@ -1,4 +1,4 @@
- import { useState, useEffect, useRef, useMemo } from "react";
+  import { useState, useEffect, useRef, useMemo } from "react";
  
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
@@ -207,6 +207,32 @@ const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf
 const MAMMOTH_SRC = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
 const TESS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.5/tesseract.min.js";
  
+/* המרת צילום ל-PNG בתוך הדפדפן — פותר צילומי HEIC מאייפון ומקטין צילומים ענקיים */
+async function imageToPng(file, maxDim = 2200) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = () => reject(new Error("לא הצלחתי לקרוא את הצילום " + file.name + ". נסה לייצא אותו כ-JPEG ולהעלות שוב."));
+      im.src = url;
+    });
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scale);
+    const h = Math.round(img.naturalHeight * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /* OCR עברית לצילומים — רץ במחשב של המשתמש, הצילומים לא נשלחים לשום מקום */
 async function ocrImages(files, onProgress) {
   await loadScript(TESS_SRC);
@@ -217,10 +243,13 @@ async function ocrImages(files, onProgress) {
   try {
     for (let i = 0; i < files.length; i++) {
       onProgress?.(i + 1, files.length);
-      const { data } = await worker.recognize(files[i]);
+      const png = await imageToPng(files[i]);
+      const { data } = await worker.recognize(png);
       const t = (data?.text || "").trim();
       if (t) out += t + "\n\n";
     }
+  } catch (err) {
+    throw new Error("שגיאה בפענוח: " + (err?.message || String(err)));
   } finally {
     await worker.terminate();
   }
@@ -1645,4 +1674,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
-  
+ 
