@@ -566,11 +566,25 @@ export default function LearningTV() {
     });
   };
  
-  /* כל טקסט הספר כפסקאות — למצב המגילה */
-  const paragraphs = useMemo(() => {
-    if (!book) return [];
+  /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
+     סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
+     גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
+  const { sentences, paraGroups } = useMemo(() => {
+    if (!book) return { sentences: [], paraGroups: [] };
     const all = book.chapters.map((c) => c.text).join("\n\n");
-    return all.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const paras = all.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    const sentences = [];
+    const paraGroups = [];
+    for (const p of paras) {
+      const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
+      const start = sentences.length;
+      for (const s of parts) {
+        const t = s.trim();
+        if (t) sentences.push(t);
+      }
+      if (sentences.length > start) paraGroups.push([start, sentences.length - start]);
+    }
+    return { sentences, paraGroups };
   }, [book?.id, book?.chapters?.length]);
  
   useEffect(() => {
@@ -751,11 +765,14 @@ export default function LearningTV() {
     return () => clearTimeout(t);
   }, [view]);
  
-  const onParagraphClick = async (i) => {
+  const onSentenceClick = async (i) => {
     if (!markMode) return;
     if (markMode === "start") {
       setSelStart(i);
+      setSelEnd(null);
       setDragText("");
+      setMarkMode("end"); // זרימה טבעית: מיד בוחרים את הסוף
+      return;
     } else if (markMode === "end") {
       setSelEnd(i);
       setDragText("");
@@ -790,7 +807,7 @@ export default function LearningTV() {
       : null;
   const selectedText =
     dragText ||
-    (rangeIdx ? paragraphs.slice(rangeIdx[0], rangeIdx[1] + 1).join("\n\n") : "");
+    (rangeIdx ? sentences.slice(rangeIdx[0], rangeIdx[1] + 1).join(" ") : "");
  
   const generateFlex = async (id) => {
     if (!selectedText || flexLoading) return;
@@ -1038,14 +1055,14 @@ export default function LearningTV() {
                 <div className="scrolly-wrap">
                   <p className="flex-hint">
                     {markMode === "bookmark"
-                      ? "📍 לחץ על פסקה כדי לקבוע: עד כאן קראתי."
+                      ? "📍 לחץ על משפט כדי לקבוע: עד כאן קראתי."
                       : markMode === "start"
-                      ? "⟢ לחץ על הפסקה שבה מתחיל הקטע."
+                      ? "⟢ לחץ על המשפט שבו מתחיל הקטע."
                       : markMode === "end"
-                      ? "⟣ לחץ על הפסקה שבה מסתיים הקטע."
+                      ? "⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע."
                       : selectedText
                       ? `✓ סומן קטע (${selectedText.length.toLocaleString()} תווים) — בחר למטה מה להפיק עליו.`
-                      : "גלול וקרא חופשי. סמן קטע בגרירת עכבר, או השתמש בכפתורים למטה: סימנייה · התחלה · סוף."}
+                      : "גלול וקרא חופשי. סמן קטע בגרירת עכבר, או לחץ ⟢ התחלה ואז בחר משפט התחלה ומשפט סוף."}
                   </p>
  
                   {/* תוצאה שהופקה על הקטע */}
@@ -1078,28 +1095,38 @@ export default function LearningTV() {
                   {/* המגילה עצמה */}
                   {!flexResult && !flexLoading && (
                     <div className="scroll-text" ref={scrollBodyRef} onMouseUp={onScrollMouseUp}>
-                      {paragraphs.map((p, i) => {
-                        const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
-                        const isRead = book.flex?.upTo !== undefined && i <= book.flex.upTo;
-                        return (
-                          <div key={i} id={"para-" + i}>
-                            <p
-                              className={
-                                "scroll-para " +
-                                (inRange ? "in-range " : "") +
-                                (isRead ? "was-read " : "") +
-                                (markMode ? "clickable" : "")
-                              }
-                              onClick={() => onParagraphClick(i)}
-                            >
-                              {p}
-                            </p>
-                            {book.flex?.upTo === i && (
+                      {paraGroups.map(([start, count], pi) => (
+                        <div key={pi}>
+                          <p className="scroll-para">
+                            {sentences.slice(start, start + count).map((s, j) => {
+                              const i = start + j;
+                              const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
+                              const isStart = selStart !== null && i === selStart && selEnd === null;
+                              const isRead = book.flex?.upTo !== undefined && i <= book.flex.upTo;
+                              return (
+                                <span
+                                  key={i}
+                                  id={"para-" + i}
+                                  className={
+                                    "scroll-sent " +
+                                    (inRange || isStart ? "in-range " : "") +
+                                    (isRead ? "was-read " : "") +
+                                    (markMode ? "clickable" : "")
+                                  }
+                                  onClick={() => onSentenceClick(i)}
+                                >
+                                  {s}{" "}
+                                </span>
+                              );
+                            })}
+                          </p>
+                          {book.flex?.upTo !== undefined &&
+                            book.flex.upTo >= start &&
+                            book.flex.upTo < start + count && (
                               <div className="bookmark-line">📍 עד כאן קראת</div>
                             )}
-                          </div>
-                        );
-                      })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1586,10 +1613,11 @@ const css = `
 .flex-hint{color:#8a8467;font-size:.85rem;line-height:1.5}
 .scroll-text{display:flex;flex-direction:column;gap:2px;padding-bottom:70px}
 .scroll-para{line-height:2.05;font-size:1.06rem;color:#232323;padding:6px 8px;border-radius:8px;white-space:pre-wrap}
-.scroll-para.clickable{cursor:pointer}
-.scroll-para.clickable:hover{background:#fdeed3}
-.scroll-para.in-range{background:#fdeed3;border-inline-start:3px solid var(--amber)}
-.scroll-para.was-read{color:#6c6449}
+.scroll-sent{border-radius:6px;padding:1px 2px;transition:background .12s}
+.scroll-sent.clickable{cursor:pointer}
+.scroll-sent.clickable:hover{background:#f6dfae;box-shadow:0 0 0 1px #d8b06a inset}
+.scroll-sent.in-range{background:#fdeed3;box-shadow:-3px 0 0 var(--amber)}
+.scroll-sent.was-read{color:#6c6449}
 .bookmark-line{
   display:flex;align-items:center;gap:8px;color:#1e7c6d;font-weight:700;font-size:.85rem;
   border-top:2px dashed var(--teal);margin:6px 0;padding-top:4px;
@@ -1672,3 +1700,4 @@ const css = `
 }
 `;
   
+ 
