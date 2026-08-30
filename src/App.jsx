@@ -356,19 +356,74 @@ function ConceptsView({ data }) {
   );
 }
  
+/* מפת חשיבה צפה: צמתים גרירים, ענפים נפתחים/נסגרים בלחיצה */
 function MindmapView({ data }) {
+  const W = 860, H = 540;
+  const mains = data.children || [];
+  const layout = useMemo(() => {
+    const p = { root: { x: W / 2, y: H / 2 } };
+    mains.forEach((m, i) => {
+      const ang = (2 * Math.PI * i) / Math.max(mains.length, 1) - Math.PI / 2;
+      p["m" + i] = { x: W / 2 + 185 * Math.cos(ang), y: H / 2 + 150 * Math.sin(ang) };
+      (m.children || []).forEach((c, j) => {
+        const a2 = ang + (j - ((m.children || []).length - 1) / 2) * 0.34;
+        p["m" + i + "c" + j] = { x: W / 2 + 345 * Math.cos(a2), y: H / 2 + 245 * Math.sin(a2) };
+      });
+    });
+    return p;
+  }, [data]);
+  const [pos, setPos] = useState(layout);
+  useEffect(() => setPos(layout), [layout]);
+  const [closed, setClosed] = useState({});
+  const drag = useRef(null);
+  const moved = useRef(false);
+
+  const down = (id) => (e) => {
+    e.preventDefault();
+    moved.current = false;
+    drag.current = { id, dx: pos[id].x - e.clientX, dy: pos[id].y - e.clientY };
+  };
+  const move = (e) => {
+    const d = drag.current;
+    if (!d) return;
+    moved.current = true;
+    setPos((p) => ({ ...p, [d.id]: { x: e.clientX + d.dx, y: e.clientY + d.dy } }));
+  };
+  const up = () => { drag.current = null; };
+  const toggle = (i) => {
+    if (moved.current) return;
+    setClosed((c) => ({ ...c, [i]: !c[i] }));
+  };
+
+  const node = (id, label, cls, onClick) => (
+    <div
+      key={id}
+      className={"fm-node " + cls}
+      style={{ left: pos[id]?.x, top: pos[id]?.y }}
+      onPointerDown={down(id)}
+      onClick={onClick}
+    >
+      {label}
+    </div>
+  );
+
   return (
-    <div className="mindmap">
-      <div className="mm-topic">{data.topic}</div>
-      <div className="mm-branches">
-        {(data.children || []).map((b, i) => (
-          <div className="mm-branch" key={i}>
-            <div className="mm-branch-label">{b.label}</div>
-            {(b.children || []).map((s, j) => (
-              <div className="mm-leaf" key={j}>{s.label}</div>
-            ))}
-          </div>
-        ))}
+    <div className="fm-wrap">
+      <p className="fm-hint">✋ גרור צמתים · לחיצה על ענף ראשי פותחת/סוגרת · <button className="mini-btn" onClick={() => { setPos(layout); setClosed({}); }}>🔄 סידור מחדש</button></p>
+      <div className="fm-canvas" style={{ height: H }} onPointerMove={move} onPointerUp={up} onPointerLeave={up}>
+        <svg className="fm-lines" width="100%" height="100%">
+          {mains.map((m, i) => (
+            <g key={i}>
+              <line x1={pos.root?.x} y1={pos.root?.y} x2={pos["m" + i]?.x} y2={pos["m" + i]?.y} />
+              {!closed[i] && (m.children || []).map((c, j) => (
+                <line key={j} x1={pos["m" + i]?.x} y1={pos["m" + i]?.y} x2={pos["m" + i + "c" + j]?.x} y2={pos["m" + i + "c" + j]?.y} />
+              ))}
+            </g>
+          ))}
+        </svg>
+        {node("root", data.topic, "fm-root")}
+        {mains.map((m, i) => node("m" + i, ((m.children || []).length ? (closed[i] ? "▸ " : "▾ ") : "") + m.label, "fm-main", () => toggle(i)))}
+        {mains.flatMap((m, i) => (closed[i] ? [] : (m.children || []).map((c, j) => node("m" + i + "c" + j, c.label, "fm-sub"))))}
       </div>
     </div>
   );
@@ -566,19 +621,25 @@ function sentenceMatches(sentence, qWords) {
 }
 
 /* בניית מבחן לפי מספר שאלות.
-   עד 10 שאלות — קריאה אחת. 15/20 — שתי קריאות במקביל (הבנה + העמקה)
-   שמתמזגות למבחן אחד, כדי שאף קריאה לא תהיה ארוכה מדי. */
+   כל 5 שאלות = קריאה נפרדת, וכולן רצות במקביל (10=2 קריאות, 20=4).
+   כך אף קריאה לא חורגת ממגבלת הזמן של Netlify (~10 שניות). */
 async function buildQuiz(text, n) {
-  const tokensFor = (k) => (k <= 5 ? 2000 : 3600);
-  if (n <= 10) {
-    return await askClaude(PROMPTS.quiz(text, n, ""), tokensFor(n));
+  const ANGLES = [
+    "התמקד בשאלות ידע והבנה ישירה של הנאמר בטקסט. ",
+    "התמקד בשאלות העמקה, הסקה וקשרים בין רעיונות. אל תחזור על שאלות בסיסיות. ",
+    "התמקד בשאלות על מושגים והגדרות מתוך הטקסט. ",
+    "התמקד בשאלות יישום והשוואה בין חלקי הטקסט. ",
+  ];
+  const chunks = [];
+  let left = n, k = 0;
+  while (left > 0) {
+    const size = Math.min(5, left);
+    chunks.push(askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length]), 2000));
+    left -= size;
+    k++;
   }
-  const b = n - 10;
-  const [d1, d2] = await Promise.all([
-    askClaude(PROMPTS.quiz(text, 10, "התמקד בשאלות ידע והבנה ישירה של הנאמר בטקסט. "), tokensFor(10)),
-    askClaude(PROMPTS.quiz(text, b, "התמקד בשאלות העמקה, הסקה וקשרים בין רעיונות — לא שאלות ידע בסיסיות. "), tokensFor(b)),
-  ]);
-  return { questions: [...(d1.questions || []), ...(d2.questions || [])] };
+  const results = await Promise.all(chunks);
+  return { questions: results.flatMap((r) => r.questions || []) };
 }
 
 export default function LearningTV() {
@@ -825,6 +886,20 @@ export default function LearningTV() {
     setCheckedHits([]);
   };
 
+  const HL_COLORS = { y: "#fff3a0", g: "#d3f7c6", p: "#ffd6e8" };
+  const applyMark = async (patch) => {
+    if (!rangeIdx) return;
+    const marks = { ...(book.marks || {}) };
+    for (let i = rangeIdx[0]; i <= rangeIdx[1]; i++) {
+      if (patch === null) delete marks[i];
+      else marks[i] = { ...(marks[i] || {}), ...patch };
+    }
+    await persist({ ...book, marks });
+    setSelStart(null);
+    setSelEnd(null);
+    setDragText("");
+  };
+
   const closeSearch = () => {
     setSearchHits(null);
     setCheckedHits([]);
@@ -904,9 +979,9 @@ export default function LearningTV() {
       return;
     }
     let t = selectedText;
-    if (t.length > 12000) {
-      const cut = t.lastIndexOf(".", 12000);
-      t = t.slice(0, cut > 6000 ? cut + 1 : 12000);
+    if (t.length > 9000) {
+      const cut = t.lastIndexOf(".", 9000);
+      t = t.slice(0, cut > 4500 ? cut + 1 : 9000);
     }
     const action = FLEX_ACTIONS.find((a) => a.id === id);
     setFlexLoading(action?.label || id);
@@ -1027,6 +1102,7 @@ export default function LearningTV() {
               <span className="font-btns">
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
+                <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
               </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
             </div>
@@ -1280,6 +1356,15 @@ export default function LearningTV() {
                                 <span
                                   key={i}
                                   id={"para-" + i}
+                                  style={(() => {
+                                    const mk = book.marks?.[i];
+                                    if (!mk) return undefined;
+                                    return {
+                                      fontWeight: mk.b ? 800 : undefined,
+                                      textDecoration: mk.u ? "underline" : undefined,
+                                      background: mk.hl ? HL_COLORS[mk.hl] : undefined,
+                                    };
+                                  })()}
                                   className={
                                     "scroll-sent " +
                                     (inRange || isStart ? "in-range " : "") +
@@ -1507,6 +1592,18 @@ export default function LearningTV() {
             </div>
           )}
  
+          {selectedText && !flexResult && !flexLoading && selStart !== null && selEnd !== null && (
+            <div className="mark-bar">
+              <span className="mark-title">✍️ שכבת הלומד:</span>
+              <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
+              <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
+              <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>מרקר</button>
+              <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
+              <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
+              <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
+            </div>
+          )}
+
           {selectedText && !flexResult && !flexLoading && (
             <div className="deck">
               {FLEX_ACTIONS.map((a) => (
@@ -1754,6 +1851,29 @@ const css = `
 .flow-arrow{color:#b3a97f;font-size:1.2rem;padding:4px 0}
  
 /* מבחן */
+.fm-wrap{width:100%}
+.fm-hint{font-size:.85rem;color:#6c6449;margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fm-canvas{position:relative;width:100%;background:#faf7ee;border:1.5px solid #d8d0ba;border-radius:14px;overflow:hidden;touch-action:none}
+.fm-lines{position:absolute;inset:0}
+.fm-lines line{stroke:#c9b98a;stroke-width:2}
+.fm-node{position:absolute;transform:translate(-50%,-50%);cursor:grab;user-select:none;border-radius:12px;padding:8px 14px;font-size:.9rem;line-height:1.4;max-width:190px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.fm-node:active{cursor:grabbing}
+.fm-root{background:var(--amber);color:#241a08;font-weight:800;font-size:1rem;z-index:3}
+.fm-main{background:#1a2140;color:#fff;font-weight:700;z-index:2}
+.fm-sub{background:#fff;border:1.5px solid #d8d0ba;color:#232323;font-size:.82rem;z-index:1}
+.mark-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f7f3e8;border:1.5px solid #d8d0ba;border-radius:12px;padding:8px 12px;margin:0 auto 10px;max-width:860px;justify-content:center}
+.mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
+.mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
+.mark-btn:hover{border-color:var(--amber)}
+.mark-btn.hl-y{background:#fff3a0}
+.mark-btn.hl-g{background:#d3f7c6}
+.mark-btn.hl-p{background:#ffd6e8}
+@media print{
+  body{background:#fff!important}
+  .masthead,.deck,.dial,.tv-chin,.tv-stand,.font-btns,.search-row,.search-panel,.flex-hint,.mark-bar,.fm-hint,.bar-title{display:none!important}
+  .tv-frame,.screen,.screen-body{position:static!important;box-shadow:none!important;border:none!important;background:#fff!important;color:#000!important;max-height:none!important;overflow:visible!important;zoom:1!important}
+  .scroll-text{max-height:none!important;overflow:visible!important}
+}
 .search-row{display:flex;gap:8px;margin-bottom:10px}
 .search-input{flex:1;font-family:inherit;font-size:.95rem;padding:9px 12px;border-radius:10px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323}
 .search-input:focus{outline:none;border-color:var(--amber)}
