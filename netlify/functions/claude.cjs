@@ -1,5 +1,4 @@
- Content is user-generated and unverified.
-Learn about artifacts
+
 /* פונקציית שרת: מתווכת בין האפליקציה ל-Anthropic API.
    המפתח נלקח ממשתנה הסביבה ANTHROPIC_API_KEY ולא מגיע לדפדפן. */
 
