@@ -529,6 +529,42 @@ function TTSView({ text }) {
  
 /* ─── האפליקציה ─── */
  
+/* ─── חיפוש בתוך הספר (קונקורדנציה חכמת-עברית) ───
+   התאמה מדויקת + זיהוי תחיליות (ו/ה/ב/ל/מ/ש/כ וצירופיהן),
+   התעלמות מגרשיים, וחיפוש רב-מילים (כל המילים חייבות להופיע במשפט). */
+const HEB_PREFIXES = ["וכש","וה","וב","ול","ומ","וש","וכ","שה","שב","של","שמ","מה","כש","לכ","ו","ה","ב","ל","מ","ש","כ"];
+const HEB_SUFFIXES = ["ותיהם","ותינו","יהם","יהן","ינו","יכם","ותיו","ות","ים","נו","כם","כן","הם","הן","יו","יה","ו","ה","י","ם","ן","ך"];
+function hebClean(w) {
+  return (w || "").replace(/["'׳״]/g, "");
+}
+function hebForms(w) {
+  const out = new Set([w]);
+  for (const p of HEB_PREFIXES) {
+    if (w.startsWith(p) && w.length - p.length >= 2) out.add(w.slice(p.length));
+  }
+  return out;
+}
+function stemEq(token, q) {
+  if (token === q) return true;
+  if (token.startsWith(q)) {
+    const rest = token.slice(q.length);
+    if (HEB_SUFFIXES.includes(rest)) return true;
+  }
+  return false;
+}
+function sentenceMatches(sentence, qWords) {
+  const tokens = sentence.split(/[^א-תa-zA-Z"'׳״]+/).filter(Boolean).map(hebClean);
+  return qWords.every((q) => {
+    const qf = hebForms(q);
+    return tokens.some((t) => {
+      for (const tf of hebForms(t)) {
+        for (const f of qf) if (stemEq(tf, f)) return true;
+      }
+      return false;
+    });
+  });
+}
+
 /* בניית מבחן לפי מספר שאלות.
    עד 10 שאלות — קריאה אחת. 15/20 — שתי קריאות במקביל (הבנה + העמקה)
    שמתמזגות למבחן אחד, כדי שאף קריאה לא תהיה ארוכה מדי. */
@@ -566,6 +602,9 @@ export default function LearningTV() {
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
   const [flexError, setFlexError] = useState(null);
   const [quizPick, setQuizPick] = useState(null); // null | 'tv' | 'flex' — בורר גודל מבחן פתוח
+  const [searchQ, setSearchQ] = useState("");
+  const [searchHits, setSearchHits] = useState(null); // null=סגור, []=אין תוצאות
+  const [checkedHits, setCheckedHits] = useState([]);
   const scrollBodyRef = useRef(null);
  
   const titleRef = useRef(null);
@@ -762,7 +801,38 @@ export default function LearningTV() {
   };
  
   /* ── מצב מגילה (גמיש) ── */
+  const runSearch = () => {
+    const words = searchQ.trim().split(/\s+/).map(hebClean).filter((w) => w.length >= 2);
+    if (!words.length) return;
+    const hits = [];
+    sentences.forEach((s, i) => {
+      if (sentenceMatches(s, words)) hits.push(i);
+    });
+    setSearchHits(hits.slice(0, 300));
+    setCheckedHits([]);
+  };
+
+  const toggleHit = (i) =>
+    setCheckedHits((c) => (c.includes(i) ? c.filter((x) => x !== i) : [...c, i].sort((a, b) => a - b)));
+
+  const useHitsAsSelection = () => {
+    const idxs = (checkedHits.length ? checkedHits : searchHits) || [];
+    if (!idxs.length) return;
+    setDragText(idxs.map((i) => sentences[i]).join("\n"));
+    setSelStart(null);
+    setSelEnd(null);
+    setSearchHits(null);
+    setCheckedHits([]);
+  };
+
+  const closeSearch = () => {
+    setSearchHits(null);
+    setCheckedHits([]);
+    setSearchQ("");
+  };
+
   const openScroll = () => {
+    closeSearch();
     setQuizPick(null);
     setFlexResult(null);
     setFlexError(null);
@@ -1086,6 +1156,62 @@ export default function LearningTV() {
               {/* ── מגילה רציפה (לימוד גמיש) ── */}
               {view === "scroll" && book && (
                 <div className="scrolly-wrap">
+                  {!flexResult && !flexLoading && (
+                    <div className="search-row">
+                      <input
+                        className="search-input"
+                        type="text"
+                        placeholder="🔍 חיפוש בספר — מילה או כמה מילים (למשל: כוונה עמידה)"
+                        value={searchQ}
+                        onChange={(e) => setSearchQ(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
+                      />
+                      <button className="mini-btn" onClick={runSearch}>חפש</button>
+                      {searchHits !== null && (
+                        <button className="mini-btn" onClick={closeSearch}>✕ סגור</button>
+                      )}
+                    </div>
+                  )}
+
+                  {searchHits !== null && !flexResult && !flexLoading && (
+                    <div className="search-panel">
+                      {searchHits.length === 0 ? (
+                        <p className="search-none">לא נמצאו מופעים. נסה מילה אחרת או פחות מילים.</p>
+                      ) : (
+                        <>
+                          <div className="search-bar">
+                            <span className="search-count">{searchHits.length} מופעים{checkedHits.length ? ` · נבחרו ${checkedHits.length}` : ""}</span>
+                            <button className="mini-btn" onClick={() => setCheckedHits([...searchHits])}>סמן הכול</button>
+                            <button className="mini-btn" onClick={() => setCheckedHits([])}>נקה</button>
+                            <button className="mini-btn gold-btn" onClick={useHitsAsSelection}>
+                              ✦ צור קטע מ{checkedHits.length ? "הנבחרים" : "כל התוצאות"}
+                            </button>
+                          </div>
+                          <div className="search-list">
+                            {searchHits.map((i) => (
+                              <label key={i} className="search-hit">
+                                <input
+                                  type="checkbox"
+                                  checked={checkedHits.includes(i)}
+                                  onChange={() => toggleHit(i)}
+                                />
+                                <span
+                                  className="search-snip"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    document.getElementById("para-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                                  }}
+                                >
+                                  {sentences[i].length > 120 ? sentences[i].slice(0, 120) + "…" : sentences[i]}
+                                </span>
+                              </label>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   <p className="flex-hint">
                     {markMode === "bookmark"
                       ? "📍 לחץ על משפט כדי לקבוע: עד כאן קראתי."
@@ -1157,6 +1283,7 @@ export default function LearningTV() {
                                   className={
                                     "scroll-sent " +
                                     (inRange || isStart ? "in-range " : "") +
+                                    (searchHits && searchHits.includes(i) ? "hit " : "") +
                                     (isRead ? "was-read " : "") +
                                     (markMode ? "clickable" : "")
                                   }
@@ -1627,6 +1754,20 @@ const css = `
 .flow-arrow{color:#b3a97f;font-size:1.2rem;padding:4px 0}
  
 /* מבחן */
+.search-row{display:flex;gap:8px;margin-bottom:10px}
+.search-input{flex:1;font-family:inherit;font-size:.95rem;padding:9px 12px;border-radius:10px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323}
+.search-input:focus{outline:none;border-color:var(--amber)}
+.gold-btn{background:var(--amber)!important;color:#241a08!important;font-weight:800}
+.search-panel{background:#f7f3e8;border:1.5px solid #d8d0ba;border-radius:12px;padding:10px 12px;margin-bottom:12px}
+.search-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.search-count{font-weight:800;font-size:.9rem;color:#6c6449}
+.search-none{color:#6c6449;font-size:.92rem;margin:4px 0}
+.search-list{max-height:230px;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.search-hit{display:flex;gap:8px;align-items:flex-start;font-size:.9rem;line-height:1.55;padding:4px 6px;border-radius:8px;cursor:pointer}
+.search-hit:hover{background:#efe9d8}
+.search-hit input{margin-top:4px;accent-color:var(--amber)}
+.search-snip{cursor:pointer}
+.scroll-sent.hit{background:#fff3c9;box-shadow:0 2px 0 var(--amber)}
 .quiz-size-row{display:flex;gap:12px;justify-content:center;margin:14px 0;flex-wrap:wrap}
 .quiz-size-btn{font-family:inherit;font-size:1.3rem;font-weight:800;width:64px;height:64px;border-radius:14px;border:2px solid var(--key-edge);background:var(--key);color:#fff;cursor:pointer;transition:all .15s}
 .quiz-size-btn:hover{border-color:var(--amber);background:#232c52;transform:translateY(-2px)}
