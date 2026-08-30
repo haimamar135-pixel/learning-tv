@@ -37,21 +37,21 @@ const PROMPTS = {
     `קרא את הטקסט הבא והחזר JSON בלבד של מפת חשיבה במבנה: {"topic":"הנושא המרכזי","children":[{"label":"ענף ראשי","children":[{"label":"תת-ענף"}]}]}. עד 5 ענפים ראשיים, עד 4 תתי-ענפים לכל אחד. הטקסט:\n${t}`,
   flow: (t) =>
     `קרא את הטקסט הבא והחזר JSON בלבד של תרשים זרימה לוגי (תהליך, רצף רעיונות או השתלשלות) במבנה: {"title":"כותרת התהליך","steps":["שלב 1","שלב 2"]}. בין 4 ל-8 שלבים. הטקסט:\n${t}`,
-  quiz: (t) =>
-    `קרא את הטקסט הבא וכתוב מבחן. החזר JSON בלבד במבנה: {"questions":[{"q":"שאלה","options":["א","ב","ג","ד"],"correct":0,"explanation":"הסבר קצר לתשובה הנכונה"}]}. 5 שאלות, correct הוא אינדקס התשובה הנכונה. הטקסט:\n${t}`,
+  quiz: (t, n = 5, angle = "") =>
+    `קרא את הטקסט הבא וכתוב מבחן. החזר JSON בלבד במבנה: {"questions":[{"q":"שאלה","options":["א","ב","ג","ד"],"correct":0,"explanation":"הסבר קצר לתשובה הנכונה"}]}. בדיוק ${n} שאלות, correct הוא אינדקס התשובה הנכונה. ${angle}הטקסט:\n${t}`,
   cards: (t) =>
     `קרא את הטקסט הבא וצור כרטיסיות זיכרון. החזר JSON בלבד במבנה: {"cards":[{"front":"שאלה או מושג","back":"תשובה או הגדרה"}]}. בין 6 ל-10 כרטיסיות. הטקסט:\n${t}`,
 };
  
 /* ─── קריאה ל-Claude דרך Netlify Function ───
    המפתח נשמר בצד השרת (משתנה סביבה ANTHROPIC_API_KEY) ולא נחשף לדפדפן. */
-async function askClaude(prompt) {
+async function askClaude(prompt, maxTokens) {
   let res;
   try {
     res = await fetch("/.netlify/functions/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({ prompt, maxTokens }),
     });
   } catch (e) {
     console.log("Network error:", e);
@@ -529,6 +529,22 @@ function TTSView({ text }) {
  
 /* ─── האפליקציה ─── */
  
+/* בניית מבחן לפי מספר שאלות.
+   עד 10 שאלות — קריאה אחת. 15/20 — שתי קריאות במקביל (הבנה + העמקה)
+   שמתמזגות למבחן אחד, כדי שאף קריאה לא תהיה ארוכה מדי. */
+async function buildQuiz(text, n) {
+  const tokensFor = (k) => (k <= 5 ? 2000 : 3600);
+  if (n <= 10) {
+    return await askClaude(PROMPTS.quiz(text, n, ""), tokensFor(n));
+  }
+  const b = n - 10;
+  const [d1, d2] = await Promise.all([
+    askClaude(PROMPTS.quiz(text, 10, "התמקד בשאלות ידע והבנה ישירה של הנאמר בטקסט. "), tokensFor(10)),
+    askClaude(PROMPTS.quiz(text, b, "התמקד בשאלות העמקה, הסקה וקשרים בין רעיונות — לא שאלות ידע בסיסיות. "), tokensFor(b)),
+  ]);
+  return { questions: [...(d1.questions || []), ...(d2.questions || [])] };
+}
+
 export default function LearningTV() {
   const [view, setView] = useState("boot"); // boot | library | intake | guide | tv
   const [index, setIndex] = useState([]);
@@ -549,6 +565,7 @@ export default function LearningTV() {
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
   const [flexError, setFlexError] = useState(null);
+  const [quizPick, setQuizPick] = useState(null); // null | 'tv' | 'flex' — בורר גודל מבחן פתוח
   const scrollBodyRef = useRef(null);
  
   const titleRef = useRef(null);
@@ -746,6 +763,7 @@ export default function LearningTV() {
  
   /* ── מצב מגילה (גמיש) ── */
   const openScroll = () => {
+    setQuizPick(null);
     setFlexResult(null);
     setFlexError(null);
     setMarkMode(null);
@@ -809,8 +827,12 @@ export default function LearningTV() {
     dragText ||
     (rangeIdx ? sentences.slice(rangeIdx[0], rangeIdx[1] + 1).join(" ") : "");
  
-  const generateFlex = async (id) => {
+  const generateFlex = async (id, qCount) => {
     if (!selectedText || flexLoading) return;
+    if (id === "quiz" && !qCount) {
+      setQuizPick("flex"); // קודם בוחרים כמה שאלות
+      return;
+    }
     let t = selectedText;
     if (t.length > 12000) {
       const cut = t.lastIndexOf(".", 12000);
@@ -821,7 +843,7 @@ export default function LearningTV() {
     setFlexError(null);
     setFlexResult(null);
     try {
-      const data = await askClaude(PROMPTS[id](t));
+      const data = id === "quiz" ? await buildQuiz(t, qCount) : await askClaude(PROMPTS[id](t));
       setFlexResult({ channel: id, data });
     } catch (e) {
       setFlexError(e.message || "ההפקה נכשלה. נסה שוב.");
@@ -830,13 +852,20 @@ export default function LearningTV() {
     }
   };
  
-  const generate = async (id, ci) => {
+  const generate = async (id, ci, qCount) => {
     if (id === "tts" || id === "read") return;
     if (book.results[key(ci, id)]) return;
+    if (id === "quiz" && !qCount) {
+      setQuizPick("tv"); // קודם בוחרים כמה שאלות
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      const data = await askClaude(PROMPTS[id](book.chapters[ci].text));
+      const data =
+        id === "quiz"
+          ? await buildQuiz(book.chapters[ci].text, qCount)
+          : await askClaude(PROMPTS[id](book.chapters[ci].text));
       await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } });
     } catch (e) {
       setError(e.message || "השידור נכשל. נסה שוב.");
@@ -848,6 +877,7 @@ export default function LearningTV() {
   const tune = (id) => {
     if (loading) return;
     flick();
+    setQuizPick(null);
     setChannel(id);
     setError(null);
     window.speechSynthesis?.cancel();
@@ -857,6 +887,7 @@ export default function LearningTV() {
   const gotoChapter = (i) => {
     if (loading || i === chIdx) return;
     flick();
+    setQuizPick(null);
     setChIdx(i);
     setError(null);
     window.speechSynthesis?.cancel();
@@ -872,12 +903,14 @@ export default function LearningTV() {
  
   const backToGuide = () => {
     window.speechSynthesis?.cancel();
+    setQuizPick(null);
     setChannel(null);
     flick();
     setView("guide");
   };
   const backToLibrary = () => {
     window.speechSynthesis?.cancel();
+    setQuizPick(null);
     setBook(null);
     setChannel(null);
     flick();
@@ -1066,6 +1099,20 @@ export default function LearningTV() {
                   </p>
  
                   {/* תוצאה שהופקה על הקטע */}
+                  {quizPick === "flex" && !flexLoading && !flexResult && (
+                    <div className="flex-panel">
+                      <h3 style={{ margin: "0 0 10px" }}>כמה שאלות במבחן על הקטע?</h3>
+                      <div className="quiz-size-row">
+                        {[5, 10, 15, 20].map((n) => (
+                          <button key={n} className="quiz-size-btn" onClick={() => { setQuizPick(null); generateFlex("quiz", n); }}>
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                      <button className="mini-btn" onClick={() => setQuizPick(null)}>✕ ביטול</button>
+                    </div>
+                  )}
+
                   {flexLoading && (
                     <div className="flex-panel">
                       <div className="idle-mark spin" style={{ fontSize: "1.6rem" }}>✳</div>
@@ -1149,6 +1196,20 @@ export default function LearningTV() {
                 </div>
               )}
  
+              {view === "tv" && channel === "quiz" && quizPick === "tv" && !loading && (
+                <div className="idle open">
+                  <h2 className="guide-title">כמה שאלות במבחן?</h2>
+                  <div className="quiz-size-row">
+                    {[5, 10, 15, 20].map((n) => (
+                      <button key={n} className="quiz-size-btn" onClick={() => { setQuizPick(null); generate("quiz", chIdx, n); }}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="idle-hint">מבחן ארוך יותר לוקח מעט יותר זמן להפקה.</p>
+                </div>
+              )}
+
               {view === "tv" && channel && loading && (
                 <div className="idle">
                   <div className="idle-mark spin">✳</div>
@@ -1566,6 +1627,9 @@ const css = `
 .flow-arrow{color:#b3a97f;font-size:1.2rem;padding:4px 0}
  
 /* מבחן */
+.quiz-size-row{display:flex;gap:12px;justify-content:center;margin:14px 0;flex-wrap:wrap}
+.quiz-size-btn{font-family:inherit;font-size:1.3rem;font-weight:800;width:64px;height:64px;border-radius:14px;border:2px solid var(--key-edge);background:var(--key);color:#fff;cursor:pointer;transition:all .15s}
+.quiz-size-btn:hover{border-color:var(--amber);background:#232c52;transform:translateY(-2px)}
 .quiz{display:flex;flex-direction:column;gap:24px}
 .quiz-score{background:#232323;color:#fff;border-radius:12px;padding:12px 20px;text-align:center;font-weight:800;font-size:1.05rem}
 .quiz-prev{background:#eee8d5;color:#6c6449;border-radius:10px;padding:8px 14px;font-size:.88rem;text-align:center}
