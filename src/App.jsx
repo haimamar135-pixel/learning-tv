@@ -947,7 +947,25 @@ export default function LearningTV() {
  
   const onScrollMouseUp = () => {
     if (markMode) return; // במצב סימון נקודות — לא גרירה
-    const s = window.getSelection?.()?.toString().trim() || "";
+    const sel = window.getSelection?.();
+    if (!sel || sel.isCollapsed) return;
+    // ממפה את הגרירה למשפטים שלמים — כך גם המרקרים עובדים על גרירה
+    const idxOf = (node) => {
+      let el = node && (node.nodeType === 3 ? node.parentElement : node);
+      while (el && !(el.id && el.id.startsWith("para-"))) el = el.parentElement;
+      const n = el ? parseInt(el.id.slice(5), 10) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+    const a = idxOf(sel.anchorNode);
+    const b = idxOf(sel.focusNode);
+    if (a !== null && b !== null) {
+      setSelStart(Math.min(a, b));
+      setSelEnd(Math.max(a, b));
+      setDragText("");
+      sel.removeAllRanges();
+      return;
+    }
+    const s = sel.toString().trim();
     if (s.length >= 25) {
       setDragText(s);
       setSelStart(null);
@@ -2024,4 +2042,3 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
-  
