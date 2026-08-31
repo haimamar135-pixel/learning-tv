@@ -1,5 +1,4 @@
-
-/* פונקציית שרת: מתווכת בין האפליקציה ל-Anthropic API.
+ /* פונקציית שרת: מתווכת בין האפליקציה ל-Anthropic API.
    המפתח נלקח ממשתנה הסביבה ANTHROPIC_API_KEY ולא מגיע לדפדפן. */
 
 const SYSTEM_PROMPT =
@@ -30,6 +29,10 @@ exports.handler = async (event) => {
     return { statusCode: 400, body: JSON.stringify({ error: { message: "Missing or invalid prompt" } }) };
   }
   const mt = Math.min(4000, Math.max(500, parseInt(maxTokens, 10) || 2000));
+  // מודל מהיר (Haiku) להפקות מובנות — פי 3-4 מהיר, נגד timeout
+  let fast;
+  try { fast = JSON.parse(event.body || "{}").fast; } catch { fast = false; }
+  const model = fast ? "claude-haiku-4-5-20251001" : "claude-sonnet-4-6";
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -40,7 +43,7 @@ exports.handler = async (event) => {
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
+        model,
         max_tokens: mt,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: prompt }],
