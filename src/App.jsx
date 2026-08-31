@@ -45,13 +45,13 @@ const PROMPTS = {
  
 /* ─── קריאה ל-Claude דרך Netlify Function ───
    המפתח נשמר בצד השרת (משתנה סביבה ANTHROPIC_API_KEY) ולא נחשף לדפדפן. */
-async function askClaude(prompt, maxTokens) {
+async function askClaude(prompt, maxTokens, fast) {
   let res;
   try {
     res = await fetch("/.netlify/functions/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, maxTokens }),
+      body: JSON.stringify({ prompt, maxTokens, fast }),
     });
   } catch (e) {
     console.log("Network error:", e);
@@ -328,15 +328,20 @@ function SummaryView({ data }) {
   );
 }
  
-function ConceptsView({ data }) {
+function ConceptsView({ data, onTrace }) {
   return (
     <div className="concepts">
+      {onTrace && <p className="fm-hint">💡 לחיצה על מושג או כלל קופצת למקור בטקסט ומסמנת אותו בירוק.</p>}
       {data.concepts?.length > 0 && (
         <section>
           <h3 className="sec-title">מושגים</h3>
           {data.concepts.map((c, i) => (
             <div className="term-row" key={i}>
-              <span className="term">{c.term}</span>
+              <span
+                className={"term" + (onTrace ? " traceable" : "")}
+                onClick={onTrace ? () => onTrace(c.term) : undefined}
+                title={onTrace ? "הצג את המקור בטקסט" : undefined}
+              >{c.term}</span>
               <span className="def">{c.definition}</span>
             </div>
           ))}
@@ -347,7 +352,12 @@ function ConceptsView({ data }) {
           <h3 className="sec-title">כללים ועקרונות</h3>
           <ul className="rules">
             {data.rules.map((r, i) => (
-              <li key={i}>{r}</li>
+              <li
+                key={i}
+                className={onTrace ? "traceable" : undefined}
+                onClick={onTrace ? () => onTrace(r) : undefined}
+                title={onTrace ? "הצג את המקור בטקסט" : undefined}
+              >{r}</li>
             ))}
           </ul>
         </section>
@@ -630,17 +640,24 @@ async function buildQuiz(text, n) {
     "התמקד בשאלות על מושגים והגדרות מתוך הטקסט. ",
     "התמקד בשאלות יישום והשוואה בין חלקי הטקסט. ",
   ];
+  const once = (size, k) =>
+    askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length] + "הסברים קצרים — עד 12 מילים. "), 1800, true);
+  const withRetry = async (size, k) => {
+    try { return await once(size, k); }
+    catch { return await once(size, k); } // ניסיון שני אוטומטי
+  };
   const chunks = [];
   let left = n, k = 0;
   while (left > 0) {
     const size = Math.min(5, left);
-    chunks.push(askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length]), 2000));
+    chunks.push(withRetry(size, k));
     left -= size;
     k++;
   }
   const results = await Promise.all(chunks);
   return { questions: results.flatMap((r) => r.questions || []) };
 }
+
 
 export default function LearningTV() {
   const [view, setView] = useState("boot"); // boot | library | intake | guide | tv
@@ -900,6 +917,56 @@ export default function LearningTV() {
     setDragText("");
   };
 
+  /* הערות שוליים חיות: הערה אישית על משפט, נשמרת עם הספר */
+  const addNote = async () => {
+    if (!rangeIdx) return;
+    const i = rangeIdx[0];
+    const existing = book.notes?.[i] || "";
+    const txt = window.prompt("✏️ הערה על הקטע (השאר ריק למחיקה):", existing);
+    if (txt === null) return;
+    const notes = { ...(book.notes || {}) };
+    if (txt.trim()) notes[i] = txt.trim();
+    else delete notes[i];
+    await persist({ ...book, notes });
+    setSelStart(null); setSelEnd(null); setDragText("");
+  };
+  const editNote = async (i) => {
+    const existing = book.notes?.[i] || "";
+    const txt = window.prompt("✏️ הערה (השאר ריק למחיקה):", existing);
+    if (txt === null) return;
+    const notes = { ...(book.notes || {}) };
+    if (txt.trim()) notes[i] = txt.trim();
+    else delete notes[i];
+    await persist({ ...book, notes });
+  };
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [trace, setTrace] = useState(null); // { term, hits:[...] } — הדגשת מקור ירוקה
+
+  /* מושג/כלל ← המקור בטקסט: מוצא משפטים תואמים, עובר למגילה ומסמן בירוק */
+  const traceToSource = (phrase) => {
+    const words = String(phrase).trim().split(/\s+/).map(hebClean).filter((w) => w.length >= 2).slice(0, 4);
+    if (!words.length) return;
+    let hits = [];
+    sentences.forEach((s, i) => { if (sentenceMatches(s, words)) hits.push(i); });
+    // אם צירוף מלא לא נמצא — ננסה עם שתי המילים הראשונות, ואז עם הראשונה
+    if (!hits.length && words.length > 2) {
+      sentences.forEach((s, i) => { if (sentenceMatches(s, words.slice(0, 2))) hits.push(i); });
+    }
+    if (!hits.length && words.length > 1) {
+      sentences.forEach((s, i) => { if (sentenceMatches(s, [words[0]])) hits.push(i); });
+    }
+    if (!hits.length) { window.alert("לא נמצא מקור מתאים בטקסט 🔍"); return; }
+    hits = hits.slice(0, 60);
+    setFlexResult(null);
+    setNotesOpen(false);
+    setSearchHits(null);
+    setTrace({ term: phrase, hits });
+    if (view !== "scroll") openScroll();
+    setTimeout(() => {
+      document.getElementById("para-" + hits[0])?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 200);
+  };
+
   const closeSearch = () => {
     setSearchHits(null);
     setCheckedHits([]);
@@ -907,6 +974,7 @@ export default function LearningTV() {
   };
 
   const openScroll = () => {
+    setTrace(null);
     closeSearch();
     setQuizPick(null);
     setFlexResult(null);
@@ -1006,7 +1074,8 @@ export default function LearningTV() {
     setFlexError(null);
     setFlexResult(null);
     try {
-      const data = id === "quiz" ? await buildQuiz(t, qCount) : await askClaude(PROMPTS[id](t));
+      const FAST_IDS = ["cards", "concepts", "flow"];
+      const data = id === "quiz" ? await buildQuiz(t, qCount) : await askClaude(PROMPTS[id](t), 2000, FAST_IDS.includes(id));
       setFlexResult({ channel: id, data });
     } catch (e) {
       setFlexError(e.message || "ההפקה נכשלה. נסה שוב.");
@@ -1025,10 +1094,11 @@ export default function LearningTV() {
     setLoading(true);
     setError(null);
     try {
+      const FAST_IDS = ["cards", "concepts", "flow"];
       const data =
         id === "quiz"
           ? await buildQuiz(book.chapters[ci].text, qCount)
-          : await askClaude(PROMPTS[id](book.chapters[ci].text));
+          : await askClaude(PROMPTS[id](book.chapters[ci].text), 2000, FAST_IDS.includes(id));
       await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } });
     } catch (e) {
       setError(e.message || "השידור נכשל. נסה שוב.");
@@ -1261,6 +1331,9 @@ export default function LearningTV() {
                         onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                       />
                       <button className="mini-btn" onClick={runSearch}>חפש</button>
+                      <button className="mini-btn" onClick={() => setNotesOpen((o) => !o)}>
+                        📝 הערות ({Object.keys(book.notes || {}).length})
+                      </button>
                       {searchHits !== null && (
                         <button className="mini-btn" onClick={closeSearch}>✕ סגור</button>
                       )}
@@ -1303,6 +1376,51 @@ export default function LearningTV() {
                           </div>
                         </>
                       )}
+                    </div>
+                  )}
+
+                  {notesOpen && !flexResult && !flexLoading && (
+                    <div className="search-panel">
+                      {Object.keys(book.notes || {}).length === 0 ? (
+                        <p className="search-none">אין עדיין הערות. סמן קטע ולחץ 📝 הערה.</p>
+                      ) : (
+                        <div className="search-list">
+                          {Object.entries(book.notes || {})
+                            .sort((a, b) => Number(a[0]) - Number(b[0]))
+                            .map(([i, txt]) => (
+                              <div key={i} className="search-hit">
+                                <span
+                                  className="search-snip"
+                                  onClick={() =>
+                                    document.getElementById("para-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" })
+                                  }
+                                >
+                                  <b>📝 {txt}</b>
+                                  <br />
+                                  <span style={{ color: "#8a8467" }}>
+                                    {(sentences[Number(i)] || "").slice(0, 90)}…
+                                  </span>
+                                </span>
+                                <button className="mini-btn" onClick={() => editNote(Number(i))}>✎</button>
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {trace && !flexResult && !flexLoading && (
+                    <div className="trace-bar">
+                      🟢 מקור: <b>{trace.term.length > 40 ? trace.term.slice(0, 40) + "…" : trace.term}</b>
+                      <span> · {trace.hits.length} מופעים</span>
+                      <button className="mini-btn" onClick={() => {
+                        const cur = trace.hits;
+                        const pos = cur.indexOf(trace.at ?? cur[0]);
+                        const next = cur[(pos + 1) % cur.length];
+                        setTrace({ ...trace, at: next });
+                        document.getElementById("para-" + next)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      }}>⤵ הבא</button>
+                      <button className="mini-btn" onClick={() => setTrace(null)}>✕ נקה</button>
                     </div>
                   )}
 
@@ -1351,7 +1469,7 @@ export default function LearningTV() {
                         <button className="mini-btn" onClick={() => setFlexResult(null)}>✕ חזרה לטקסט</button>
                       </div>
                       {flexResult.channel === "summary" && <SummaryView data={flexResult.data} />}
-                      {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} />}
+                      {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} />}
                       {flexResult.channel === "mindmap" && <MindmapView data={flexResult.data} />}
                       {flexResult.channel === "flow" && <FlowView data={flexResult.data} />}
                       {flexResult.channel === "quiz" && <QuizView data={flexResult.data} saved={null} onComplete={() => {}} />}
@@ -1387,12 +1505,20 @@ export default function LearningTV() {
                                     "scroll-sent " +
                                     (inRange || isStart ? "in-range " : "") +
                                     (searchHits && searchHits.includes(i) ? "hit " : "") +
+                                    (trace && trace.hits.includes(i) ? "trace-hit " : "") +
                                     (isRead ? "was-read " : "") +
                                     (markMode ? "clickable" : "")
                                   }
                                   onClick={() => onSentenceClick(i)}
                                 >
-                                  {s}{" "}
+                                  {s}
+                                  {book.notes?.[i] && (
+                                    <sup
+                                      className="note-pin"
+                                      title={book.notes[i]}
+                                      onClick={(e) => { e.stopPropagation(); editNote(i); }}
+                                    >📝</sup>
+                                  )}{" "}
                                 </span>
                               );
                             })}
@@ -1465,7 +1591,7 @@ export default function LearningTV() {
               {view === "tv" && channel && channel !== "tts" && channel !== "read" && !loading && !error && data && (
                 <>
                   {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} />}
-                  {channel === "concepts" && <ConceptsView data={data} />}
+                  {channel === "concepts" && <ConceptsView data={data} onTrace={traceToSource} />}
                   {channel === "mindmap" && <MindmapView data={data} />}
                   {channel === "flow" && <FlowView data={data} />}
                   {channel === "quiz" && (
@@ -1618,6 +1744,7 @@ export default function LearningTV() {
               <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>מרקר</button>
               <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
               <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
+              <button className="mark-btn" onClick={addNote}>📝 הערה</button>
               <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
             </div>
           )}
@@ -1906,6 +2033,13 @@ const css = `
 .search-hit input{margin-top:4px;accent-color:var(--amber)}
 .search-snip{cursor:pointer}
 .scroll-sent.hit{background:#fff3c9;box-shadow:0 2px 0 var(--amber)}
+.trace-bar{display:flex;gap:10px;align-items:center;background:#e8f7e3;border:1.5px solid #9ed18c;border-radius:12px;padding:8px 14px;margin-bottom:10px;font-size:.92rem;flex-wrap:wrap}
+.scroll-sent.trace-hit{background:#d3f7c6!important;font-weight:800;box-shadow:0 2px 0 #5cae4a}
+.term.traceable,.rules .traceable{cursor:pointer}
+.term.traceable:hover{color:var(--amber);text-decoration:underline}
+.rules .traceable:hover{background:#fdeed3;border-radius:6px}
+.note-pin{cursor:pointer;font-size:.75em;margin-inline-start:2px}
+.note-pin:hover{filter:brightness(1.2)}
 .quiz-size-row{display:flex;gap:12px;justify-content:center;margin:14px 0;flex-wrap:wrap}
 .quiz-size-btn{font-family:inherit;font-size:1.3rem;font-weight:800;width:64px;height:64px;border-radius:14px;border:2px solid var(--key-edge);background:var(--key);color:#fff;cursor:pointer;transition:all .15s}
 .quiz-size-btn:hover{border-color:var(--amber);background:#232c52;transform:translateY(-2px)}
