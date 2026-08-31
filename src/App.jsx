@@ -918,27 +918,40 @@ export default function LearningTV() {
   };
 
   /* הערות שוליים חיות: הערה אישית על משפט, נשמרת עם הספר */
+  const noteVal = (n) => (typeof n === "string" ? n : n?.t || "");
   const addNote = async () => {
     if (!rangeIdx) return;
     const i = rangeIdx[0];
-    const existing = book.notes?.[i] || "";
+    const existing = noteVal(book.notes?.[i]);
     const txt = window.prompt("✏️ הערה על הקטע (השאר ריק למחיקה):", existing);
     if (txt === null) return;
     const notes = { ...(book.notes || {}) };
-    if (txt.trim()) notes[i] = txt.trim();
+    if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
     else delete notes[i];
     await persist({ ...book, notes });
     setSelStart(null); setSelEnd(null); setDragText("");
   };
   const editNote = async (i) => {
-    const existing = book.notes?.[i] || "";
+    const existing = noteVal(book.notes?.[i]);
     const txt = window.prompt("✏️ הערה (השאר ריק למחיקה):", existing);
     if (txt === null) return;
     const notes = { ...(book.notes || {}) };
-    if (txt.trim()) notes[i] = txt.trim();
+    if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
     else delete notes[i];
     await persist({ ...book, notes });
   };
+  const [flashIdx, setFlashIdx] = useState(null);
+  const jumpToSentence = (i) => {
+    document.getElementById("para-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setFlashIdx(i);
+    setTimeout(() => setFlashIdx(null), 1600);
+  };
+  /* מספור הערות לפי סדר הופעתן בטקסט — כמו הערות שוליים בספר */
+  const noteOrder = useMemo(
+    () => Object.keys(book?.notes || {}).map(Number).sort((a, b) => a - b),
+    [book?.notes]
+  );
+  const noteNum = (i) => noteOrder.indexOf(Number(i)) + 1;
   const [notesOpen, setNotesOpen] = useState(false);
   const [trace, setTrace] = useState(null); // { term, hits:[...] } — הדגשת מקור ירוקה
 
@@ -1387,18 +1400,13 @@ export default function LearningTV() {
                         <div className="search-list">
                           {Object.entries(book.notes || {})
                             .sort((a, b) => Number(a[0]) - Number(b[0]))
-                            .map(([i, txt]) => (
+                            .map(([i, n]) => (
                               <div key={i} className="search-hit">
-                                <span
-                                  className="search-snip"
-                                  onClick={() =>
-                                    document.getElementById("para-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" })
-                                  }
-                                >
-                                  <b>📝 {txt}</b>
+                                <span className="search-snip" onClick={() => jumpToSentence(Number(i))}>
+                                  <b>[{noteNum(i)}] {noteVal(n)}</b>
                                   <br />
                                   <span style={{ color: "#8a8467" }}>
-                                    {(sentences[Number(i)] || "").slice(0, 90)}…
+                                    „{(n?.src || sentences[Number(i)] || "").slice(0, 90)}…"
                                   </span>
                                 </span>
                                 <button className="mini-btn" onClick={() => editNote(Number(i))}>✎</button>
@@ -1506,6 +1514,8 @@ export default function LearningTV() {
                                     (inRange || isStart ? "in-range " : "") +
                                     (searchHits && searchHits.includes(i) ? "hit " : "") +
                                     (trace && trace.hits.includes(i) ? "trace-hit " : "") +
+                                    (book.notes?.[i] ? "has-note " : "") +
+                                    (flashIdx === i ? "flash " : "") +
                                     (isRead ? "was-read " : "") +
                                     (markMode ? "clickable" : "")
                                   }
@@ -1515,9 +1525,9 @@ export default function LearningTV() {
                                   {book.notes?.[i] && (
                                     <sup
                                       className="note-pin"
-                                      title={book.notes[i]}
+                                      title={noteVal(book.notes[i])}
                                       onClick={(e) => { e.stopPropagation(); editNote(i); }}
-                                    >📝</sup>
+                                    >[{noteNum(i)}]</sup>
                                   )}{" "}
                                 </span>
                               );
@@ -2038,8 +2048,11 @@ const css = `
 .term.traceable,.rules .traceable{cursor:pointer}
 .term.traceable:hover{color:var(--amber);text-decoration:underline}
 .rules .traceable:hover{background:#fdeed3;border-radius:6px}
-.note-pin{cursor:pointer;font-size:.75em;margin-inline-start:2px}
-.note-pin:hover{filter:brightness(1.2)}
+.note-pin{cursor:pointer;font-size:.72em;margin-inline-start:2px;color:#b3661f;font-weight:800}
+.note-pin:hover{color:var(--amber);text-decoration:underline}
+.scroll-sent.has-note{border-bottom:1.5px dashed #d8b06a}
+@keyframes noteflash{0%{background:#ffe08a}100%{background:transparent}}
+.scroll-sent.flash{animation:noteflash 1.5s ease-out}
 .quiz-size-row{display:flex;gap:12px;justify-content:center;margin:14px 0;flex-wrap:wrap}
 .quiz-size-btn{font-family:inherit;font-size:1.3rem;font-weight:800;width:64px;height:64px;border-radius:14px;border:2px solid var(--key-edge);background:var(--key);color:#fff;cursor:pointer;transition:all .15s}
 .quiz-size-btn:hover{border-color:var(--amber);background:#232c52;transform:translateY(-2px)}
@@ -2176,3 +2189,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
+  
