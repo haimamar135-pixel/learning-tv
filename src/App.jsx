@@ -204,6 +204,31 @@ async function deleteBookFromStorage(id) {
   }
 }
 
+/* ─── שלב 3: חותמות סנכרון ───
+   לכל ספר נשמרת החותמת (updated_at) של הפעם האחרונה שהמכשיר *הזה* כתב לענן.
+   אם החותמת שבענן שונה ממנה — סימן שמכשיר אחר עדכן, ויש מה למשוך. */
+function syncStamps() {
+  try {
+    return JSON.parse(localStorage.getItem("ltv-cloud-stamps") || "{}");
+  } catch {
+    return {};
+  }
+}
+function setSyncStamp(bookId, iso) {
+  try {
+    const m = syncStamps();
+    m[bookId] = iso;
+    localStorage.setItem("ltv-cloud-stamps", JSON.stringify(m));
+  } catch {}
+}
+function clearSyncStamp(bookId) {
+  try {
+    const m = syncStamps();
+    delete m[bookId];
+    localStorage.setItem("ltv-cloud-stamps", JSON.stringify(m));
+  } catch {}
+}
+
 /* ─── גיבוי ושחזור (שלב 0 לפני Supabase) ───
    ⬇ מוריד קובץ JSON עם כל הספרים, ההערות, המרקרים והציונים.
    ⬆ משחזר מקובץ כזה. ביטוח לטביעת היד של הלומד. */
@@ -212,6 +237,9 @@ function downloadBackup() {
     const data = {};
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
+      /* חותמות הסנכרון שייכות למכשיר הזה בלבד — לא נכנסות לגיבוי,
+         כדי ששחזור במכשיר אחר לא ישתיק שם הצעת הורדה לגיטימית מהענן. */
+      if (k === "ltv-cloud-stamps") continue;
       if (k && (k.startsWith("ltv-") || k.startsWith("lomedtv-"))) data[k] = localStorage.getItem(k);
     }
     const payload = { app: "LOMED-TV", version: 1, savedAt: new Date().toISOString(), data };
@@ -791,6 +819,139 @@ export default function LearningTV() {
     setCloudMsg("");
   }
 
+  /* ─── שלב 3: מנוע הסנכרון ───
+     pushWholeBook — ספר שלם (פרקים + תוצרים + הערות). משמש בהגירה, ביצירת ספר
+     ובכל מקרה שהספר עוד לא קיים בענן.
+     בשאר הזמן נשלח רק מה שהשתנה: מרקר/ציון/סימנייה → עדכון שדה; הערה → שורה אחת;
+     תוצר → שורה אחת. כך סימון מרקר בשער הכוונות (565 פרקים) לא שולח מגה-בייט. */
+  const [syncState, setSyncState] = useState("idle"); // idle | saving | ok | err
+  const [syncErr, setSyncErr] = useState("");
+  const cloudRef = useRef(null);
+  useEffect(() => { cloudRef.current = cloudUser; }, [cloudUser]);
+
+  async function pushWholeBook(book, uid) {
+    const now = new Date().toISOString();
+    const { error: e1 } = await supa.from("books").upsert({
+      user_id: uid,
+      id: book.id,
+      title: book.title || "",
+      chapters: book.chapters || [],
+      progress: book.progress || {},
+      marks: book.marks || {},
+      flex: book.flex || {},
+      updated_at: now,
+    });
+    if (e1) throw new Error(e1.message);
+    const outRows = [];
+    for (const k of Object.keys(book.results || {})) {
+      const p = k.indexOf(":");
+      if (p < 1) continue;
+      const ci = parseInt(k.slice(0, p), 10);
+      const ch = k.slice(p + 1);
+      if (isNaN(ci) || !ch) continue;
+      outRows.push({ user_id: uid, book_id: book.id, chapter_idx: ci, channel: ch, data: { v: book.results[k] }, updated_at: now });
+    }
+    for (let j = 0; j < outRows.length; j += 40) {
+      const { error: e2 } = await supa.from("outputs").upsert(outRows.slice(j, j + 40));
+      if (e2) throw new Error(e2.message);
+    }
+    const noteRows = Object.keys(book.notes || {})
+      .map((k) => ({
+        user_id: uid,
+        book_id: book.id,
+        sent_idx: parseInt(k, 10),
+        text: (book.notes[k] && book.notes[k].t) || "",
+        src_quote: (book.notes[k] && book.notes[k].src) || "",
+        updated_at: now,
+      }))
+      .filter((r) => !isNaN(r.sent_idx) && r.text.trim());
+    for (let j = 0; j < noteRows.length; j += 100) {
+      const { error: e3 } = await supa.from("notes").upsert(noteRows.slice(j, j + 100));
+      if (e3) throw new Error(e3.message);
+    }
+    setSyncStamp(book.id, now);
+    return { outputs: outRows.length, notes: noteRows.length };
+  }
+
+  /* עדכון קל — רק השדות שמשתנים תוך כדי לימוד. אם השורה עוד לא בענן: העלאה מלאה. */
+  async function pushBookMeta(book, uid) {
+    const now = new Date().toISOString();
+    const { data, error } = await supa
+      .from("books")
+      .update({ title: book.title || "", progress: book.progress || {}, marks: book.marks || {}, flex: book.flex || {}, updated_at: now })
+      .eq("user_id", uid)
+      .eq("id", book.id)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if (!data || !data.length) { await pushWholeBook(book, uid); return; }
+    setSyncStamp(book.id, now);
+  }
+  /* מרענן את חותמת הזמן של הספר אחרי כתיבת הערה/תוצר, כדי שמכשיר אחר יידע שיש חדש. */
+  async function touchBook(bookId, uid, now) {
+    const { data, error } = await supa.from("books").update({ updated_at: now }).eq("user_id", uid).eq("id", bookId).select("id");
+    if (error) throw new Error(error.message);
+    if (data && data.length) { setSyncStamp(bookId, now); return true; }
+    return false;
+  }
+  async function pushNote(book, i, uid) {
+    const now = new Date().toISOString();
+    const n = (book.notes || {})[i];
+    if (n && (n.t || "").trim()) {
+      const { error } = await supa.from("notes").upsert({
+        user_id: uid, book_id: book.id, sent_idx: Number(i),
+        text: n.t || "", src_quote: n.src || "", updated_at: now,
+      });
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supa.from("notes").delete().eq("user_id", uid).eq("book_id", book.id).eq("sent_idx", Number(i));
+      if (error) throw new Error(error.message);
+    }
+    if (!(await touchBook(book.id, uid, now))) await pushWholeBook(book, uid);
+  }
+  async function pushOutput(book, ci, ch, uid) {
+    const now = new Date().toISOString();
+    const v = (book.results || {})[ci + ":" + ch];
+    if (v === undefined) return;
+    const { error } = await supa.from("outputs").upsert({
+      user_id: uid, book_id: book.id, chapter_idx: Number(ci), channel: ch, data: { v }, updated_at: now,
+    });
+    if (error) throw new Error(error.message);
+    if (!(await touchBook(book.id, uid, now))) await pushWholeBook(book, uid);
+  }
+
+  /* תור הסנכרון: הערה ותוצר נשלחים מיד (אירוע בודד);
+     מרקרים/ציונים מתאחדים בהשהיה קצרה כדי לא להציף בסימון רצוף. */
+  const syncTimer = useRef(null);
+  const syncJob = useRef(null);
+  async function runSync(job) {
+    const uid = cloudRef.current?.id;
+    if (!uid || !job || !job.book) return;
+    try {
+      setSyncState("saving");
+      setSyncErr("");
+      if (job.k === "full") await pushWholeBook(job.book, uid);
+      else if (job.k === "note") await pushNote(job.book, job.i, uid);
+      else if (job.k === "output") await pushOutput(job.book, job.ci, job.ch, uid);
+      else await pushBookMeta(job.book, uid);
+      setSyncState("ok");
+    } catch (e) {
+      console.error("sync failed", e);
+      setSyncState("err");
+      setSyncErr(e.message || "שגיאת סנכרון");
+    }
+  }
+  function queueSync(job) {
+    if (!cloudRef.current) return;
+    if (job.k !== "meta") { runSync(job); return; }
+    syncJob.current = job;
+    clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      const j = syncJob.current;
+      syncJob.current = null;
+      runSync(j);
+    }, 1200);
+  }
+
   /* ─── שלב 2: הגירה — העלאת כל הספרייה המקומית לענן ───
      upsert = הרצה חוזרת בטוחה (מעדכנת, לא מכפילה). */
   const [migrating, setMigrating] = useState(false);
@@ -803,56 +964,146 @@ export default function LearningTV() {
       if (!idx.length) { setCloudMsg("אין ספרים מקומיים להעלאה."); setMigrating(false); return; }
       let nBooks = 0, nOutputs = 0, nNotes = 0;
       for (let i = 0; i < idx.length; i++) {
-        const book = await loadBook(idx[i].id);
-        if (!book) continue;
-        setCloudMsg("מעלה ספר " + (i + 1) + "/" + idx.length + ": " + (book.title || "") + "...");
-        const { error: e1 } = await supa.from("books").upsert({
-          user_id: cloudUser.id,
-          id: book.id,
-          title: book.title || "",
-          chapters: book.chapters || [],
-          progress: book.progress || {},
-          marks: book.marks || {},
-          flex: book.flex || {},
-          updated_at: new Date().toISOString(),
-        });
-        if (e1) throw new Error('ספר "' + (book.title || "") + '": ' + e1.message);
-        nBooks++;
-        const outRows = [];
-        for (const key of Object.keys(book.results || {})) {
-          const p = key.indexOf(":");
-          if (p < 1) continue;
-          const ci = parseInt(key.slice(0, p), 10);
-          const ch = key.slice(p + 1);
-          if (isNaN(ci) || !ch) continue;
-          outRows.push({ user_id: cloudUser.id, book_id: book.id, chapter_idx: ci, channel: ch, data: { v: book.results[key] }, updated_at: new Date().toISOString() });
+        const b = await loadBook(idx[i].id);
+        if (!b) continue;
+        setCloudMsg("מעלה ספר " + (i + 1) + "/" + idx.length + ": " + (b.title || "") + "...");
+        try {
+          const r = await pushWholeBook(b, cloudUser.id);
+          nBooks++;
+          nOutputs += r.outputs;
+          nNotes += r.notes;
+        } catch (e) {
+          throw new Error('ספר "' + (b.title || "") + '": ' + e.message);
         }
-        for (let j = 0; j < outRows.length; j += 40) {
-          const { error: e2 } = await supa.from("outputs").upsert(outRows.slice(j, j + 40));
-          if (e2) throw new Error('תוצרים של "' + (book.title || "") + '": ' + e2.message);
-        }
-        nOutputs += outRows.length;
-        const noteRows = Object.keys(book.notes || {})
-          .map((k) => ({
-            user_id: cloudUser.id,
-            book_id: book.id,
-            sent_idx: parseInt(k, 10),
-            text: (book.notes[k] && book.notes[k].t) || "",
-            src_quote: (book.notes[k] && book.notes[k].src) || "",
-            updated_at: new Date().toISOString(),
-          }))
-          .filter((r) => !isNaN(r.sent_idx));
-        for (let j = 0; j < noteRows.length; j += 100) {
-          const { error: e3 } = await supa.from("notes").upsert(noteRows.slice(j, j + 100));
-          if (e3) throw new Error('הערות של "' + (book.title || "") + '": ' + e3.message);
-        }
-        nNotes += noteRows.length;
       }
       setCloudMsg("✅ ההעלאה הושלמה! " + nBooks + " ספרים · " + nOutputs + " תוצרים · " + nNotes + " הערות — שמורים בענן.");
     } catch (e) {
       setCloudMsg("שגיאה בהעלאה: " + e.message);
     }
     setMigrating(false);
+  }
+
+  /* ─── שלב 3: משיכה מהענן ─── */
+  const [pullList, setPullList] = useState(null); // ספרים שיש בענן ואינם מעודכנים כאן
+  const [pulling, setPulling] = useState(false);
+  const [pullMsg, setPullMsg] = useState("");
+  const [pullChecked, setPullChecked] = useState(false);
+
+  async function fetchCloudIndex(uid) {
+    const { data, error } = await supa.from("books").select("id,title,updated_at").eq("user_id", uid);
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+  async function pullBook(id, uid) {
+    const { data: rows, error } = await supa.from("books").select("*").eq("user_id", uid).eq("id", id).limit(1);
+    if (error) throw new Error(error.message);
+    const b = rows && rows[0];
+    if (!b) throw new Error("הספר לא נמצא בענן");
+    const { data: outs, error: eo } = await supa.from("outputs").select("chapter_idx,channel,data").eq("user_id", uid).eq("book_id", id);
+    if (eo) throw new Error(eo.message);
+    const { data: nts, error: en } = await supa.from("notes").select("sent_idx,text,src_quote").eq("user_id", uid).eq("book_id", id);
+    if (en) throw new Error(en.message);
+    const results = {};
+    for (const o of outs || []) if (o.data && o.data.v !== undefined) results[o.chapter_idx + ":" + o.channel] = o.data.v;
+    const notes = {};
+    for (const n of nts || []) if ((n.text || "").trim()) notes[n.sent_idx] = { t: n.text, src: n.src_quote || "" };
+    const nb = {
+      id: b.id,
+      title: b.title || "",
+      chapters: b.chapters || [],
+      results,
+      progress: b.progress || {},
+      marks: b.marks || {},
+      flex: b.flex || {},
+      notes,
+    };
+    await saveBookToStorage(nb);
+    setSyncStamp(nb.id, b.updated_at);
+    return { book: nb, updatedAt: Date.parse(b.updated_at) || Date.now() };
+  }
+
+  /* בדיקה חד-פעמית בכל כניסה: האם בענן יש משהו חדש יותר ממה שיש כאן? */
+  useEffect(() => {
+    if (!cloudUser) { if (pullChecked) setPullChecked(false); return; }
+    if (pullChecked) return;
+    setPullChecked(true);
+    (async () => {
+      try {
+        const cloud = await fetchCloudIndex(cloudUser.id);
+        if (!cloud.length) return;
+        const localIdx = await loadIndex();
+        const localIds = new Set(localIdx.map((b) => b.id));
+        /* ריצה ראשונה של שלב 3: מה שכבר הועלה בהגירה נחשב מסונכרן — לא מציקים. */
+        let raw = null;
+        try { raw = localStorage.getItem("ltv-cloud-stamps"); } catch {}
+        if (!raw) for (const c of cloud) if (localIds.has(c.id)) setSyncStamp(c.id, c.updated_at);
+        const st = syncStamps();
+        const fresh = cloud.filter((c) => {
+          if (!localIds.has(c.id)) return true; // ספר שאין כאן בכלל
+          if (st[c.id] === c.updated_at) return false; // המכשיר הזה כתב אותו אחרון
+          const loc = localIdx.find((b) => b.id === c.id);
+          return (Date.parse(c.updated_at) || 0) > ((loc && loc.updatedAt) || 0);
+        });
+        if (fresh.length) setPullList(fresh.map((c) => ({ ...c, isNew: !localIds.has(c.id) })));
+        /* ולכיוון השני: ספר שנוצר כאן כשלא היינו מחוברים — עולה עכשיו מעצמו.
+           העלאה בלבד, לא נוגעת בשום דבר מקומי. */
+        const cloudIds = new Set(cloud.map((c) => c.id));
+        const orphans = localIdx.filter((b) => !cloudIds.has(b.id));
+        if (orphans.length) {
+          setSyncState("saving");
+          for (const o of orphans) {
+            const b = await loadBook(o.id);
+            if (b) await pushWholeBook(b, cloudUser.id);
+          }
+          setSyncState("ok");
+        }
+      } catch (e) {
+        console.error("cloud check failed", e);
+        setSyncState("err");
+        setSyncErr(e.message || "בדיקת הענן נכשלה");
+      }
+    })();
+  }, [cloudUser, pullChecked]);
+
+  async function doPull(list) {
+    if (!cloudUser || pulling || !list || !list.length) return;
+    setPulling(true);
+    setPullMsg("");
+    try {
+      let idx = await loadIndex();
+      for (let i = 0; i < list.length; i++) {
+        setPullMsg("מוריד " + (i + 1) + "/" + list.length + ": " + (list[i].title || "") + "...");
+        const { book: nb, updatedAt } = await pullBook(list[i].id, cloudUser.id);
+        const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), updatedAt };
+        idx = [entry, ...idx.filter((b) => b.id !== nb.id)];
+        if (book && book.id === nb.id) setBook(nb);
+      }
+      await saveIndex(idx);
+      setIndex(idx);
+      setPullMsg("✅ הורדו " + list.length + " ספרים מהענן.");
+      setPullList(null);
+      setSyncState("ok");
+      if (view === "intake" && idx.length) setView("library");
+    } catch (e) {
+      setPullMsg("שגיאה בהורדה: " + e.message);
+    }
+    setPulling(false);
+  }
+
+  /* כפתור ידני בחלון החשבון — למכשיר חדש, או כשרוצים לרענן ביוזמה. */
+  async function manualPull() {
+    if (!cloudUser) return;
+    setCloudMsg("בודק מה יש בענן...");
+    try {
+      const cloud = await fetchCloudIndex(cloudUser.id);
+      if (!cloud.length) { setCloudMsg("אין ספרים בענן עדיין."); return; }
+      setCloudMsg("");
+      setShowCloud(false);
+      setPullMsg("");
+      setPullList(cloud.map((c) => ({ ...c, isNew: false, manual: true })));
+    } catch (e) {
+      setCloudMsg("שגיאה: " + e.message);
+    }
   }
  
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
@@ -887,8 +1138,13 @@ export default function LearningTV() {
   const key = (ci, id) => `${ci}:${id}`;
   const flick = () => { setStaticFx(true); setTimeout(() => setStaticFx(false), 260); };
  
-  /* שמירה: ספר + עדכון האינדקס בפעולה אחת */
-  const persist = async (nextBook) => {
+  /* שמירה: ספר + עדכון האינדקס בפעולה אחת — ומאז שלב 3, גם לענן.
+     sync מתאר מה בדיוק השתנה, כדי שלענן ייסע רק זה:
+       {k:"meta"}                — מרקרים / ציונים / סימנייה / שם
+       {k:"note", i}             — הערה אחת על משפט i
+       {k:"output", ci, ch}      — תוצר אחד (פרק ci, ערוץ ch)
+       {k:"full"}                — הספר כולו (יצירה / העלאה ראשונה) */
+  const persist = async (nextBook, sync = { k: "meta" }) => {
     setBook(nextBook);
     const entry = {
       id: nextBook.id,
@@ -901,6 +1157,7 @@ export default function LearningTV() {
     setIndex(nextIdx);
     await saveBookToStorage(nextBook);
     await saveIndex(nextIdx);
+    if (sync) queueSync({ ...sync, book: nextBook });
   };
  
   const buildBook = async (text, forcedTitle, stayInLibrary = false) => {
@@ -917,7 +1174,7 @@ export default function LearningTV() {
       results: {},
       progress: {},
     };
-    await persist(nb);
+    await persist(nb, { k: "full" });
     setError(null);
     if (!stayInLibrary) {
       flick();
@@ -1021,6 +1278,18 @@ export default function LearningTV() {
     setDeleteArm(null);
     await deleteBookFromStorage(id);
     await saveIndex(nextIdx);
+    clearSyncStamp(id);
+    /* מחיקה אמיתית: כשמחוברים לענן, הספר נמחק גם שם — אחרת הוא יוצע להורדה מיד. */
+    const uid = cloudRef.current?.id;
+    if (uid) {
+      try {
+        await supa.from("notes").delete().eq("user_id", uid).eq("book_id", id);
+        await supa.from("outputs").delete().eq("user_id", uid).eq("book_id", id);
+        await supa.from("books").delete().eq("user_id", uid).eq("id", id);
+      } catch (e) {
+        console.error("cloud delete failed", e);
+      }
+    }
     if (!nextIdx.length) setView("intake");
   };
  
@@ -1083,7 +1352,7 @@ export default function LearningTV() {
     const notes = { ...(book.notes || {}) };
     if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
     else delete notes[i];
-    await persist({ ...book, notes });
+    await persist({ ...book, notes }, { k: "note", i });
     setSelStart(null); setSelEnd(null); setDragText("");
   };
   const editNote = async (i) => {
@@ -1093,7 +1362,7 @@ export default function LearningTV() {
     const notes = { ...(book.notes || {}) };
     if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
     else delete notes[i];
-    await persist({ ...book, notes });
+    await persist({ ...book, notes }, { k: "note", i });
   };
   const [flashIdx, setFlashIdx] = useState(null);
   const jumpToSentence = (i) => {
@@ -1267,7 +1536,7 @@ export default function LearningTV() {
         id === "quiz"
           ? await buildQuiz(book.chapters[ci].text, qCount)
           : await askClaude(PROMPTS[id](book.chapters[ci].text), 2000, FAST_IDS.includes(id));
-      await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } });
+      await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } }, { k: "output", ci, ch: id });
     } catch (e) {
       setError(e.message || "השידור נכשל. נסה שוב.");
     } finally {
@@ -1361,7 +1630,22 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
-                <button className={"font-btn" + (cloudUser ? " cloud-on" : "")} onClick={() => setShowCloud(true)} title={cloudUser ? "מחובר לענן: " + (cloudUser.email || "") : "חשבון ענן — כניסה"} aria-label="חשבון ענן">☁</button>
+                <button
+                  className={"font-btn" + (cloudUser ? (syncState === "err" ? " cloud-err" : " cloud-on") : "")}
+                  onClick={() => setShowCloud(true)}
+                  title={
+                    !cloudUser
+                      ? "חשבון ענן — כניסה"
+                      : syncState === "saving"
+                      ? "שומר בענן..."
+                      : syncState === "err"
+                      ? "שגיאת סנכרון: " + syncErr
+                      : "מסונכרן לענן · " + (cloudUser.email || "")
+                  }
+                  aria-label="חשבון ענן"
+                >
+                  {cloudUser && syncState === "saving" ? "⏳" : cloudUser && syncState === "err" ? "⚠" : "☁"}
+                </button>
               </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
             </div>
@@ -1373,10 +1657,17 @@ export default function LearningTV() {
                   {cloudUser ? (
                     <>
                       <p>מחובר בתור:<br /><b dir="ltr">{cloudUser.email}</b></p>
+                      <p className="sync-line">
+                        {syncState === "saving" ? "⏳ שומר בענן..." : syncState === "err" ? "⚠ " + syncErr : "✅ סנכרון שוטף פעיל — כל מרקר, הערה, תוצר וציון נשמרים גם בענן."}
+                      </p>
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={migrateToCloud} disabled={migrating}>{migrating ? "⏳ מעלה..." : "☁ העלה את הספרים שלי לענן"}</button>
+                        <button className="cloud-btn" onClick={manualPull} disabled={migrating || pulling}>⬇ הורד את הספרים מהענן</button>
                       </div>
-                      <p style={{ fontSize: ".8rem", opacity: 0.75, marginTop: 8 }}>העלאה חד-פעמית של כל הספרים, ההערות והמרקרים. בטוח להריץ שוב — הרצה חוזרת מעדכנת ולא מכפילה.</p>
+                      <p style={{ fontSize: ".8rem", opacity: 0.75, marginTop: 8 }}>למכשיר חדש, או כדי למשוך עבודה שנעשתה במקום אחר. תמיד יוצג מה עומד לרדת לפני שמחליטים.</p>
+                      <div className="cloud-actions">
+                        <button className="cloud-btn ghost" onClick={migrateToCloud} disabled={migrating}>{migrating ? "⏳ מעלה..." : "☁ העלאה מלאה מחדש"}</button>
+                      </div>
+                      <p style={{ fontSize: ".8rem", opacity: 0.6, marginTop: 8 }}>לרוב אין בזה צורך — הסנכרון השוטף מטפל בהכול. בטוח להריץ שוב: מעדכן ולא מכפיל.</p>
                       <div className="cloud-actions">
                         <button className="cloud-btn ghost" onClick={() => setShowCloud(false)} disabled={migrating}>סגור</button>
                         <button className="cloud-btn ghost" onClick={cloudSignOut} disabled={migrating}>התנתק</button>
@@ -1401,6 +1692,41 @@ export default function LearningTV() {
                     </>
                   )}
                   {cloudMsg && <p className="cloud-msg">{cloudMsg}</p>}
+                </div>
+              </div>
+            )}
+
+            {/* שלב 3: הצעת הורדה — נפתחת רק כשבענן יש משהו חדש יותר ממה שיש כאן */}
+            {pullList && (
+              <div className="cloud-overlay" onClick={() => { if (!pulling) { setPullList(null); setPullMsg(""); } }}>
+                <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
+                  <h3>⬇ יש חדש בענן</h3>
+                  <p style={{ fontSize: ".9rem" }}>
+                    {pullList[0]?.manual
+                      ? "הספרים הבאים נמצאים בענן. ההורדה תחליף את העותק שבמכשיר הזה:"
+                      : "הספרים הבאים עודכנו במקום אחר, או שאינם קיימים במכשיר הזה:"}
+                  </p>
+                  <ul className="pull-list">
+                    {pullList.map((c) => (
+                      <li key={c.id}>
+                        <b>{c.title || "ללא שם"}</b>
+                        {c.isNew ? <span className="pull-tag">חדש</span> : null}
+                        <span className="pull-when">{c.updated_at ? new Date(c.updated_at).toLocaleString("he-IL") : ""}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  {pullMsg && <p className="cloud-msg">{pullMsg}</p>}
+                  <div className="cloud-actions">
+                    <button className="cloud-btn" onClick={() => doPull(pullList)} disabled={pulling}>
+                      {pulling ? "⏳ מוריד..." : "⬇ הורד הכול"}
+                    </button>
+                    <button className="cloud-btn ghost" onClick={() => { setPullList(null); setPullMsg(""); }} disabled={pulling}>
+                      לא עכשיו
+                    </button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", opacity: 0.6, marginTop: 10 }}>
+                    "לא עכשיו" בטוח לחלוטין — שום דבר לא נמחק, וההצעה תחזור בכניסה הבאה.
+                  </p>
                 </div>
               </div>
             )}
@@ -2061,6 +2387,13 @@ const css = `
 .font-btn{background:#1b2a4a;color:#cfd3e6;border:1px solid #3a4a72;border-radius:8px;min-width:34px;height:26px;font-size:.85rem;cursor:pointer;line-height:1}
 .font-btn:hover{border-color:#f2a33c;color:#fff}
 .font-btn.cloud-on{border-color:#39d98a;color:#39d98a}
+.font-btn.cloud-err{border-color:#ff7b6b;color:#ff7b6b}
+.sync-line{font-size:.82rem;opacity:.85;margin:6px 0 2px;line-height:1.5}
+.pull-list{list-style:none;padding:0;margin:10px 0;text-align:right;max-height:190px;overflow:auto}
+.pull-list li{padding:6px 8px;border-bottom:1px solid #26355c;font-size:.9rem}
+.pull-list li:last-child{border-bottom:none}
+.pull-tag{background:#39d98a;color:#06210f;border-radius:5px;padding:1px 6px;font-size:.7rem;margin-inline-start:6px}
+.pull-when{display:block;font-size:.72rem;opacity:.6}
 .cloud-overlay{position:fixed;inset:0;background:rgba(5,10,25,.75);z-index:400;display:flex;align-items:center;justify-content:center}
 .cloud-box{background:#101c38;border:1px solid #3a4a72;border-radius:14px;padding:22px 26px;max-width:360px;width:90%;color:#e8ebf7;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.5)}
 .cloud-box h3{margin:0 0 10px;color:#f2a33c}
