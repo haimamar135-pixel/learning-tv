@@ -1,4 +1,4 @@
-    import { useState, useEffect, useRef, useMemo } from "react";
+   import { useState, useEffect, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
@@ -2329,4 +2329,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
- 
+  
