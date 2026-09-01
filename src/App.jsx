@@ -1,4 +1,12 @@
-   import { useState, useEffect, useRef, useMemo } from "react";
+    import { useState, useEffect, useRef, useMemo } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+/* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
+   המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
+   בצד השרת — כל משתמש רואה אך ורק את הנתונים שלו. */
+const SUPA_URL = "https://hghlesijwzpfdhmlvgiv.supabase.co";
+const SUPA_KEY = "sb_publishable_JsWZApJRwuzZId7iUPwUkA_EGlZfNNe";
+const supa = createClient(SUPA_URL, SUPA_KEY);
  
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
@@ -757,6 +765,31 @@ export default function LearningTV() {
       return v;
     });
   };
+
+  /* ─── חשבון ענן (Supabase) — שלב 1: כניסה בקישור למייל ─── */
+  const [cloudUser, setCloudUser] = useState(null);
+  const [showCloud, setShowCloud] = useState(false);
+  const [cloudEmail, setCloudEmail] = useState("");
+  const [cloudMsg, setCloudMsg] = useState("");
+  useEffect(() => {
+    supa.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
+    const { data: sub } = supa.auth.onAuthStateChange((_ev, session) => setCloudUser(session?.user || null));
+    return () => { try { sub.subscription.unsubscribe(); } catch {} };
+  }, []);
+  async function sendMagicLink() {
+    const email = cloudEmail.trim();
+    if (!email || !email.includes("@")) { setCloudMsg("כתובת מייל לא תקינה"); return; }
+    setCloudMsg("שולח קישור...");
+    const { error } = await supa.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setCloudMsg(error ? "שגיאה: " + error.message : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר.");
+  }
+  async function cloudSignOut() {
+    await supa.auth.signOut();
+    setCloudMsg("");
+  }
  
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
@@ -1264,9 +1297,46 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
+                <button className={"font-btn" + (cloudUser ? " cloud-on" : "")} onClick={() => setShowCloud(true)} title={cloudUser ? "מחובר לענן: " + (cloudUser.email || "") : "חשבון ענן — כניסה"} aria-label="חשבון ענן">☁</button>
               </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
             </div>
+
+            {showCloud && (
+              <div className="cloud-overlay" onClick={() => setShowCloud(false)}>
+                <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
+                  <h3>☁ חשבון ענן</h3>
+                  {cloudUser ? (
+                    <>
+                      <p>מחובר בתור:<br /><b dir="ltr">{cloudUser.email}</b></p>
+                      <p style={{ fontSize: ".85rem", opacity: 0.8 }}>השלב הבא בדרך: העלאת הספרים וההערות לענן וסנכרון בין מכשירים.</p>
+                      <div className="cloud-actions">
+                        <button className="cloud-btn" onClick={() => setShowCloud(false)}>סגור</button>
+                        <button className="cloud-btn ghost" onClick={cloudSignOut}>התנתק</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p>כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה.</p>
+                      <input
+                        className="cloud-input"
+                        type="email"
+                        dir="ltr"
+                        placeholder="you@email.com"
+                        value={cloudEmail}
+                        onChange={(e) => setCloudEmail(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") sendMagicLink(); }}
+                      />
+                      <div className="cloud-actions">
+                        <button className="cloud-btn" onClick={sendMagicLink}>📨 שלח לי קישור כניסה</button>
+                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)}>המשך בלי חשבון</button>
+                      </div>
+                    </>
+                  )}
+                  {cloudMsg && <p className="cloud-msg">{cloudMsg}</p>}
+                </div>
+              </div>
+            )}
  
             {view === "tv" && multi && (
               <div className="chapter-strip">
@@ -1923,6 +1993,16 @@ const css = `
 .font-btns{display:flex;gap:6px;margin-inline-start:auto;margin-inline-end:10px}
 .font-btn{background:#1b2a4a;color:#cfd3e6;border:1px solid #3a4a72;border-radius:8px;min-width:34px;height:26px;font-size:.85rem;cursor:pointer;line-height:1}
 .font-btn:hover{border-color:#f2a33c;color:#fff}
+.font-btn.cloud-on{border-color:#39d98a;color:#39d98a}
+.cloud-overlay{position:fixed;inset:0;background:rgba(5,10,25,.75);z-index:400;display:flex;align-items:center;justify-content:center}
+.cloud-box{background:#101c38;border:1px solid #3a4a72;border-radius:14px;padding:22px 26px;max-width:360px;width:90%;color:#e8ebf7;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+.cloud-box h3{margin:0 0 10px;color:#f2a33c}
+.cloud-input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #3a4a72;background:#0b1430;color:#fff;font-size:1rem;margin:8px 0}
+.cloud-actions{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.cloud-btn{background:#1b2a4a;color:#fff;border:1px solid #3a4a72;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:.95rem}
+.cloud-btn:hover{border-color:#f2a33c}
+.cloud-btn.ghost{opacity:.75}
+.cloud-msg{font-size:.85rem;color:#ffd27a;margin-top:10px}
 .screen-body{
   flex:1;background:var(--paper);color:var(--ink);padding:26px 30px;overflow-y:auto;max-height:560px;
   background-image:radial-gradient(rgba(0,0,0,.03) 1px,transparent 1px);background-size:5px 5px;
@@ -2249,4 +2329,4 @@ const css = `
   .g-title{white-space:normal}
 }
 `;
-  
+ 
