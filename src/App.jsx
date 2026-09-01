@@ -790,6 +790,70 @@ export default function LearningTV() {
     await supa.auth.signOut();
     setCloudMsg("");
   }
+
+  /* ─── שלב 2: הגירה — העלאת כל הספרייה המקומית לענן ───
+     upsert = הרצה חוזרת בטוחה (מעדכנת, לא מכפילה). */
+  const [migrating, setMigrating] = useState(false);
+  async function migrateToCloud() {
+    if (!cloudUser || migrating) return;
+    setMigrating(true);
+    try {
+      setCloudMsg("קורא את הספרייה המקומית...");
+      const idx = await loadIndex();
+      if (!idx.length) { setCloudMsg("אין ספרים מקומיים להעלאה."); setMigrating(false); return; }
+      let nBooks = 0, nOutputs = 0, nNotes = 0;
+      for (let i = 0; i < idx.length; i++) {
+        const book = await loadBook(idx[i].id);
+        if (!book) continue;
+        setCloudMsg("מעלה ספר " + (i + 1) + "/" + idx.length + ": " + (book.title || "") + "...");
+        const { error: e1 } = await supa.from("books").upsert({
+          user_id: cloudUser.id,
+          id: book.id,
+          title: book.title || "",
+          chapters: book.chapters || [],
+          progress: book.progress || {},
+          marks: book.marks || {},
+          flex: book.flex || {},
+          updated_at: new Date().toISOString(),
+        });
+        if (e1) throw new Error('ספר "' + (book.title || "") + '": ' + e1.message);
+        nBooks++;
+        const outRows = [];
+        for (const key of Object.keys(book.results || {})) {
+          const p = key.indexOf(":");
+          if (p < 1) continue;
+          const ci = parseInt(key.slice(0, p), 10);
+          const ch = key.slice(p + 1);
+          if (isNaN(ci) || !ch) continue;
+          outRows.push({ user_id: cloudUser.id, book_id: book.id, chapter_idx: ci, channel: ch, data: { v: book.results[key] }, updated_at: new Date().toISOString() });
+        }
+        for (let j = 0; j < outRows.length; j += 40) {
+          const { error: e2 } = await supa.from("outputs").upsert(outRows.slice(j, j + 40));
+          if (e2) throw new Error('תוצרים של "' + (book.title || "") + '": ' + e2.message);
+        }
+        nOutputs += outRows.length;
+        const noteRows = Object.keys(book.notes || {})
+          .map((k) => ({
+            user_id: cloudUser.id,
+            book_id: book.id,
+            sent_idx: parseInt(k, 10),
+            text: (book.notes[k] && book.notes[k].t) || "",
+            src_quote: (book.notes[k] && book.notes[k].src) || "",
+            updated_at: new Date().toISOString(),
+          }))
+          .filter((r) => !isNaN(r.sent_idx));
+        for (let j = 0; j < noteRows.length; j += 100) {
+          const { error: e3 } = await supa.from("notes").upsert(noteRows.slice(j, j + 100));
+          if (e3) throw new Error('הערות של "' + (book.title || "") + '": ' + e3.message);
+        }
+        nNotes += noteRows.length;
+      }
+      setCloudMsg("✅ ההעלאה הושלמה! " + nBooks + " ספרים · " + nOutputs + " תוצרים · " + nNotes + " הערות — שמורים בענן.");
+    } catch (e) {
+      setCloudMsg("שגיאה בהעלאה: " + e.message);
+    }
+    setMigrating(false);
+  }
  
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
@@ -1309,10 +1373,13 @@ export default function LearningTV() {
                   {cloudUser ? (
                     <>
                       <p>מחובר בתור:<br /><b dir="ltr">{cloudUser.email}</b></p>
-                      <p style={{ fontSize: ".85rem", opacity: 0.8 }}>השלב הבא בדרך: העלאת הספרים וההערות לענן וסנכרון בין מכשירים.</p>
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={() => setShowCloud(false)}>סגור</button>
-                        <button className="cloud-btn ghost" onClick={cloudSignOut}>התנתק</button>
+                        <button className="cloud-btn" onClick={migrateToCloud} disabled={migrating}>{migrating ? "⏳ מעלה..." : "☁ העלה את הספרים שלי לענן"}</button>
+                      </div>
+                      <p style={{ fontSize: ".8rem", opacity: 0.75, marginTop: 8 }}>העלאה חד-פעמית של כל הספרים, ההערות והמרקרים. בטוח להריץ שוב — הרצה חוזרת מעדכנת ולא מכפילה.</p>
+                      <div className="cloud-actions">
+                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)} disabled={migrating}>סגור</button>
+                        <button className="cloud-btn ghost" onClick={cloudSignOut} disabled={migrating}>התנתק</button>
                       </div>
                     </>
                   ) : (
