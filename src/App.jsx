@@ -761,6 +761,8 @@ export default function LearningTV() {
   const [selEnd, setSelEnd] = useState(null);
   const [dragText, setDragText] = useState("");   // טקסט שסומן בגרירה
   const [wordSel, setWordSel] = useState(null);   // סימון ברמת מילה: {i, s, e} — משפט + טווח תווים
+  const [transRes, setTransRes] = useState(null); // "גע ותרגם": {q,t,n?,err?,cached?}
+  const [transLoading, setTransLoading] = useState(false);
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
@@ -1642,9 +1644,62 @@ export default function LearningTV() {
     setSelEnd(null);
     setDragText("");
     setWordSel(null);
+    setTransRes(null);
     setFlexError(null);
     window.getSelection?.()?.removeAllRanges?.();
   };
+
+  /* ── "גע ותרגם" — תרגום ארמית↔עברית לפי הקשר + מילון אישי נצבר (flex.dict) ── */
+  const translateSel = async () => {
+    const phrase = (wordSel
+      ? (sentences[wordSel.i] || "").slice(wordSel.s, wordSel.e)
+      : rangeIdx
+      ? sentences.slice(rangeIdx[0], rangeIdx[1] + 1).join(" ")
+      : dragText || ""
+    ).trim().replace(/\s+/g, " ");
+    if (!phrase || transLoading) return;
+    const dict = book.flex?.dict || {};
+    if (dict[phrase]) {
+      setTransRes({ q: phrase, ...dict[phrase], cached: true });
+      return;
+    }
+    const ctx = wordSel ? (sentences[wordSel.i] || "") : phrase;
+    setTransLoading(true);
+    setTransRes(null);
+    try {
+      const data = await askClaude(
+        `תרגם לעברית פשוטה את הביטוי הארמי המסומן מתוך ספר קבלה, לפי הקשרו במשפט. אם הביטוי כבר בעברית — באר אותו במשפט קצר.\nהביטוי: "${phrase.slice(0, 200)}"\nהמשפט המלא: "${ctx.slice(0, 400)}"\nהחזר JSON בלבד: {"t":"התרגום המילולי, קצר","n":"הערה קצרה רק אם באמת נחוצה, אחרת מחרוזת ריקה"}`,
+        500,
+        true
+      );
+      const entry = { t: String(data.t || "").trim(), n: String(data.n || "").trim() };
+      if (!entry.t) throw new Error("לא התקבל תרגום");
+      setTransRes({ q: phrase, ...entry });
+      /* נשמר במילון האישי של הספר — פעם הבאה: מיידי, בלי AI */
+      await persist({ ...book, flex: { ...(book.flex || {}), dict: { ...dict, [phrase]: entry } } });
+    } catch (e) {
+      setTransRes({ q: phrase, err: e.message });
+    }
+    setTransLoading(false);
+  };
+  const transBubble = (transLoading || transRes) && (
+    <div className="trans-bubble" dir="rtl">
+      {transLoading ? (
+        <span>⏳ מתרגם…</span>
+      ) : transRes.err ? (
+        <span>⚠ {transRes.err}</span>
+      ) : (
+        <span>
+          <b>{transRes.q}</b> = {transRes.t}
+          {transRes.n ? <span className="trans-note"> · {transRes.n}</span> : null}
+          {transRes.cached ? <span className="trans-note"> 📖</span> : null}
+        </span>
+      )}
+      {!transLoading && (
+        <button className="trans-x" onClick={() => setTransRes(null)}>✕</button>
+      )}
+    </div>
+  );
  
   // הטקסט הנבחר בפועל: גרירה קודמת לנקודות
   const rangeIdx =
@@ -2494,9 +2549,11 @@ export default function LearningTV() {
               <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
               <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
               <button className="mark-btn" onClick={addNote}>📝 הערה</button>
+              <button className="mark-btn trans-btn" onClick={translateSel}>א⇄ע תרגם</button>
               <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
             </div>
           )}
+          {transBubble}
 
           {selectedText && !flexResult && !flexLoading && (
             <div className="deck">
@@ -2882,6 +2939,12 @@ const css = `
 .read-sents{white-space:normal}
 .read-sents .scroll-para{padding:0;margin:0 0 14px}
 .read-mark-hint{margin:0}
+.trans-btn{background:#eaf3ff;border-color:#9fc3ef}
+.trans-bubble{display:flex;align-items:center;gap:10px;background:#eaf3ff;border:1.5px solid #9fc3ef;
+  border-radius:10px;padding:8px 12px;margin:8px 0;font-size:1.02rem;color:#1d3a5f;box-shadow:0 2px 6px rgba(30,60,110,.12)}
+.trans-bubble b{color:#0d2b52}
+.trans-note{color:#4a6a95;font-size:.92em}
+.trans-x{margin-inline-start:auto;border:none;background:none;cursor:pointer;color:#4a6a95;font-size:1rem}
 .read-title{font-size:1.25rem;font-weight:800;color:#232323;border-bottom:2px solid var(--amber);padding-bottom:10px}
 .read-body{line-height:2.05;font-size:1.08rem;white-space:pre-wrap;color:#232323}
 .read-hint{margin-top:8px;color:#8a8467;font-size:.9rem;line-height:1.6;border-top:1px dashed #d9d2bd;padding-top:14px}
