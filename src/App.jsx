@@ -760,6 +760,8 @@ export default function LearningTV() {
   const [selStart, setSelStart] = useState(null); // אינדקס פסקה
   const [selEnd, setSelEnd] = useState(null);
   const [dragText, setDragText] = useState("");   // טקסט שסומן בגרירה
+  const [wordSel, setWordSel] = useState(null);   // סימון ברמת מילה: {i, s, e} — משפט + טווח תווים
+  const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
   const [flexError, setFlexError] = useState(null);
@@ -1324,10 +1326,116 @@ export default function LearningTV() {
 
   const HL_COLORS = { y: "#fff3a0", g: "#d3f7c6", p: "#ffd6e8" };
 
+  /* ── סימון ברמת מילה ──
+     המרקרים נשמרים כרגיל פר-משפט (book.marks[i]), ובנוסף אפשר טווחי-מילים:
+     marks[i].w = [{s,e,b?,u?,hl?}] — אינדקסי תווים בתוך המשפט, מיושרים לגבולות מילים. */
+  const offsetInSpan = (span, node, off) => {
+    if (!span || !node) return null;
+    let total = 0, found = false;
+    const walk = (el) => {
+      if (found || !el) return;
+      if (el.nodeType === 3) {
+        if (el === node) { total += off; found = true; }
+        else total += el.nodeValue.length;
+      } else if (el.classList && el.classList.contains("note-pin")) {
+        /* מספרי הערות לא נספרים */
+      } else {
+        for (const c of el.childNodes) { walk(c); if (found) return; }
+      }
+    };
+    walk(span);
+    return found ? total : null;
+  };
+  const snapWord = (txt, s, e) => {
+    s = Math.max(0, Math.min(s, txt.length));
+    e = Math.max(s, Math.min(e, txt.length));
+    while (s > 0 && !/\s/.test(txt[s - 1])) s--;
+    while (e < txt.length && !/\s/.test(txt[e])) e++;
+    while (s < e && /\s/.test(txt[s])) s++;
+    while (e > s && /\s/.test(txt[e - 1])) e--;
+    return [s, e];
+  };
+  const applyWordPatch = (w, s, e, patch) => {
+    const out = [];
+    let gaps = [[s, e]];
+    for (const r of w) {
+      if (r.e <= s || r.s >= e) { out.push(r); continue; }
+      if (r.s < s) out.push({ ...r, e: s });
+      if (r.e > e) out.push({ ...r, s: e });
+      const os = Math.max(r.s, s), oe = Math.min(r.e, e);
+      if (patch) out.push({ s: os, e: oe, b: r.b, u: r.u, hl: r.hl, ...patch });
+      gaps = gaps.flatMap(([gs, ge]) => {
+        if (oe <= gs || os >= ge) return [[gs, ge]];
+        const parts = [];
+        if (gs < os) parts.push([gs, os]);
+        if (ge > oe) parts.push([oe, ge]);
+        return parts;
+      });
+    }
+    if (patch) for (const [gs, ge] of gaps) if (ge > gs) out.push({ s: gs, e: ge, ...patch });
+    return out
+      .map((r) => { const o = { s: r.s, e: r.e }; if (r.b) o.b = 1; if (r.u) o.u = 1; if (r.hl) o.hl = r.hl; return o; })
+      .filter((r) => (r.b || r.u || r.hl) && r.e > r.s)
+      .sort((a, b) => a.s - b.s);
+  };
+  const captureWordSel = (sel, span, i) => {
+    const txt = sentences[i] || "";
+    const so = offsetInSpan(span, sel.anchorNode, sel.anchorOffset);
+    const eo = offsetInSpan(span, sel.focusNode, sel.focusOffset);
+    if (so === null || eo === null || so === eo) return false;
+    const [ws, we] = snapWord(txt, Math.min(so, eo), Math.max(so, eo));
+    if (we <= ws) return false;
+    if (we - ws >= txt.trim().length) {
+      setSelStart(i); setSelEnd(i); setWordSel(null);
+    } else {
+      setWordSel({ i, s: ws, e: we }); setSelStart(null); setSelEnd(null);
+    }
+    setDragText("");
+    sel.removeAllRanges();
+    dragJustRef.current = true;
+    return true;
+  };
+  /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין */
+  const renderSentText = (txt, mk, pend) => {
+    const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
+    if (!mk && !pend) return txt;
+    const base = {};
+    if (mk) {
+      if (mk.b) base.fontWeight = 800;
+      if (mk.u) base.textDecoration = "underline";
+      if (mk.hl) base.background = HL_COLORS[mk.hl];
+    }
+    if (!w.length && !pend) return <span style={base}>{txt}</span>;
+    const pts = new Set([0, txt.length]);
+    const clamp = (n) => Math.max(0, Math.min(n, txt.length));
+    w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
+    if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
+    const arr = [...pts].sort((a, b) => a - b);
+    const nodes = [];
+    for (let k = 0; k < arr.length - 1; k++) {
+      const s = arr[k], e = arr[k + 1];
+      if (e <= s) continue;
+      const piece = txt.slice(s, e);
+      const r = w.find((r2) => clamp(r2.s) <= s && clamp(r2.e) >= e);
+      const isPend = pend && clamp(pend.s) <= s && clamp(pend.e) >= e;
+      const st = { ...base };
+      if (r) {
+        if (r.b) st.fontWeight = 800;
+        if (r.u) st.textDecoration = "underline";
+        if (r.hl) st.background = HL_COLORS[r.hl];
+      }
+      if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
+      nodes.push(<span key={k} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
+    }
+    return nodes;
+  };
+
   /* בקשה ג': סימון קטע בתצוגת הפרק (ערוץ 00) —
      לחיצה ראשונה בוחרת את משפט ההתחלה, שנייה את הסוף (סדר הפוך מתוקן אוטומטית),
      ולחיצה שלישית מתחילה סימון חדש. אותם מרקרים והערות של המגילה — אותו אחסון. */
   const onReadSentClick = (i) => {
+    if (dragJustRef.current) { dragJustRef.current = false; return; }
+    if (wordSel) setWordSel(null);
     if (selStart === null || selEnd !== null) {
       setSelStart(i);
       setSelEnd(null);
@@ -1337,11 +1445,26 @@ export default function LearningTV() {
     }
   };
   const applyMark = async (patch) => {
-    if (!rangeIdx) return;
+    if (!rangeIdx && !wordSel) return;
     const marks = { ...(book.marks || {}) };
+    if (wordSel) {
+      /* סימון ברמת מילה — נוגע רק בטווח שנגרר */
+      const cur = { ...(marks[wordSel.i] || {}) };
+      const w = applyWordPatch(Array.isArray(cur.w) ? cur.w : [], wordSel.s, wordSel.e, patch);
+      if (w.length) cur.w = w; else delete cur.w;
+      if (patch === null && !w.length) { delete cur.b; delete cur.u; delete cur.hl; }
+      if (Object.keys(cur).length) marks[wordSel.i] = cur; else delete marks[wordSel.i];
+      await persist({ ...book, marks });
+      setWordSel(null);
+      setDragText("");
+      return;
+    }
     for (let i = rangeIdx[0]; i <= rangeIdx[1]; i++) {
       if (patch === null) delete marks[i];
-      else marks[i] = { ...(marks[i] || {}), ...patch };
+      else {
+        const kept = marks[i] && marks[i].w ? { w: marks[i].w } : {};
+        marks[i] = { ...(marks[i] || {}), ...kept, ...patch };
+      }
     }
     await persist({ ...book, marks });
     setSelStart(null);
@@ -1352,8 +1475,8 @@ export default function LearningTV() {
   /* הערות שוליים חיות: הערה אישית על משפט, נשמרת עם הספר */
   const noteVal = (n) => (typeof n === "string" ? n : n?.t || "");
   const addNote = async () => {
-    if (!rangeIdx) return;
-    const i = rangeIdx[0];
+    if (!rangeIdx && !wordSel) return;
+    const i = wordSel ? wordSel.i : rangeIdx[0];
     const existing = noteVal(book.notes?.[i]);
     const txt = window.prompt("✏️ הערה על הקטע (השאר ריק למחיקה):", existing);
     if (txt === null) return;
@@ -1361,7 +1484,7 @@ export default function LearningTV() {
     if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
     else delete notes[i];
     await persist({ ...book, notes }, { k: "note", i });
-    setSelStart(null); setSelEnd(null); setDragText("");
+    setSelStart(null); setSelEnd(null); setDragText(""); setWordSel(null);
   };
   const editNote = async (i) => {
     const existing = noteVal(book.notes?.[i]);
@@ -1471,7 +1594,12 @@ export default function LearningTV() {
     };
     const a = idxOf(sel.anchorNode);
     const b = idxOf(sel.focusNode);
+    if (a !== null && b !== null && a === b) {
+      /* גרירה בתוך משפט אחד — סימון ברמת מילה */
+      if (captureWordSel(sel, document.getElementById("para-" + a), a)) return;
+    }
     if (a !== null && b !== null) {
+      setWordSel(null);
       setSelStart(Math.min(a, b));
       setSelEnd(Math.max(a, b));
       setDragText("");
@@ -1486,10 +1614,34 @@ export default function LearningTV() {
     }
   };
  
+  const onReadMouseUp = () => {
+    const sel = window.getSelection?.();
+    if (!sel || sel.isCollapsed) return;
+    const idxOf = (node) => {
+      let el = node && (node.nodeType === 3 ? node.parentElement : node);
+      el = el && el.closest ? el.closest("[data-si]") : null;
+      const n = el ? parseInt(el.getAttribute("data-si"), 10) : NaN;
+      return Number.isFinite(n) ? { i: n, el } : null;
+    };
+    const a = idxOf(sel.anchorNode);
+    const b = idxOf(sel.focusNode);
+    if (a && b && a.i === b.i) {
+      if (captureWordSel(sel, a.el, a.i)) return;
+    }
+    if (a && b) {
+      setWordSel(null);
+      setSelStart(Math.min(a.i, b.i));
+      setSelEnd(Math.max(a.i, b.i));
+      setDragText("");
+      sel.removeAllRanges();
+      dragJustRef.current = true;
+    }
+  };
   const clearSelection = () => {
     setSelStart(null);
     setSelEnd(null);
     setDragText("");
+    setWordSel(null);
     setFlexError(null);
     window.getSelection?.()?.removeAllRanges?.();
   };
@@ -1501,6 +1653,7 @@ export default function LearningTV() {
       : null;
   const selectedText =
     dragText ||
+    (wordSel ? (sentences[wordSel.i] || "").slice(wordSel.s, wordSel.e) : "") ||
     (rangeIdx ? sentences.slice(rangeIdx[0], rangeIdx[1] + 1).join(" ") : "");
  
   const generateFlex = async (id, qCount) => {
@@ -2032,15 +2185,6 @@ export default function LearningTV() {
                                 <span
                                   key={i}
                                   id={"para-" + i}
-                                  style={(() => {
-                                    const mk = book.marks?.[i];
-                                    if (!mk) return undefined;
-                                    return {
-                                      fontWeight: mk.b ? 800 : undefined,
-                                      textDecoration: mk.u ? "underline" : undefined,
-                                      background: mk.hl ? HL_COLORS[mk.hl] : undefined,
-                                    };
-                                  })()}
                                   className={
                                     "scroll-sent " +
                                     (inRange || isStart ? "in-range " : "") +
@@ -2053,7 +2197,7 @@ export default function LearningTV() {
                                   }
                                   onClick={() => onSentenceClick(i)}
                                 >
-                                  {s}
+                                  {renderSentText(s, book.marks?.[i], wordSel && wordSel.i === i ? wordSel : null)}
                                   {book.notes?.[i] && (
                                     <sup
                                       className="note-pin"
@@ -2128,11 +2272,13 @@ export default function LearningTV() {
                   <p className="flex-hint read-mark-hint">
                     {selStart !== null && selEnd === null
                       ? "⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע."
+                      : wordSel
+                      ? "✓ סומנו מילים — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
                       : rangeIdx
                       ? "✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
-                      : "קרא חופשי. לסימון קטע: לחץ על משפט ההתחלה ואז על משפט הסוף."}
+                      : "קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף."}
                   </p>
-                  {rangeIdx && (
+                  {(rangeIdx || wordSel) && (
                     <div className="mark-bar">
                       <span className="mark-title">✍️ שכבת הלומד:</span>
                       <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
@@ -2145,7 +2291,7 @@ export default function LearningTV() {
                       <button className="mark-btn" onClick={clearSelection}>✕ בטל סימון</button>
                     </div>
                   )}
-                  <div className="read-body read-sents">
+                  <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
                       const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
@@ -2160,7 +2306,7 @@ export default function LearningTV() {
                             return (
                               <span
                                 key={i}
-                                style={mk ? { fontWeight: mk.b ? 800 : undefined, textDecoration: mk.u ? "underline" : undefined, background: mk.hl ? HL_COLORS[mk.hl] : undefined } : undefined}
+                                data-si={i}
                                 className={
                                   "scroll-sent clickable " +
                                   (inRange || isStart ? "in-range " : "") +
@@ -2168,7 +2314,7 @@ export default function LearningTV() {
                                 }
                                 onClick={() => onReadSentClick(i)}
                               >
-                                {s}
+                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null)}
                                 {book.notes?.[i] && (
                                   <sup
                                     className="note-pin"
@@ -2339,7 +2485,7 @@ export default function LearningTV() {
             </div>
           )}
  
-          {selectedText && !flexResult && !flexLoading && selStart !== null && selEnd !== null && (
+          {selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
             <div className="mark-bar">
               <span className="mark-title">✍️ שכבת הלומד:</span>
               <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
