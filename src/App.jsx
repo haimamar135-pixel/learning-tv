@@ -607,16 +607,6 @@ function QuizView({ data, saved, onComplete }) {
   );
 }
  
-function ReadView({ text, title }) {
-  return (
-    <div className="read">
-      <h2 className="read-title">{title}</h2>
-      <div className="read-body">{text}</div>
-      <p className="read-hint">אחרי שקראת — בחר ערוץ למטה כדי לקבל סיכום, מבחן, כרטיסיות ועוד על מה שלמדת.</p>
-    </div>
-  );
-}
- 
 function CardsView({ data }) {
   const [flipped, setFlipped] = useState({});
   return (
@@ -1109,22 +1099,26 @@ export default function LearningTV() {
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
      גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
-  const { sentences, paraGroups } = useMemo(() => {
-    if (!book) return { sentences: [], paraGroups: [] };
-    const all = book.chapters.map((c) => c.text).join("\n\n");
-    const paras = all.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const { sentences, paraGroups, chapterRanges } = useMemo(() => {
+    if (!book) return { sentences: [], paraGroups: [], chapterRanges: [] };
     const sentences = [];
     const paraGroups = [];
-    for (const p of paras) {
-      const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
-      const start = sentences.length;
-      for (const s of parts) {
-        const t = s.trim();
-        if (t) sentences.push(t);
+    const chapterRanges = []; // בקשה ג': טווח המשפטים הגלובלי של כל פרק — [התחלה, סוף)
+    for (const c of book.chapters) {
+      const chStart = sentences.length;
+      const paras = (c.text || "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+      for (const p of paras) {
+        const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
+        const start = sentences.length;
+        for (const s of parts) {
+          const t = s.trim();
+          if (t) sentences.push(t);
+        }
+        if (sentences.length > start) paraGroups.push([start, sentences.length - start]);
       }
-      if (sentences.length > start) paraGroups.push([start, sentences.length - start]);
+      chapterRanges.push([chStart, sentences.length]);
     }
-    return { sentences, paraGroups };
+    return { sentences, paraGroups, chapterRanges };
   }, [book?.id, book?.chapters?.length]);
  
   useEffect(() => {
@@ -1297,6 +1291,7 @@ export default function LearningTV() {
     setChIdx(i);
     setChannel("read");
     setError(null);
+    clearSelection();
     window.speechSynthesis?.cancel();
     flick();
     setView("tv");
@@ -1328,6 +1323,19 @@ export default function LearningTV() {
   };
 
   const HL_COLORS = { y: "#fff3a0", g: "#d3f7c6", p: "#ffd6e8" };
+
+  /* בקשה ג': סימון קטע בתצוגת הפרק (ערוץ 00) —
+     לחיצה ראשונה בוחרת את משפט ההתחלה, שנייה את הסוף (סדר הפוך מתוקן אוטומטית),
+     ולחיצה שלישית מתחילה סימון חדש. אותם מרקרים והערות של המגילה — אותו אחסון. */
+  const onReadSentClick = (i) => {
+    if (selStart === null || selEnd !== null) {
+      setSelStart(i);
+      setSelEnd(null);
+      setDragText("");
+    } else {
+      setSelEnd(i);
+    }
+  };
   const applyMark = async (patch) => {
     if (!rangeIdx) return;
     const marks = { ...(book.marks || {}) };
@@ -1558,6 +1566,7 @@ export default function LearningTV() {
     if (loading || i === chIdx) return;
     flick();
     setQuizPick(null);
+    clearSelection();
     setChIdx(i);
     setError(null);
     window.speechSynthesis?.cancel();
@@ -2114,7 +2123,68 @@ export default function LearningTV() {
               )}
  
               {view === "tv" && channel === "read" && !loading && cur && (
-                <ReadView key={key(chIdx, "read")} text={cur.text} title={cur.title} />
+                <div className="read" key={key(chIdx, "read")}>
+                  <h2 className="read-title">{cur.title}</h2>
+                  <p className="flex-hint read-mark-hint">
+                    {selStart !== null && selEnd === null
+                      ? "⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע."
+                      : rangeIdx
+                      ? "✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
+                      : "קרא חופשי. לסימון קטע: לחץ על משפט ההתחלה ואז על משפט הסוף."}
+                  </p>
+                  {rangeIdx && (
+                    <div className="mark-bar">
+                      <span className="mark-title">✍️ שכבת הלומד:</span>
+                      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
+                      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
+                      <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>מרקר</button>
+                      <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
+                      <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
+                      <button className="mark-btn" onClick={addNote}>📝 הערה</button>
+                      <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
+                      <button className="mark-btn" onClick={clearSelection}>✕ בטל סימון</button>
+                    </div>
+                  )}
+                  <div className="read-body read-sents">
+                    {(() => {
+                      const [rs, re] = chapterRanges[chIdx] || [0, 0];
+                      const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
+                      if (!chParas.length) return cur.text; // ביטחון: אם אין משפטים — הטקסט כמו שהוא
+                      return chParas.map(([start, count], pi) => (
+                        <p className="scroll-para" key={pi}>
+                          {sentences.slice(start, start + count).map((s, j) => {
+                            const i = start + j;
+                            const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
+                            const isStart = selStart !== null && i === selStart && selEnd === null;
+                            const mk = book.marks?.[i];
+                            return (
+                              <span
+                                key={i}
+                                style={mk ? { fontWeight: mk.b ? 800 : undefined, textDecoration: mk.u ? "underline" : undefined, background: mk.hl ? HL_COLORS[mk.hl] : undefined } : undefined}
+                                className={
+                                  "scroll-sent clickable " +
+                                  (inRange || isStart ? "in-range " : "") +
+                                  (book.notes?.[i] ? "has-note " : "")
+                                }
+                                onClick={() => onReadSentClick(i)}
+                              >
+                                {s}
+                                {book.notes?.[i] && (
+                                  <sup
+                                    className="note-pin"
+                                    title={noteVal(book.notes[i])}
+                                    onClick={(e) => { e.stopPropagation(); editNote(i); }}
+                                  >[{noteNum(i)}]</sup>
+                                )}{" "}
+                              </span>
+                            );
+                          })}
+                        </p>
+                      ));
+                    })()}
+                  </div>
+                  <p className="read-hint">אחרי שקראת — בחר ערוץ למטה כדי לקבל סיכום, מבחן, כרטיסיות ועוד. הסימונים וההערות נשמרים ומופיעים גם במגילה.</p>
+                </div>
               )}
  
               {view === "tv" && channel === "tts" && !loading && cur && (
@@ -2663,6 +2733,9 @@ const css = `
  
 /* קריאה — טקסט הפרק */
 .read{display:flex;flex-direction:column;gap:16px}
+.read-sents{white-space:normal}
+.read-sents .scroll-para{padding:0;margin:0 0 14px}
+.read-mark-hint{margin:0}
 .read-title{font-size:1.25rem;font-weight:800;color:#232323;border-bottom:2px solid var(--amber);padding-bottom:10px}
 .read-body{line-height:2.05;font-size:1.08rem;white-space:pre-wrap;color:#232323}
 .read-hint{margin-top:8px;color:#8a8467;font-size:.9rem;line-height:1.6;border-top:1px dashed #d9d2bd;padding-top:14px}
