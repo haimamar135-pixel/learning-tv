@@ -53,13 +53,13 @@ const PROMPTS = {
  
 /* ─── קריאה ל-Claude דרך Netlify Function ───
    המפתח נשמר בצד השרת (משתנה סביבה ANTHROPIC_API_KEY) ולא נחשף לדפדפן. */
-async function askClaude(prompt, maxTokens, fast, img, imgType) {
+async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
   let res;
   try {
     res = await fetch("/.netlify/functions/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(img ? { prompt, maxTokens, fast, img, imgType } : { prompt, maxTokens, fast }),
+      body: JSON.stringify(img ? { prompt, maxTokens, fast, img, imgType, raw: rawMode } : { prompt, maxTokens, fast, raw: rawMode }),
     });
   } catch (e) {
     console.log("Network error:", e);
@@ -88,7 +88,9 @@ async function askClaude(prompt, maxTokens, fast, img, imgType) {
     .join("\n");
  
   if (!text.trim()) throw new Error(`התקבלה תשובה ריקה [${res.status}]: ${raw.slice(0, 160)}`);
- 
+
+  if (rawMode) return text.trim(); // מצב טקסט גולמי — בלי חילוץ JSON
+
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
@@ -380,12 +382,11 @@ const SCAN_MODES = {
   },
 };
 
-const SCAN_JSON = '\n\nהחזר JSON בלבד: {"text":"הטקסט המפוענח"} — בלי שום דבר נוסף.';
-const isTimeoutErr = (e) => /504|Timeout|timeout/.test(String(e?.message || e));
+const isRetryableScanErr = (e) => /504|Timeout|timeout|פגום|נחתכה|ריקה/.test(String(e?.message || e));
 
 async function scanPiece(spec, b64, note, mt) {
-  const data = await askClaude(spec.prompt + (note || "") + SCAN_JSON, mt, true, b64, "image/jpeg");
-  return String(data.text || "").trim();
+  const text = await askClaude(spec.prompt + (note || "") + "\n\nהחזר את הטקסט המפוענח בלבד.", mt, true, b64, "image/jpeg", true);
+  return String(text || "").trim();
 }
 
 async function smartScanImages(files, mode, onProgress) {
@@ -399,13 +400,13 @@ async function smartScanImages(files, mode, onProgress) {
       /* ניסיון ראשון: העמוד בשלמותו, מנוע מהיר */
       t = await scanPiece(spec, imgToJpegBase64(img), "", 2600);
     } catch (e1) {
-      if (!isTimeoutErr(e1)) throw e1;
+      if (!isRetryableScanErr(e1)) throw e1;
       /* עמוד צפוף — מפצלים לשני חצאים עם חפיפה קטנה (אנטי-timeout, כמו במבחנים) */
       onProgress?.(i + 1, files.length, " · עמוד צפוף — מפענח בחלקים");
       const top = await scanPiece(spec, imgToJpegBase64(img, 1400, [0, 0.54]),
-        "\nזהו החלק העליון של העמוד בלבד — פענח רק אותו, ועצור במשפט השלם האחרון שנראה במלואו.", 1800);
+        "\nזהו החלק העליון של העמוד בלבד — פענח רק אותו, ועצור במשפט השלם האחרון שנראה במלואו.", 2000);
       const bottom = await scanPiece(spec, imgToJpegBase64(img, 1400, [0.46, 1]),
-        "\nזהו החלק התחתון של העמוד בלבד — התחל מהמשפט השלם הראשון שנראה במלואו, ואל תחזור על שורות מהחלק העליון.", 1800);
+        "\nזהו החלק התחתון של העמוד בלבד — התחל מהמשפט השלם הראשון שנראה במלואו, ואל תחזור על שורות מהחלק העליון.", 2000);
       t = (top + "\n" + bottom).trim();
     }
     if (t) out += (out ? "\n\n" : "") + t;
