@@ -336,25 +336,30 @@ async function ocrImages(files, onProgress) {
  
 /* ── צלם דף חכם: הצילום נשלח למנוע ה-AI שמבין את מבנה הדף ──
    הצילום מוקטן במחשב של המשתמש לפני השליחה (חיסכון + פרטיות יחסית). */
-async function imageToJpegBase64(file, maxSide = 1600) {
+async function loadImageEl(file) {
   const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise((res, rej) => {
+    return await new Promise((res, rej) => {
       const im = new Image();
       im.onload = () => res(im);
       im.onerror = () => rej(new Error("לא ניתן לקרוא את הצילום (" + file.name + "). נסה JPG/PNG."));
       im.src = url;
     });
-    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
-    const cv = document.createElement("canvas");
-    cv.width = w; cv.height = h;
-    cv.getContext("2d").drawImage(img, 0, 0, w, h);
-    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
-    return dataUrl.split(",")[1];
   } finally {
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
+}
+/* crop: [y0,y1] כשברי גובה (0–1) — לפיצול עמוד לחצאים נגד timeout */
+function imgToJpegBase64(img, maxSide = 1400, crop) {
+  const [y0, y1] = crop || [0, 1];
+  const sy = Math.round(img.height * y0);
+  const sh = Math.round(img.height * (y1 - y0));
+  const scale = Math.min(1, maxSide / Math.max(img.width, sh));
+  const w = Math.round(img.width * scale), h = Math.round(sh * scale);
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(img, 0, sy, img.width, sh, 0, 0, w, h);
+  return cv.toDataURL("image/jpeg", 0.85).split(",")[1];
 }
 
 const SCAN_MODES = {
@@ -375,20 +380,34 @@ const SCAN_MODES = {
   },
 };
 
+const SCAN_JSON = '\n\nהחזר JSON בלבד: {"text":"הטקסט המפוענח"} — בלי שום דבר נוסף.';
+const isTimeoutErr = (e) => /504|Timeout|timeout/.test(String(e?.message || e));
+
+async function scanPiece(spec, b64, note, mt) {
+  const data = await askClaude(spec.prompt + (note || "") + SCAN_JSON, mt, true, b64, "image/jpeg");
+  return String(data.text || "").trim();
+}
+
 async function smartScanImages(files, mode, onProgress) {
   const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
   let out = "";
   for (let i = 0; i < files.length; i++) {
-    onProgress?.(i + 1, files.length);
-    const b64 = await imageToJpegBase64(files[i]);
-    const data = await askClaude(
-      spec.prompt + '\n\nהחזר JSON בלבד: {"text":"הטקסט המלא המפוענח"} — בלי שום דבר נוסף.',
-      4000,
-      false,
-      b64,
-      "image/jpeg"
-    );
-    const t = String(data.text || "").trim();
+    onProgress?.(i + 1, files.length, "");
+    const img = await loadImageEl(files[i]);
+    let t;
+    try {
+      /* ניסיון ראשון: העמוד בשלמותו, מנוע מהיר */
+      t = await scanPiece(spec, imgToJpegBase64(img), "", 2600);
+    } catch (e1) {
+      if (!isTimeoutErr(e1)) throw e1;
+      /* עמוד צפוף — מפצלים לשני חצאים עם חפיפה קטנה (אנטי-timeout, כמו במבחנים) */
+      onProgress?.(i + 1, files.length, " · עמוד צפוף — מפענח בחלקים");
+      const top = await scanPiece(spec, imgToJpegBase64(img, 1400, [0, 0.54]),
+        "\nזהו החלק העליון של העמוד בלבד — פענח רק אותו, ועצור במשפט השלם האחרון שנראה במלואו.", 1800);
+      const bottom = await scanPiece(spec, imgToJpegBase64(img, 1400, [0.46, 1]),
+        "\nזהו החלק התחתון של העמוד בלבד — התחל מהמשפט השלם הראשון שנראה במלואו, ואל תחזור על שורות מהחלק העליון.", 1800);
+      t = (top + "\n" + bottom).trim();
+    }
     if (t) out += (out ? "\n\n" : "") + t;
   }
   const clean = out.trim();
@@ -1334,8 +1353,8 @@ export default function LearningTV() {
     if (!files.length) return;
     setError(null);
     try {
-      const text = await smartScanImages(files, smartMode, (n, total) =>
-        setFileBusy(`📸 המנוע קורא ומארגן את הדף ${n}/${total}... (זה לוקח כחצי דקה לעמוד)`)
+      const text = await smartScanImages(files, smartMode, (n, total, extra) =>
+        setFileBusy(`📸 המנוע קורא ומארגן את הדף ${n}/${total}${extra || ""}... (עד דקה לעמוד)`)
       );
       const base = files[0].name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
