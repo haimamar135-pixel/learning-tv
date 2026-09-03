@@ -17,13 +17,14 @@ exports.handler = async (event) => {
     };
   }
 
-  let prompt, maxTokens, img, imgType;
+  let prompt, maxTokens, img, imgType, raw;
   try {
     const parsed = JSON.parse(event.body || "{}");
     prompt = parsed.prompt;
     maxTokens = parsed.maxTokens;
     img = parsed.img;         // שער התמונה: צילום דף כ-base64 (בלי קידומת data:)
     imgType = parsed.imgType; // image/jpeg | image/png | image/webp
+    raw = parsed.raw;         // מצב טקסט גולמי (לצלם דף חכם) — בלי עטיפת JSON
   } catch {
     return { statusCode: 400, body: JSON.stringify({ error: { message: "Bad request body" } }) };
   }
@@ -50,7 +51,9 @@ exports.handler = async (event) => {
       body: JSON.stringify({
         model,
         max_tokens: mt,
-        system: SYSTEM_PROMPT,
+        system: raw
+          ? "אתה מפענח דפי ספרים מצולמים. החזר אך ורק את הטקסט המבוקש עצמו — בלי הקדמות, בלי הסברים, בלי JSON, בלי backticks."
+          : SYSTEM_PROMPT,
         messages: [
           {
             role: "user",
