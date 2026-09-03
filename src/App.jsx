@@ -53,13 +53,13 @@ const PROMPTS = {
  
 /* ─── קריאה ל-Claude דרך Netlify Function ───
    המפתח נשמר בצד השרת (משתנה סביבה ANTHROPIC_API_KEY) ולא נחשף לדפדפן. */
-async function askClaude(prompt, maxTokens, fast) {
+async function askClaude(prompt, maxTokens, fast, img, imgType) {
   let res;
   try {
     res = await fetch("/.netlify/functions/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, maxTokens, fast }),
+      body: JSON.stringify(img ? { prompt, maxTokens, fast, img, imgType } : { prompt, maxTokens, fast }),
     });
   } catch (e) {
     console.log("Network error:", e);
@@ -334,6 +334,70 @@ async function ocrImages(files, onProgress) {
   return clean;
 }
  
+/* ── צלם דף חכם: הצילום נשלח למנוע ה-AI שמבין את מבנה הדף ──
+   הצילום מוקטן במחשב של המשתמש לפני השליחה (חיסכון + פרטיות יחסית). */
+async function imageToJpegBase64(file, maxSide = 1600) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error("לא ניתן לקרוא את הצילום (" + file.name + "). נסה JPG/PNG."));
+      im.src = url;
+    });
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+    const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    cv.getContext("2d").drawImage(img, 0, 0, w, h);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+    return dataUrl.split(",")[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+const SCAN_MODES = {
+  merged: {
+    label: "משולב — מקור ומתחתיו פירושו",
+    prompt:
+      "לפניך צילום עמוד מספר קודש (זוהר / תיקונים / דף מפורש). פענח את העמוד והרכב אותו מחדש כך: כל פסקת מקור (ארמית, לרוב עם אות סימון כמו א) ב) או קפח)) — ומיד אחריה הפירוש/התרגום העברי שלה מהעמוד (כגון תרגום, הסולם), בשורה שמתחילה ב'פירוש: '. שמור על סימוני הפסקאות המקוריים. דלג על כותרות עמוד, מספרי עמוד ומראי-מקומות שוליים (מסורת הזוהר, חילופי גרסאות) — אל תכלול אותם. תקן שברי מילים שנוצרו מהצילום לפי ההקשר, בלי להמציא תוכן שאינו בעמוד.",
+  },
+  layers: {
+    label: "שכבות נפרדות — מקור / פירוש",
+    prompt:
+      "לפניך צילום עמוד מספר קודש. חלץ את העמוד בשכבות נפרדות, מופרדות בשורה של === בדיוק: שכבה ראשונה — גוף המקור (הארמית) ברצף, לפי סדר הפסקאות. === שכבה שנייה — הפירוש/התרגום העברי במלואו. אם יש שכבת הערות (מסורת הזוהר וכד') — === ואחריה ההערות. שמור על סימוני הפסקאות. תקן שברי מילים לפי ההקשר בלבד.",
+  },
+  asis: {
+    label: "כפי שהוא — נאמן לדף",
+    prompt:
+      "לפניך צילום עמוד מספר קודש. תמלל את העמוד בנאמנות מלאה, בסדר הקריאה הנכון (ימין לשמאל, טור אחר טור, מקור לפני פירוש). אל תשמיט דבר מלבד כותרות עמוד רצות ומספרי עמוד. תקן רק שברי מילים ברורים שנוצרו מהצילום.",
+  },
+};
+
+async function smartScanImages(files, mode, onProgress) {
+  const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
+  let out = "";
+  for (let i = 0; i < files.length; i++) {
+    onProgress?.(i + 1, files.length);
+    const b64 = await imageToJpegBase64(files[i]);
+    const data = await askClaude(
+      spec.prompt + '\n\nהחזר JSON בלבד: {"text":"הטקסט המלא המפוענח"} — בלי שום דבר נוסף.',
+      4000,
+      false,
+      b64,
+      "image/jpeg"
+    );
+    const t = String(data.text || "").trim();
+    if (t) out += (out ? "\n\n" : "") + t;
+  }
+  const clean = out.trim();
+  if (clean.replace(/\s/g, "").length < 30) {
+    throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
+  }
+  return clean;
+}
+
 async function extractPdf(file) {
   await loadScript(PDFJS_SRC);
   const pdfjsLib = window.pdfjsLib;
@@ -763,6 +827,7 @@ export default function LearningTV() {
   const [wordSel, setWordSel] = useState(null);   // סימון ברמת מילה: {i, s, e} — משפט + טווח תווים
   const [transRes, setTransRes] = useState(null); // "גע ותרגם": {q,t,n?,err?,cached?}
   const [transLoading, setTransLoading] = useState(false);
+  const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
@@ -777,6 +842,7 @@ export default function LearningTV() {
   const inputRef = useRef(null);
   const fileRef = useRef(null);
   const photoRef = useRef(null);
+  const smartRef = useRef(null);
   const [fontScale, setFontScale] = useState(() => {
     try { const v = parseFloat(localStorage.getItem("lomedtv-fontscale")); return v >= 0.7 && v <= 1.8 ? v : 1; } catch { return 1; }
   });
@@ -1260,6 +1326,28 @@ export default function LearningTV() {
     }
   };
  
+  const onSmartPicked = async (e) => {
+    const files = Array.from(e.target.files || []).sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true })
+    );
+    if (smartRef.current) smartRef.current.value = "";
+    if (!files.length) return;
+    setError(null);
+    try {
+      const text = await smartScanImages(files, smartMode, (n, total) =>
+        setFileBusy(`📸 המנוע קורא ומארגן את הדף ${n}/${total}... (זה לוקח כחצי דקה לעמוד)`)
+      );
+      const base = files[0].name.replace(/\.[^.]+$/, "");
+      const givenTitle = titleRef.current?.value?.trim();
+      setFileBusy(null);
+      await buildBook(text, givenTitle || "דף חכם — " + base);
+    } catch (err) {
+      console.error("smart scan failed", err);
+      setError(err.message || "פענוח הדף נכשל.");
+      setFileBusy(null);
+    }
+  };
+
   const openBook = async (id) => {
     const b = await loadBook(id);
     if (!b) { setError("הספר לא נמצא באחסון."); return; }
@@ -2003,6 +2091,24 @@ export default function LearningTV() {
                     {fileBusy && <span className="busy-line">⏳ {fileBusy}</span>}
                   </div>
  
+                  <input
+                    id="smart-scan-input"
+                    ref={smartRef}
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+                    onChange={onSmartPicked}
+                  />
+                  <div className="scan-mode-row">
+                    <span className="scan-mode-title">📸 צלם דף חכם (AI · לדפי זוהר ודפים מפורשים) — תבנית:</span>
+                    <select className="scan-mode-select" value={smartMode} onChange={(e) => setSmartMode(e.target.value)}>
+                      {Object.entries(SCAN_MODES).map(([k, v]) => (
+                        <option key={k} value={k}>{v.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="or-divider"><span>או הדבק טקסט</span></div>
  
                   <textarea ref={inputRef} className="intake-text" placeholder="הדבק את הטקסט כאן..." />
@@ -2444,6 +2550,10 @@ export default function LearningTV() {
           <label htmlFor="photo-ocr-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
             <span className="key-label">צילומים OCR</span>
+          </label>
+          <label htmlFor="smart-scan-input" className="ch-key smart" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+            <span className="key-num">📸</span>
+            <span className="key-label">דף חכם AI</span>
           </label>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
@@ -2939,6 +3049,10 @@ const css = `
 .read-sents{white-space:normal}
 .read-sents .scroll-para{padding:0;margin:0 0 14px}
 .read-mark-hint{margin:0}
+.scan-mode-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f2ecff;border:1.5px solid #c9b8f2;border-radius:10px;padding:10px 14px;margin:10px 0;font-size:.98rem;color:#3a2a63}
+.scan-mode-title{font-weight:600}
+.scan-mode-select{font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #c9b8f2;background:#fff;color:#3a2a63}
+.ch-key.smart{background:linear-gradient(180deg,#7a5cc4,#5d3fa8);border-color:#8f74d6}
 .trans-btn{background:#eaf3ff;border-color:#9fc3ef}
 .trans-bubble{display:flex;align-items:center;gap:10px;background:#eaf3ff;border:1.5px solid #9fc3ef;
   border-radius:10px;padding:8px 12px;margin:8px 0;font-size:1.02rem;color:#1d3a5f;box-shadow:0 2px 6px rgba(30,60,110,.12)}
