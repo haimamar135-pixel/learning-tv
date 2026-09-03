@@ -17,16 +17,21 @@ exports.handler = async (event) => {
     };
   }
 
-  let prompt, maxTokens;
+  let prompt, maxTokens, img, imgType;
   try {
     const parsed = JSON.parse(event.body || "{}");
     prompt = parsed.prompt;
     maxTokens = parsed.maxTokens;
+    img = parsed.img;         // שער התמונה: צילום דף כ-base64 (בלי קידומת data:)
+    imgType = parsed.imgType; // image/jpeg | image/png | image/webp
   } catch {
     return { statusCode: 400, body: JSON.stringify({ error: { message: "Bad request body" } }) };
   }
   if (!prompt || typeof prompt !== "string" || prompt.length > 30000) {
     return { statusCode: 400, body: JSON.stringify({ error: { message: "Missing or invalid prompt" } }) };
+  }
+  if (img && (typeof img !== "string" || img.length > 5500000)) {
+    return { statusCode: 400, body: JSON.stringify({ error: { message: "תמונה גדולה מדי — יש להקטין לפני שליחה" } }) };
   }
   const mt = Math.min(4000, Math.max(500, parseInt(maxTokens, 10) || 2000));
   // מודל מהיר (Haiku) להפקות מובנות — פי 3-4 מהיר, נגד timeout
@@ -46,7 +51,17 @@ exports.handler = async (event) => {
         model,
         max_tokens: mt,
         system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          {
+            role: "user",
+            content: img
+              ? [
+                  { type: "image", source: { type: "base64", media_type: imgType || "image/jpeg", data: img } },
+                  { type: "text", text: prompt },
+                ]
+              : prompt,
+          },
+        ],
       }),
     });
     const body = await res.text();
