@@ -412,6 +412,131 @@ async function smartScanImages(files, mode, onProgress) {
   return clean;
 }
 
+/* ── שער הקול 🎬: קובץ אודיו/וידאו ← טקסט עברי (Whisper דרך transcribe.cjs) ──
+   הכול קורה בדפדפן: חילוץ פס הקול (גם מסרטון), הקטנה ל-16kHz מונו,
+   חיתוך לנתחים בנקודות שקט (לא באמצע מילה), ושליחה נתח-נתח לתמלול. */
+const TR_SR = 16000;      // קצב דגימה לתמלול
+const TR_CHUNK_SEC = 110; // אורך נתח בשניות (WAV ≈ 3.5MB — מתחת למגבלת נטליפיי)
+
+async function decodeMediaToMono(file) {
+  const buf = await file.arrayBuffer();
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new Ctx({ sampleRate: TR_SR });
+  let audio;
+  try {
+    audio = await ctx.decodeAudioData(buf);
+  } catch {
+    throw new Error("לא ניתן לחלץ שמע מהקובץ (" + file.name + "). נסה MP3 / M4A / WAV, או סרטון MP4/MOV.");
+  } finally {
+    try { ctx.close(); } catch {}
+  }
+  if (audio.duration > 9000) {
+    throw new Error("הקובץ ארוך מ-2.5 שעות. פצל אותו לחלקים קצרים יותר (או תמלל מהמחשב).");
+  }
+  const n = audio.length, chs = audio.numberOfChannels;
+  const mono = new Float32Array(n);
+  for (let c = 0; c < chs; c++) {
+    const d = audio.getChannelData(c);
+    for (let i = 0; i < n; i++) mono[i] += d[i] / chs;
+  }
+  return { mono, sr: audio.sampleRate, dur: audio.duration };
+}
+
+function resampleLinear(data, from, to) {
+  if (from === to) return data;
+  const outLen = Math.round((data.length * to) / from);
+  const out = new Float32Array(outLen);
+  const ratio = from / to;
+  for (let i = 0; i < outLen; i++) {
+    const pos = i * ratio, i0 = Math.floor(pos), i1 = Math.min(i0 + 1, data.length - 1), f = pos - i0;
+    out[i] = data[i0] * (1 - f) + data[i1] * f;
+  }
+  return out;
+}
+
+/* מחפש את נקודת השקט הקרובה לגבול הנתח — כדי לא לחתוך מילה באמצע */
+function quietCut(mono, target, sr) {
+  const win = Math.round(sr * 0.2), span = Math.round(sr * 2.5);
+  const from = Math.max(0, target - span), to = Math.min(mono.length - win, target + span);
+  let best = target, bestE = Infinity;
+  for (let s = from; s <= to; s += win) {
+    let e = 0;
+    for (let i = s; i < s + win; i++) e += mono[i] * mono[i];
+    if (e < bestE) { bestE = e; best = s + (win >> 1); }
+  }
+  return best;
+}
+
+function floatToWav16(samples, sr) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const ws = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  ws(0, "RIFF"); v.setUint32(4, 36 + samples.length * 2, true); ws(8, "WAVE");
+  ws(12, "fmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  ws(36, "data"); v.setUint32(40, samples.length * 2, true);
+  let o = 44;
+  for (let i = 0; i < samples.length; i++, o += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+
+function bufToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = "";
+  const STEP = 0x8000;
+  for (let i = 0; i < bytes.length; i += STEP) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + STEP));
+  }
+  return btoa(bin);
+}
+
+async function transcribeChunk(b64) {
+  const res = await fetch("/.netlify/functions/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ audio: b64, lang: "he" }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error?.message || "שגיאת תמלול (" + res.status + ")");
+  return String(data.text || "").trim();
+}
+
+async function transcribeMedia(file, onProgress) {
+  onProgress?.(0, 0, "🎬 מחלץ את פס הקול מהקובץ...");
+  const { mono, sr } = await decodeMediaToMono(file);
+  const data = sr === TR_SR ? mono : resampleLinear(mono, sr, TR_SR);
+  const chunkLen = TR_CHUNK_SEC * TR_SR;
+  const cuts = [0];
+  while (cuts[cuts.length - 1] + chunkLen < data.length) {
+    cuts.push(quietCut(data, cuts[cuts.length - 1] + chunkLen, TR_SR));
+  }
+  cuts.push(data.length);
+  const total = cuts.length - 1;
+  let out = "";
+  for (let i = 0; i < total; i++) {
+    onProgress?.(i + 1, total);
+    const piece = data.subarray(cuts[i], cuts[i + 1]);
+    if (piece.length < TR_SR) continue; // נתח קצר משנייה — מדלגים
+    const b64 = bufToBase64(floatToWav16(piece, TR_SR));
+    let text;
+    try {
+      text = await transcribeChunk(b64);
+    } catch (e) {
+      onProgress?.(i + 1, total, " · ניסיון שני");
+      text = await transcribeChunk(b64); // ניסיון חוזר אחד — ואם נכשל, השגיאה עולה למעלה
+    }
+    if (text) out += (out ? "\n\n" : "") + text;
+  }
+  const clean = out.trim();
+  if (clean.replace(/\s/g, "").length < 30) {
+    throw new Error("לא זוהה דיבור בקובץ. ודא שיש בו שמע ברור.");
+  }
+  return clean;
+}
+
 async function extractPdf(file) {
   await loadScript(PDFJS_SRC);
   const pdfjsLib = window.pdfjsLib;
@@ -857,6 +982,7 @@ export default function LearningTV() {
   const fileRef = useRef(null);
   const photoRef = useRef(null);
   const smartRef = useRef(null);
+  const mediaRef = useRef(null); // שער הקול — קובץ אודיו/וידאו לתמלול
   const [fontScale, setFontScale] = useState(() => {
     try { const v = parseFloat(localStorage.getItem("lomedtv-fontscale")); return v >= 0.7 && v <= 1.8 ? v : 1; } catch { return 1; }
   });
@@ -1358,6 +1484,30 @@ export default function LearningTV() {
     } catch (err) {
       console.error("smart scan failed", err);
       setError(err.message || "פענוח הדף נכשל.");
+      setFileBusy(null);
+    }
+  };
+
+  const onMediaPicked = async (e) => {
+    const file = (e.target.files || [])[0];
+    if (mediaRef.current) mediaRef.current.value = "";
+    if (!file) return;
+    setError(null);
+    try {
+      const text = await transcribeMedia(file, (n, total, extra) =>
+        setFileBusy(
+          n === 0
+            ? extra
+            : `🎬 מתמלל חלק ${n}/${total}${extra || ""}... (עברית · Whisper)`
+        )
+      );
+      const base = file.name.replace(/\.[^.]+$/, "");
+      const givenTitle = titleRef.current?.value?.trim();
+      setFileBusy(null);
+      await buildBook(text, givenTitle || "תמלול — " + base);
+    } catch (err) {
+      console.error("transcribe failed", err);
+      setError(err.message || "התמלול נכשל.");
       setFileBusy(null);
     }
   };
@@ -2100,11 +2250,19 @@ export default function LearningTV() {
                   />
                   <div className="upload-box">
                     <span className="upload-hint">
-                      ⬇ הכפתורים למטה: שדר טקסט, העלה קבצים (אפשר כמה בבת אחת — כל קובץ נהיה ספר), או צילומים לפענוח OCR עברי. הכל נקרא במחשב שלך בלבד.
+                      ⬇ הכפתורים למטה: שדר טקסט, העלה קבצים (אפשר כמה בבת אחת — כל קובץ נהיה ספר), צילומים לפענוח OCR עברי, או 🎬 שיעור מוקלט — קובץ אודיו או וידאו שמתומלל לטקסט עברי והופך לספר.
                     </span>
                     {fileBusy && <span className="busy-line">⏳ {fileBusy}</span>}
                   </div>
  
+                  <input
+                    id="media-transcribe-input"
+                    ref={mediaRef}
+                    type="file"
+                    accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.mp4,.mov"
+                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+                    onChange={onMediaPicked}
+                  />
                   <input
                     id="smart-scan-input"
                     ref={smartRef}
@@ -2568,6 +2726,10 @@ export default function LearningTV() {
           <label htmlFor="smart-scan-input" className="ch-key smart" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📸</span>
             <span className="key-label">דף חכם AI</span>
+          </label>
+          <label htmlFor="media-transcribe-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+            <span className="key-num">🎬</span>
+            <span className="key-label">שיעור מוקלט</span>
           </label>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
@@ -3067,6 +3229,7 @@ const css = `
 .scan-mode-title{font-weight:600}
 .scan-mode-select{font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #c9b8f2;background:#fff;color:#3a2a63}
 .ch-key.smart{background:linear-gradient(180deg,#7a5cc4,#5d3fa8);border-color:#8f74d6}
+.ch-key.media{background:linear-gradient(180deg,#3f6fb5,#2a4f8f);border-color:#6f96d0}
 .trans-btn{background:#eaf3ff;border-color:#9fc3ef}
 .trans-bubble{display:flex;align-items:center;gap:10px;background:#eaf3ff;border:1.5px solid #9fc3ef;
   border-radius:10px;padding:8px 12px;margin:8px 0;font-size:1.02rem;color:#1d3a5f;box-shadow:0 2px 6px rgba(30,60,110,.12)}
