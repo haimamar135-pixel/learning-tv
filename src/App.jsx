@@ -426,7 +426,7 @@ async function decodeMediaToMono(file) {
   try {
     audio = await ctx.decodeAudioData(buf);
   } catch {
-    throw new Error("לא ניתן לחלץ שמע מהקובץ (" + file.name + "). נסה MP3 / M4A / WAV, או סרטון MP4/MOV.");
+    throw new Error("לא ניתן לחלץ שמע מ" + (file.name ? "הקובץ (" + file.name + ")" : "ההקלטה") + ". נסה MP3 / M4A / WAV, או סרטון MP4/MOV.");
   } finally {
     try { ctx.close(); } catch {}
   }
@@ -493,18 +493,18 @@ function bufToBase64(buf) {
   return btoa(bin);
 }
 
-async function transcribeChunk(b64) {
+async function transcribeChunk(b64, hint) {
   const res = await fetch("/.netlify/functions/transcribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ audio: b64, lang: "he" }),
+    body: JSON.stringify({ audio: b64, lang: "he", hint: hint || "" }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error?.message || "שגיאת תמלול (" + res.status + ")");
   return String(data.text || "").trim();
 }
 
-async function transcribeMedia(file, onProgress) {
+async function transcribeMedia(file, onProgress, hint) {
   onProgress?.(0, 0, "🎬 מחלץ את פס הקול מהקובץ...");
   const { mono, sr } = await decodeMediaToMono(file);
   const data = sr === TR_SR ? mono : resampleLinear(mono, sr, TR_SR);
@@ -523,10 +523,10 @@ async function transcribeMedia(file, onProgress) {
     const b64 = bufToBase64(floatToWav16(piece, TR_SR));
     let text;
     try {
-      text = await transcribeChunk(b64);
+      text = await transcribeChunk(b64, hint);
     } catch (e) {
       onProgress?.(i + 1, total, " · ניסיון שני");
-      text = await transcribeChunk(b64); // ניסיון חוזר אחד — ואם נכשל, השגיאה עולה למעלה
+      text = await transcribeChunk(b64, hint); // ניסיון חוזר אחד — ואם נכשל, השגיאה עולה למעלה
     }
     if (text) out += (out ? "\n\n" : "") + text;
   }
@@ -535,6 +535,33 @@ async function transcribeMedia(file, onProgress) {
     throw new Error("לא זוהה דיבור בקובץ. ודא שיש בו שמע ברור.");
   }
   return clean;
+}
+
+/* ליטוש חכם: תיקון שגיאות שמיעה בלבד — בלי לגעת בניסוח ובתוכן (עקרון העקיפה) */
+const POLISH_PROMPT =
+  "לפניך קטע מתמלול אוטומטי של הקלטה בעברית. תקן אך ורק: מילים שנכתבו לפי צליל דומה במקום המילה הנכונה בהקשר (למשל 'מיין' במקום 'מעין'), שגיאות כתיב, ופיסוק. אסור לשנות ניסוח, אסור להוסיף תוכן, אסור להשמיט משפטים, ואסור לסכם. שמור על חלוקת הפסקאות. החזר את הקטע המתוקן בלבד.\n\n";
+
+async function polishTranscript(text, onProgress) {
+  const paras = text.split(/\n\n+/);
+  const chunks = [];
+  let cur = "";
+  for (const p of paras) {
+    if (cur && cur.length + p.length > 3000) { chunks.push(cur); cur = p; }
+    else cur = cur ? cur + "\n\n" + p : p;
+  }
+  if (cur) chunks.push(cur);
+  let out = "";
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.(i + 1, chunks.length);
+    let t;
+    try {
+      t = await askClaude(POLISH_PROMPT + chunks[i], 1600, true, null, null, true);
+    } catch {
+      t = chunks[i]; // הליטוש נכשל בנתח הזה — משאירים את המקור, לא מפילים את הכול
+    }
+    out += (out ? "\n\n" : "") + String(t || chunks[i]).trim();
+  }
+  return out;
 }
 
 async function extractPdf(file) {
@@ -983,6 +1010,10 @@ export default function LearningTV() {
   const photoRef = useRef(null);
   const smartRef = useRef(null);
   const mediaRef = useRef(null); // שער הקול — קובץ אודיו/וידאו לתמלול
+  const cameraRef = useRef(null); // מצלמה חיה — צילום ישיר לצלם החכם
+  const recRef = useRef(null); // הקלטה חיה — MediaRecorder פעיל
+  const [recOn, setRecOn] = useState(false);
+  const [recSec, setRecSec] = useState(0);
   const [fontScale, setFontScale] = useState(() => {
     try { const v = parseFloat(localStorage.getItem("lomedtv-fontscale")); return v >= 0.7 && v <= 1.8 ? v : 1; } catch { return 1; }
   });
@@ -1470,7 +1501,7 @@ export default function LearningTV() {
     const files = Array.from(e.target.files || []).sort((a, b) =>
       a.name.localeCompare(b.name, undefined, { numeric: true })
     );
-    if (smartRef.current) smartRef.current.value = "";
+    e.target.value = ""; // ניקוי הקלט שממנו הגיעו הקבצים (העלאה או מצלמה)
     if (!files.length) return;
     setError(null);
     try {
@@ -1488,29 +1519,69 @@ export default function LearningTV() {
     }
   };
 
-  const onMediaPicked = async (e) => {
-    const file = (e.target.files || [])[0];
-    if (mediaRef.current) mediaRef.current.value = "";
-    if (!file) return;
-    setError(null);
+  /* זרימה משותפת לשער הקול: קובץ שנבחר או הקלטה חיה ← תמלול ← ליטוש (רשות) ← ספר */
+  const processMedia = async (blob, fallbackBase) => {
     try {
-      const text = await transcribeMedia(file, (n, total, extra) =>
-        setFileBusy(
-          n === 0
-            ? extra
-            : `🎬 מתמלל חלק ${n}/${total}${extra || ""}... (עברית · Whisper)`
-        )
-      );
-      const base = file.name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
+      const hint = givenTitle ? "תמלול בעברית. הנושא: " + givenTitle : "";
+      const text0 = await transcribeMedia(
+        blob,
+        (n, total, extra) =>
+          setFileBusy(
+            n === 0 ? extra : `🎬 מתמלל חלק ${n}/${total}${extra || ""}... (עברית · Whisper)`
+          ),
+        hint
+      );
+      let text = text0;
+      if (window.confirm("התמלול מוכן! להעביר אותו ליטוש חכם?\n(תיקון שגיאות שמיעה בלבד, בלי לשנות תוכן — מומלץ לשירים ולהקלטות רועשות)")) {
+        text = await polishTranscript(text0, (n, total) =>
+          setFileBusy(`✨ מלטש את התמלול ${n}/${total}...`)
+        );
+      }
       setFileBusy(null);
-      await buildBook(text, givenTitle || "תמלול — " + base);
+      await buildBook(text, givenTitle || "תמלול — " + fallbackBase);
     } catch (err) {
       console.error("transcribe failed", err);
       setError(err.message || "התמלול נכשל.");
       setFileBusy(null);
     }
   };
+
+  const onMediaPicked = async (e) => {
+    const file = (e.target.files || [])[0];
+    e.target.value = "";
+    if (!file) return;
+    setError(null);
+    await processMedia(file, file.name.replace(/\.[^.]+$/, ""));
+  };
+
+  /* 🎙 הקלטה חיה: מקליטים מהמיקרופון, ובסיום — אותו צינור תמלול בדיוק */
+  const startRec = async () => {
+    if (recOn || fileBusy) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      const chunks = [];
+      mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (recRef.current?.iv) clearInterval(recRef.current.iv);
+        recRef.current = null;
+        setRecOn(false);
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        if (blob.size < 4000) { setError("ההקלטה קצרה מדי — נסה שוב."); return; }
+        await processMedia(blob, "הקלטה חיה");
+      };
+      recRef.current = { mr, iv: setInterval(() => setRecSec((s) => s + 1), 1000) };
+      setRecSec(0);
+      setRecOn(true);
+      setError(null);
+      mr.start(1000);
+    } catch {
+      setError("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון בדפדפן ונסה שוב.");
+    }
+  };
+  const stopRec = () => { try { recRef.current?.mr?.stop(); } catch {} };
 
   const openBook = async (id) => {
     const b = await loadBook(id);
@@ -2264,6 +2335,15 @@ export default function LearningTV() {
                     onChange={onMediaPicked}
                   />
                   <input
+                    id="camera-scan-input"
+                    ref={cameraRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+                    onChange={onSmartPicked}
+                  />
+                  <input
                     id="smart-scan-input"
                     ref={smartRef}
                     type="file"
@@ -2279,6 +2359,25 @@ export default function LearningTV() {
                         <option key={k} value={k}>{v.label}</option>
                       ))}
                     </select>
+                    <label htmlFor="camera-scan-input" className="cam-btn" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+                      📷 צלם עכשיו
+                    </label>
+                  </div>
+
+                  <div className="scan-mode-row">
+                    {!recOn ? (
+                      <button className="rec-btn" onClick={startRec} disabled={!!fileBusy}>
+                        🎙 הקלט שיעור חי
+                      </button>
+                    ) : (
+                      <>
+                        <span className="rec-live">● מקליט… {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
+                        <button className="rec-btn stop" onClick={stopRec}>⏹ עצור וסיים</button>
+                      </>
+                    )}
+                    <span className="scan-mode-title" style={{ opacity: 0.75 }}>
+                      שיעור, הרצאה או הקראה — בסיום ההקלטה מתומללת והופכת לספר
+                    </span>
                   </div>
 
                   <div className="or-divider"><span>או הדבק טקסט</span></div>
@@ -3230,6 +3329,16 @@ const css = `
 .scan-mode-select{font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #c9b8f2;background:#fff;color:#3a2a63}
 .ch-key.smart{background:linear-gradient(180deg,#7a5cc4,#5d3fa8);border-color:#8f74d6}
 .ch-key.media{background:linear-gradient(180deg,#3f6fb5,#2a4f8f);border-color:#6f96d0}
+.cam-btn{background:#1e5c52;color:#fff;border:1.5px solid #2a7a6e;border-radius:9px;
+  padding:6px 12px;font-size:.92rem;cursor:pointer;white-space:nowrap;user-select:none}
+.cam-btn:hover{background:#2a7a6e}
+.rec-btn{background:linear-gradient(180deg,#3f6fb5,#2a4f8f);color:#fff;border:1.5px solid #6f96d0;
+  border-radius:9px;padding:6px 14px;font-size:.95rem;cursor:pointer;white-space:nowrap}
+.rec-btn:hover:not(:disabled){filter:brightness(1.12)}
+.rec-btn:disabled{opacity:.6;cursor:default}
+.rec-btn.stop{background:linear-gradient(180deg,#b54848,#8f2f2f);border-color:#d07a7a}
+.rec-live{color:#ff8a8a;font-weight:700;font-size:.98rem;white-space:nowrap;animation:recPulse 1.2s ease-in-out infinite}
+@keyframes recPulse{0%,100%{opacity:1}50%{opacity:.45}}
 .trans-btn{background:#eaf3ff;border-color:#9fc3ef}
 .trans-bubble{display:flex;align-items:center;gap:10px;background:#eaf3ff;border:1.5px solid #9fc3ef;
   border-radius:10px;padding:8px 12px;margin:8px 0;font-size:1.02rem;color:#1d3a5f;box-shadow:0 2px 6px rgba(30,60,110,.12)}
