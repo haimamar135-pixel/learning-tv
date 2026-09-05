@@ -2327,23 +2327,6 @@ export default function LearningTV() {
                   </div>
  
                   <input
-                    id="media-transcribe-input"
-                    ref={mediaRef}
-                    type="file"
-                    accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.mp4,.mov"
-                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
-                    onChange={onMediaPicked}
-                  />
-                  <input
-                    id="camera-scan-input"
-                    ref={cameraRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
-                    onChange={onSmartPicked}
-                  />
-                  <input
                     id="smart-scan-input"
                     ref={smartRef}
                     type="file"
@@ -2394,6 +2377,9 @@ export default function LearningTV() {
               {view === "library" && (
                 <div className="library">
                   <p className="intake-lead">הספרים שלך. כל ספר שומר את הפרקים, התוצרים והציונים שלו.</p>
+                  {fileBusy && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px" }}>⏳ {fileBusy}</div>}
+                  {!fileBusy && recOn && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px", color: "#ff8a8a" }}>● מקליט… לסיום לחץ ⏹ למטה</div>}
+                  {error && <div className="err">{error}</div>}
                   {index.map((b) => (
                     <div className="book-row" key={b.id}>
                       <button className="book-main" onClick={() => openBook(b.id)}>
@@ -2799,12 +2785,50 @@ export default function LearningTV() {
       </div>
  
       {/* לוח מקשים — משתנה לפי ההקשר */}
+      {/* ── שערי המציאות: קלטים גלובליים — המצלמה והמיקרופון זמינים מכל מסך ── */}
+      <input
+        id="media-transcribe-input"
+        ref={mediaRef}
+        type="file"
+        accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.mp4,.mov"
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+        onChange={onMediaPicked}
+      />
+      <input
+        id="camera-scan-input"
+        ref={cameraRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+        onChange={onSmartPicked}
+      />
+
       {view === "library" && (
         <div className="deck">
-          <button className="ch-key gold" onClick={() => { setError(null); setView("intake"); }}>
+          <button className="ch-key gold" onClick={() => { setError(null); setView("intake"); }} disabled={!!fileBusy}>
             <span className="key-num">＋</span>
             <span className="key-label">ספר חדש</span>
           </button>
+          <label htmlFor="camera-scan-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+            <span className="key-num">📷</span>
+            <span className="key-label">צלם דף</span>
+          </label>
+          {!recOn ? (
+            <button className="ch-key media" onClick={startRec} disabled={!!fileBusy}>
+              <span className="key-num">🎙</span>
+              <span className="key-label">הקלט שיעור</span>
+            </button>
+          ) : (
+            <button className="ch-key rec-on" onClick={stopRec}>
+              <span className="key-num">⏹</span>
+              <span className="key-label">עצור {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
+            </button>
+          )}
+          <label htmlFor="media-transcribe-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+            <span className="key-num">🎬</span>
+            <span className="key-label">אודיו/וידאו</span>
+          </label>
         </div>
       )}
  
@@ -3329,6 +3353,7 @@ const css = `
 .scan-mode-select{font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #c9b8f2;background:#fff;color:#3a2a63}
 .ch-key.smart{background:linear-gradient(180deg,#7a5cc4,#5d3fa8);border-color:#8f74d6}
 .ch-key.media{background:linear-gradient(180deg,#3f6fb5,#2a4f8f);border-color:#6f96d0}
+.ch-key.rec-on{background:linear-gradient(180deg,#b54848,#8f2f2f);border-color:#d07a7a;animation:recPulse 1.2s ease-in-out infinite}
 .cam-btn{background:#1e5c52;color:#fff;border:1.5px solid #2a7a6e;border-radius:9px;
   padding:6px 12px;font-size:.92rem;cursor:pointer;white-space:nowrap;user-select:none}
 .cam-btn:hover{background:#2a7a6e}
