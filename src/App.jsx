@@ -2358,6 +2358,9 @@ export default function LearningTV() {
                         <button className="rec-btn stop" onClick={stopRec}>⏹ עצור וסיים</button>
                       </>
                     )}
+                    <label htmlFor="video-capture-input" className="rec-btn" style={{ pointerEvents: fileBusy || recOn ? "none" : "auto", opacity: fileBusy || recOn ? 0.6 : 1, userSelect: "none" }}>
+                      🎥 צלם וידאו
+                    </label>
                     <span className="scan-mode-title" style={{ opacity: 0.75 }}>
                       שיעור, הרצאה או הקראה — בסיום ההקלטה מתומללת והופכת לספר
                     </span>
@@ -2803,6 +2806,14 @@ export default function LearningTV() {
         style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
         onChange={onSmartPicked}
       />
+      <input
+        id="video-capture-input"
+        type="file"
+        accept="video/*"
+        capture="environment"
+        style={{ position: "absolute", width: 1, height: 1, opacity: 0, overflow: "hidden", clip: "rect(0 0 0 0)" }}
+        onChange={onMediaPicked}
+      />
 
       {view === "library" && (
         <div className="deck">
@@ -2813,6 +2824,10 @@ export default function LearningTV() {
           <label htmlFor="camera-scan-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
             <span className="key-label">צלם דף</span>
+          </label>
+          <label htmlFor="video-capture-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+            <span className="key-num">🎥</span>
+            <span className="key-label">צלם וידאו</span>
           </label>
           {!recOn ? (
             <button className="ch-key media" onClick={startRec} disabled={!!fileBusy}>
