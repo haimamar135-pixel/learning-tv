@@ -418,17 +418,90 @@ async function smartScanImages(files, mode, onProgress) {
 const TR_SR = 16000;      // קצב דגימה לתמלול
 const TR_CHUNK_SEC = 110; // אורך נתח בשניות (WAV ≈ 3.5MB — מתחת למגבלת נטליפיי)
 
-async function decodeMediaToMono(file) {
+/* מסלול ב' לחילוץ שמע: כשהפענוח הישיר נכשל (MOV/HEVC מהאייפון), מנגנים את
+   הסרטון בשקט דרך נגן נסתר ולוכדים את פס הקול בזמן אמת. אורך החילוץ = אורך הסרטון. */
+async function decodeViaElement(file, onProgress) {
+  const url = URL.createObjectURL(file);
+  const el = document.createElement("video");
+  el.src = url; el.playsInline = true; el.setAttribute("playsinline", ""); el.preload = "auto";
+  el.style.cssText = "position:fixed;left:-20px;top:-20px;width:2px;height:2px;opacity:0;pointer-events:none;";
+  document.body.appendChild(el);
+  let wake = null;
+  try { wake = await navigator.wakeLock?.request?.("screen"); } catch {}
+  const cleanup = () => {
+    try { el.pause(); } catch {}
+    el.remove(); URL.revokeObjectURL(url);
+    try { wake?.release?.(); } catch {}
+  };
+  try {
+    await new Promise((res, rej) => {
+      el.onloadedmetadata = () => res();
+      el.onerror = () => rej(new Error("no-play"));
+      setTimeout(() => rej(new Error("no-play")), 15000);
+    });
+    const dur = el.duration;
+    if (!isFinite(dur) || dur <= 0) throw new Error("no-play");
+    if (dur > 9000) throw new Error("הקובץ ארוך מ-2.5 שעות. פצל אותו לחלקים קצרים יותר (או תמלל מהמחשב).");
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const srLive = ctx.sampleRate;
+    try { await ctx.resume(); } catch {}
+    const src = ctx.createMediaElementSource(el);
+    const proc = ctx.createScriptProcessor(4096, 2, 1);
+    const silent = ctx.createGain(); silent.gain.value = 0;
+    src.connect(proc); proc.connect(silent); silent.connect(ctx.destination);
+    const parts = [];
+    proc.onaudioprocess = (ev) => {
+      const ib = ev.inputBuffer, n = ib.length, chs = ib.numberOfChannels || 1;
+      const m = new Float32Array(n);
+      for (let c = 0; c < chs; c++) { const d = ib.getChannelData(c); for (let i = 0; i < n; i++) m[i] += d[i] / chs; }
+      parts.push(m);
+    };
+    const done = new Promise((res, rej) => {
+      el.onended = () => res();
+      el.onerror = () => rej(new Error("no-play"));
+    });
+    try { await el.play(); } catch { throw new Error("play-blocked"); }
+    const mins = Math.max(1, Math.round(dur / 60));
+    const iv = setInterval(() => {
+      const pct = Math.min(99, Math.round((el.currentTime / dur) * 100));
+      onProgress?.(0, 0, "🎬 מחלץ שמע מהסרטון בזמן אמת… " + pct + "% (כ-" + mins + " דק' — השאר את המסך דולק)");
+    }, 1000);
+    try { await done; } finally { clearInterval(iv); }
+    try { proc.disconnect(); src.disconnect(); silent.disconnect(); } catch {}
+    try { ctx.close(); } catch {}
+    let total = 0; for (const p of parts) total += p.length;
+    const mono = new Float32Array(total);
+    let off = 0; for (const p of parts) { mono.set(p, off); off += p.length; }
+    if (total < srLive) throw new Error("no-play");
+    return { mono, sr: srLive, dur };
+  } finally { cleanup(); }
+}
+
+async function decodeMediaToMono(file, onProgress) {
   const buf = await file.arrayBuffer();
   const Ctx = window.AudioContext || window.webkitAudioContext;
   const ctx = new Ctx({ sampleRate: TR_SR });
-  let audio;
+  let audio = null;
   try {
     audio = await ctx.decodeAudioData(buf);
   } catch {
-    throw new Error("לא ניתן לחלץ שמע מ" + (file.name ? "הקובץ (" + file.name + ")" : "ההקלטה") + ". נסה MP3 / M4A / WAV, או סרטון MP4/MOV.");
+    audio = null; // מסלול ב' למטה
   } finally {
     try { ctx.close(); } catch {}
+  }
+  if (!audio) {
+    try {
+      return await decodeViaElement(file, onProgress);
+    } catch (e) {
+      if (e && e.message === "play-blocked") {
+        throw new Error("הדפדפן חסם את חילוץ השמע (הגנת אוטומטיות). נסה שוב מיד — הפעם ההרשאה תינתן.");
+      }
+      if (e && e.message === "no-play") {
+        throw new Error("לא ניתן לחלץ שמע מ" + (file.name ? "הקובץ (" + file.name + ")" : "ההקלטה") + ". נסה MP3 / M4A / WAV, או סרטון MP4/MOV.");
+      }
+      throw e;
+    }
   }
   if (audio.duration > 9000) {
     throw new Error("הקובץ ארוך מ-2.5 שעות. פצל אותו לחלקים קצרים יותר (או תמלל מהמחשב).");
@@ -506,7 +579,7 @@ async function transcribeChunk(b64, hint) {
 
 async function transcribeMedia(file, onProgress, hint) {
   onProgress?.(0, 0, "🎬 מחלץ את פס הקול מהקובץ...");
-  const { mono, sr } = await decodeMediaToMono(file);
+  const { mono, sr } = await decodeMediaToMono(file, onProgress);
   const data = sr === TR_SR ? mono : resampleLinear(mono, sr, TR_SR);
   const chunkLen = TR_CHUNK_SEC * TR_SR;
   const cuts = [0];
