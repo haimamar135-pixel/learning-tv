@@ -17,11 +17,12 @@ exports.handler = async (event) => {
     };
   }
 
-  let audio, lang;
+  let audio, lang, hint;
   try {
     const parsed = JSON.parse(event.body || "{}");
     audio = parsed.audio; // נתח WAV כ-base64 (בלי קידומת data:)
     lang = parsed.lang;   // "he" כברירת מחדל
+    hint = parsed.hint;   // רמז הקשר (שם הספר/נושא) — מטה את התמלול לכתיב הנכון
   } catch {
     return { statusCode: 400, body: JSON.stringify({ error: { message: "Bad request body" } }) };
   }
@@ -37,6 +38,9 @@ exports.handler = async (event) => {
     form.append("language", typeof lang === "string" && lang.length <= 5 ? lang : "he");
     form.append("temperature", "0");
     form.append("response_format", "json");
+    if (hint && typeof hint === "string" && hint.trim() && hint.length <= 400) {
+      form.append("prompt", hint.trim());
+    }
 
     const res = await fetch(GROQ_URL, {
       method: "POST",
