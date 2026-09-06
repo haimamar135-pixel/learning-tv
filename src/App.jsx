@@ -1,5 +1,6 @@
    import { useState, useEffect, useRef, useMemo } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { App as CapApp } from "@capacitor/app";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
    המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
@@ -1383,7 +1384,37 @@ export default function LearningTV() {
   useEffect(() => {
     supa.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
     const { data: sub } = supa.auth.onAuthStateChange((_ev, session) => setCloudUser(session?.user || null));
-    return () => { try { sub.subscription.unsubscribe(); } catch {} };
+    /* מובייל: הקישור מהמייל מפנה ל-lomedtv://auth#access_token=... —
+       iOS פותח את האפליקציה עם הכתובת, ואנחנו מכניסים את הסשן. */
+    let listener = null;
+    if (IS_NATIVE) {
+      CapApp.addListener("appUrlOpen", async ({ url }) => {
+        try {
+          if (!url || !url.startsWith("lomedtv://")) return;
+          const hash = url.includes("#") ? url.slice(url.indexOf("#") + 1) : "";
+          const q = url.includes("?") ? url.slice(url.indexOf("?") + 1).split("#")[0] : "";
+          const params = new URLSearchParams(hash || q);
+          const access_token = params.get("access_token");
+          const refresh_token = params.get("refresh_token");
+          const code = params.get("code");
+          if (access_token && refresh_token) {
+            const { error } = await supa.auth.setSession({ access_token, refresh_token });
+            setCloudMsg(error ? "שגיאת כניסה: " + error.message : "✅ מחובר!");
+          } else if (code) {
+            const { error } = await supa.auth.exchangeCodeForSession(code);
+            setCloudMsg(error ? "שגיאת כניסה: " + error.message : "✅ מחובר!");
+          } else if (params.get("error_description")) {
+            setCloudMsg("שגיאת כניסה: " + params.get("error_description"));
+          }
+        } catch (e) {
+          console.error("appUrlOpen failed", e);
+        }
+      }).then((h) => { listener = h; });
+    }
+    return () => {
+      try { sub.subscription.unsubscribe(); } catch {}
+      try { listener && listener.remove(); } catch {}
+    };
   }, []);
   async function sendMagicLink() {
     const email = cloudEmail.trim();
@@ -1391,13 +1422,13 @@ export default function LearningTV() {
     setCloudMsg("שולח קישור...");
     const { error } = await supa.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: IS_NATIVE ? "lomedtv://auth" : window.location.origin },
     });
     if (error) { setCloudMsg("שגיאה: " + error.message); return; }
     setCloudSent(true);
     setCloudMsg(IS_NATIVE
-      ? "✅ נשלח! פתח את המייל והעתק לכאן את קוד הכניסה (6 ספרות)."
-      : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר. (או הזן כאן את הקוד מהמייל)");
+      ? "✅ נשלח! פתח את המייל בטלפון ולחץ על הקישור — האפליקציה תיפתח מחוברת. (אם יש במייל קוד — אפשר גם להזין אותו כאן)"
+      : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר.");
   }
   /* כניסה עם קוד מהמייל — הדרך במובייל, שם הקישור נפתח בדפדפן ולא באפליקציה.
      דורש שתבנית המייל ב-Supabase תכלול את {{ .Token }}. */
@@ -2647,7 +2678,7 @@ export default function LearningTV() {
                     </>
                   ) : (
                     <>
-                      <p>{IS_NATIVE ? "כניסה בלי סיסמה: כתוב את המייל שלך, נשלח אליו קוד כניסה." : "כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה."}</p>
+                      <p>כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה.</p>
                       <input
                         className="cloud-input"
                         type="email"
@@ -2658,10 +2689,10 @@ export default function LearningTV() {
                         onKeyDown={(e) => { if (e.key === "Enter") sendMagicLink(); }}
                       />
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={sendMagicLink}>{IS_NATIVE ? "📨 שלח לי קוד כניסה" : "📨 שלח לי קישור כניסה"}</button>
+                        <button className="cloud-btn" onClick={sendMagicLink}>📨 שלח לי קישור כניסה</button>
                         <button className="cloud-btn ghost" onClick={() => setShowCloud(false)}>המשך בלי חשבון</button>
                       </div>
-                      {(cloudSent || IS_NATIVE) && (
+                      {cloudSent && (
                         <>
                           <input
                             className="cloud-input"
