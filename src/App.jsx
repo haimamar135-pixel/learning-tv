@@ -13,6 +13,138 @@ const supa = createClient(SUPA_URL, SUPA_KEY);
    נפתח בלשונית חדשה; לא נוגע בספרים של הלומד. */
 const SHELF_URL = "https://aquamarine-muffin-1c019d.netlify.app";
 
+/* ─── הגשר: מהארון אל הלימוד ───
+   הארון הוא אתר נפרד בלי כותרות CORS, לכן הנתונים נקראים דרך /shelf-data —
+   proxy של נטליפיי (netlify.toml) שמגיש את data/ של הארון מאותו מקור.
+   בפיתוח מקומי (vite) אין proxy — יש נפילה לכתובת הישירה. */
+const SHELF_DATA = "/shelf-data";
+/* גבול לייבוא אחד. הספרים נשמרים ב-localStorage (כ-5MB לכל הספרייה),
+   לכן ספר ענק (הזוהר, הסולם, אור החמה) נכנס שער/חלק — לא בבת אחת. */
+const SHELF_IMPORT_MAX = 250000;
+
+async function shelfFetch(path) {
+  try {
+    const r = await fetch(SHELF_DATA + path, { cache: "force-cache" });
+    if (r.ok) return await r.json();
+    throw new Error("proxy " + r.status);
+  } catch (e1) {
+    try {
+      const r = await fetch(SHELF_URL + "/data" + path);
+      if (!r.ok) throw new Error(String(r.status));
+      return await r.json();
+    } catch (e2) {
+      console.error("shelfFetch failed", path, e1, e2);
+      throw new Error("הארון לא זמין כרגע — בדוק את החיבור ונסה שוב");
+    }
+  }
+}
+
+/* מספר → אותיות עבריות (1→א, 15→טו, 30→ל) — לתוויות פרקים */
+function hebNum(n) {
+  n = Number(n);
+  if (!Number.isInteger(n) || n < 1 || n > 999) return String(n);
+  const ones = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"];
+  const tens = ["", "י", "כ", "ל", "מ", "נ", "ס", "ע", "פ", "צ"];
+  const hund = ["", "ק", "ר", "ש", "ת"];
+  let s = "", h = Math.floor(n / 100), r = n % 100;
+  while (h > 4) { s += "ת"; h -= 4; }
+  s += hund[h];
+  if (r === 15) s += "טו"; else if (r === 16) s += "טז";
+  else s += tens[Math.floor(r / 10)] + ones[r % 10];
+  return s;
+}
+function shelfComps(ref) {
+  return String(ref || "").split(":").map((c) => c.trim()).filter(Boolean);
+}
+/* מפתח פרק = ההפניה בלי הרכיב האחרון (Bereshit:12:3 → Bereshit:12) */
+function shelfChapterKey(ref) {
+  const c = shelfComps(ref);
+  return c.length > 1 ? c.slice(0, -1).join(":") : c[0] || "";
+}
+/* שער = הרכיב הראשון שאינו ריק (Bereshit) */
+function shelfSectionKey(ref) {
+  return shelfComps(ref)[0] || "";
+}
+function shelfLabel(key) {
+  const c = shelfComps(key);
+  if (!c.length) return "";
+  const parts = c.map((x) => (/^\d+$/.test(x) ? hebNum(x) : x));
+  if (c.length === 1 && /^\d+$/.test(c[0])) return "פרק " + parts[0];
+  return parts.join(" · ");
+}
+function fmtChars(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + " מיליון תווים";
+  if (n >= 1e3) return Math.round(n / 1e3) + " אלף תווים";
+  return n + " תווים";
+}
+/* שערים רצופים בספר: [{key,label,from,to,chars}] */
+function shelfSections(segs) {
+  const out = [];
+  for (let i = 0; i < segs.length; i++) {
+    const k = shelfSectionKey(segs[i].ref);
+    const last = out[out.length - 1];
+    if (last && last.key === k) { last.to = i + 1; last.chars += segs[i].t.length; }
+    else out.push({ key: k, label: shelfLabel(k) || "ללא שם", from: i, to: i + 1, chars: segs[i].t.length });
+  }
+  return out;
+}
+/* שער גדול מהגבול → חלקים לפי גבולות פרקים */
+function shelfSplitSection(segs, sec, max) {
+  if (sec.chars <= max) return [{ ...sec, part: 0 }];
+  /* קודם פרקים שלמים (קבוצות הפניה), ואז אריזה — חלק לא נחתך באמצע פרק */
+  const groups = [];
+  for (let i = sec.from; i < sec.to; i++) {
+    const k = shelfChapterKey(segs[i].ref);
+    const last = groups[groups.length - 1];
+    if (last && last.key === k) { last.to = i + 1; last.chars += segs[i].t.length; }
+    else groups.push({ key: k, from: i, to: i + 1, chars: segs[i].t.length });
+  }
+  const parts = [];
+  let cur = null;
+  for (const g of groups) {
+    if (cur && cur.chars + g.chars > max) { parts.push(cur); cur = null; }
+    if (!cur) cur = { from: g.from, to: g.to, chars: g.chars };
+    else { cur.to = g.to; cur.chars += g.chars; }
+  }
+  if (cur) parts.push(cur);
+  return parts.map((p, n) => {
+    const a = shelfComps(segs[p.from].ref), b = shelfComps(segs[p.to - 1].ref);
+    const ra = a.length > 1 ? a[1] : "", rb = b.length > 1 ? b[1] : "";
+    const range = ra && rb ? ` (${/^\d+$/.test(ra) ? hebNum(ra) : ra}–${/^\d+$/.test(rb) ? hebNum(rb) : rb})` : "";
+    return { key: sec.key, label: `${sec.label} · חלק ${n + 1}/${parts.length}${range}`, from: p.from, to: p.to, chars: p.chars, part: n + 1 };
+  });
+}
+/* קטעים → פרקים למסך הלמידה. פרק = קבוצת הפניה; פרק ארוך מדי מתפצל לחלקים. */
+function shelfToChapters(segs, from, to) {
+  const groups = [];
+  for (let i = from; i < to; i++) {
+    const k = shelfChapterKey(segs[i].ref);
+    const last = groups[groups.length - 1];
+    if (last && last.key === k) last.segs.push(segs[i].t);
+    else groups.push({ key: k, segs: [segs[i].t] });
+  }
+  const chapters = [];
+  for (const g of groups) {
+    const label = shelfLabel(g.key) || `פרק ${chapters.length + 1}`;
+    const pieces = [];
+    for (const t of g.segs) {
+      if (t.length > CHUNK_TARGET * 1.3) pieces.push(...hardSplit(t)); else pieces.push(t);
+    }
+    const chunks = [];
+    let cur = "";
+    for (const p of pieces) {
+      if (cur && cur.length + p.length > CHAPTER_LIMIT) { chunks.push(cur); cur = p; }
+      else cur = cur ? cur + "\n\n" + p : p;
+    }
+    if (cur) chunks.push(cur);
+    chunks.forEach((text, n) => {
+      const title = chunks.length > 1 ? `${label} · חלק ${n + 1}` : label;
+      chapters.push({ title, text: title + "\n" + text });
+    });
+  }
+  return chapters;
+}
+
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
    · שמירה מתמשכת (window.storage) — ספרים, תוצרים והתקדמות נשמרים בין ישיבות
@@ -1067,7 +1199,16 @@ export default function LearningTV() {
   const [staticFx, setStaticFx] = useState(false);
   const [deleteArm, setDeleteArm] = useState(null);
   const [fileBusy, setFileBusy] = useState(null); // הודעת סטטוס בזמן קריאת קובץ
- 
+
+  /* ── ארון הספרים → ייבוא ללימוד ── */
+  const [shelfIdx, setShelfIdx] = useState(null);     // index.json של הארון
+  const [shelfErr, setShelfErr] = useState(null);
+  const [shelfFilter, setShelfFilter] = useState("");  // מדף נבחר ("" = הכל)
+  const [shelfQ, setShelfQ] = useState("");            // חיפוש בשמות
+  const [shelfPick, setShelfPick] = useState(null);    // ספר שנבחר (רשומת המפתח)
+  const [shelfSegs, setShelfSegs] = useState(null);    // הקטעים של הספר שנבחר
+  const [shelfOpts, setShelfOpts] = useState([]);      // שערים/חלקים לבחירה בספר ענק
+
   /* ── מצב מגילה (גמיש) ── */
   const [markMode, setMarkMode] = useState(null); // null | 'start' | 'end' | 'bookmark'
   const [selStart, setSelStart] = useState(null); // אינדקס פסקה
@@ -1478,8 +1619,8 @@ export default function LearningTV() {
     if (sync) queueSync({ ...sync, book: nextBook });
   };
  
-  const buildBook = async (text, forcedTitle, stayInLibrary = false) => {
-    const chapters = splitToChapters(text);
+  const buildBook = async (text, forcedTitle, stayInLibrary = false, presetChapters = null) => {
+    const chapters = presetChapters && presetChapters.length ? presetChapters : splitToChapters(text);
     const title =
       (forcedTitle && forcedTitle.trim()) ||
       titleRef.current?.value?.trim() ||
@@ -1500,7 +1641,71 @@ export default function LearningTV() {
     }
     return nb;
   };
- 
+
+  /* ── הגשר: מהארון אל הלימוד ── */
+  const openShelf = async () => {
+    setError(null);
+    setShelfErr(null);
+    setShelfPick(null);
+    setShelfSegs(null);
+    setShelfOpts([]);
+    flick();
+    setView("shelf");
+    if (shelfIdx) return;
+    setFileBusy("קורא את מפתח הארון...");
+    try {
+      const idx = await shelfFetch("/index.json");
+      if (!idx || !Array.isArray(idx.books)) throw new Error("מפתח הארון לא תקין");
+      setShelfIdx(idx);
+    } catch (e) {
+      console.error("shelf index failed", e);
+      setShelfErr(e.message || "הארון לא זמין כרגע");
+    }
+    setFileBusy(null);
+  };
+
+  /* ספר קטן — נכנס כולו. ספר ענק — מציגים שערים/חלקים לבחירה. */
+  const pickShelfBook = async (b) => {
+    setShelfErr(null);
+    setShelfPick(b);
+    setShelfSegs(null);
+    setShelfOpts([]);
+    setFileBusy(`מוריד את "${b.hebrew || b.title}" מהארון...`);
+    try {
+      const data = await shelfFetch("/books/" + b.file);
+      const segs = (data && data.segments) || [];
+      if (!segs.length) throw new Error("לא נמצאו קטעים בספר");
+      if ((b.chars || 0) <= SHELF_IMPORT_MAX) {
+        setFileBusy(null);
+        await importFromShelf(b, segs, 0, segs.length, "");
+        return;
+      }
+      const opts = [];
+      for (const sec of shelfSections(segs)) opts.push(...shelfSplitSection(segs, sec, SHELF_IMPORT_MAX));
+      setShelfSegs(segs);
+      setShelfOpts(opts);
+      setShelfQ("");
+    } catch (e) {
+      console.error("shelf book failed", e);
+      setShelfErr(e.message || "הורדת הספר נכשלה");
+      setShelfPick(null);
+    }
+    setFileBusy(null);
+  };
+
+  const importFromShelf = async (b, segs, from, to, suffix) => {
+    const chapters = shelfToChapters(segs, from, to);
+    if (!chapters.length) { setShelfErr("אין טקסט לייבוא"); return; }
+    const name = b.hebrew || b.title || "ספר מהארון";
+    const title = suffix ? `${name} — ${suffix}` : name;
+    setFileBusy(`בונה "${title}" — ${chapters.length} פרקים...`);
+    try {
+      await buildBook("", title, false, chapters);
+    } finally {
+      setFileBusy(null);
+    }
+  };
+
   const createBook = async () => {
     const t = inputRef.current?.value?.trim();
     if (!t || t.length < 40) {
@@ -2225,6 +2430,7 @@ export default function LearningTV() {
     : view === "scroll" ? "מגילה · לימוד גמיש"
     : view === "guide" ? "לוח שידורים"
     : view === "library" ? "ספריית השידורים"
+    : view === "shelf" ? "ארון הספרים · ייבוא ללימוד"
     : "קליטת טקסט";
   const barNum = view === "tv" && active ? `CH ${active.num}` : view === "scroll" ? "CH ∞" : "CH 00";
  
@@ -2487,7 +2693,88 @@ export default function LearningTV() {
                   {error && <div className="err">{error}</div>}
                 </div>
               )}
- 
+
+              {/* ── ארון הספרים → ייבוא ללימוד ── */}
+              {view === "shelf" && (() => {
+                const books = shelfIdx ? shelfIdx.books : [];
+                const q = shelfQ.trim();
+                const shown = books.filter((b) =>
+                  (!shelfFilter || b.shelf === shelfFilter) &&
+                  (!q || (b.hebrew || "").includes(q) || (b.title || "").toLowerCase().includes(q.toLowerCase()))
+                );
+                const optQ = q.toLowerCase();
+                const shownOpts = shelfOpts.filter((o) => !q || o.label.toLowerCase().includes(optQ));
+                return (
+                  <div className="library shelf-screen">
+                    {!shelfPick && (
+                      <p className="intake-lead">
+                        70 ספרי המקור של הארון. בחר ספר — והוא נכנס לספרייה שלך כספר עם פרקים, לסיכום, מבחן, מגילה ומרקרים.
+                        ספר ענק נכנס שער אחר שער.
+                        {" "}<a className="shelf-link" href={SHELF_URL} target="_blank" rel="noopener noreferrer">לקריאה בארון עצמו ↗</a>
+                      </p>
+                    )}
+                    {fileBusy && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px" }}>⏳ {fileBusy}</div>}
+                    {shelfErr && <div className="err">{shelfErr}</div>}
+
+                    {shelfPick && shelfSegs && (
+                      <>
+                        <div className="shelf-pick-head">
+                          <button className="ghost-btn" onClick={() => { setShelfPick(null); setShelfSegs(null); setShelfOpts([]); setShelfQ(""); }}>→ כל הספרים</button>
+                          <div>
+                            <div className="book-title">{shelfPick.hebrew || shelfPick.title}</div>
+                            <div className="book-meta">{fmtChars(shelfPick.chars)} · {shelfPick.segments.toLocaleString("he")} קטעים · ספר גדול — בחר שער או חלק לייבוא</div>
+                          </div>
+                        </div>
+                        <input
+                          className="shelf-search"
+                          placeholder="סינון שערים..."
+                          value={shelfQ}
+                          onChange={(e) => setShelfQ(e.target.value)}
+                        />
+                        {shownOpts.map((o, i) => (
+                          <div className="book-row" key={o.key + ":" + o.part + ":" + i}>
+                            <button className="book-main" disabled={!!fileBusy} onClick={() => importFromShelf(shelfPick, shelfSegs, o.from, o.to, o.label)}>
+                              <span className="book-title">{o.label}</span>
+                              <span className="book-meta">{fmtChars(o.chars)} · {o.to - o.from} קטעים</span>
+                            </button>
+                          </div>
+                        ))}
+                        {!shownOpts.length && <p className="intake-tip">לא נמצא שער מתאים.</p>}
+                      </>
+                    )}
+
+                    {!shelfPick && shelfIdx && (
+                      <>
+                        <input
+                          className="shelf-search"
+                          placeholder="חיפוש ספר בארון..."
+                          value={shelfQ}
+                          onChange={(e) => setShelfQ(e.target.value)}
+                        />
+                        <div className="shelf-chips">
+                          <button className={"pill" + (!shelfFilter ? " on" : "")} onClick={() => setShelfFilter("")}>הכל · {books.length}</button>
+                          {(shelfIdx.shelves || []).map((s) => (
+                            <button key={s} className={"pill" + (shelfFilter === s ? " on" : "")} onClick={() => setShelfFilter(shelfFilter === s ? "" : s)}>{s}</button>
+                          ))}
+                        </div>
+                        {shown.map((b) => (
+                          <div className="book-row" key={b.file}>
+                            <button className="book-main" disabled={!!fileBusy} onClick={() => pickShelfBook(b)}>
+                              <span className="book-title">{b.hebrew || b.title}</span>
+                              <span className="book-meta">
+                                {b.shelf} · {fmtChars(b.chars)} · {b.segments.toLocaleString("he")} קטעים
+                                {b.chars > SHELF_IMPORT_MAX ? " · ייבוא לפי שער" : " · נכנס כולו"}
+                              </span>
+                            </button>
+                          </div>
+                        ))}
+                        {!shown.length && <p className="intake-tip">לא נמצא ספר מתאים.</p>}
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── לוח שידורים של ספר ── */}
               {view === "guide" && book && (
                 <div className="guide">
@@ -2927,19 +3214,37 @@ export default function LearningTV() {
             <span className="key-num">🎬</span>
             <span className="key-label">אודיו/וידאו</span>
           </label>
-          <a
+          <button
             className="ch-key shelf"
-            href={SHELF_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="ארון הספרים — 70 ספרי מקור, נפתח בלשונית חדשה"
+            onClick={openShelf}
+            disabled={!!fileBusy}
+            title="ארון הספרים — 70 ספרי מקור, לייבוא ללימוד"
           >
             <span className="key-num">📚</span>
             <span className="key-label">ארון הספרים</span>
-          </a>
+          </button>
         </div>
       )}
- 
+
+      {view === "shelf" && (
+        <div className="deck">
+          {shelfPick && shelfSegs && (
+            <button className="ch-key" onClick={() => { setShelfPick(null); setShelfSegs(null); setShelfOpts([]); setShelfQ(""); }} disabled={!!fileBusy}>
+              <span className="key-num">📚</span>
+              <span className="key-label">כל הספרים</span>
+            </button>
+          )}
+          <a className="ch-key shelf" href={SHELF_URL} target="_blank" rel="noopener noreferrer" title="פותח את הארון בלשונית חדשה">
+            <span className="key-num">↗</span>
+            <span className="key-label">פתח את הארון</span>
+          </a>
+          <button className="ch-key newtext" onClick={() => { backToLibrary(); if (!index.length) setView("intake"); }} disabled={!!fileBusy}>
+            <span className="key-num">↩</span>
+            <span className="key-label">חזרה לספרייה</span>
+          </button>
+        </div>
+      )}
+
       {view === "intake" && (
         <div className="deck">
           <button className="ch-key gold" onClick={createBook} disabled={!!fileBusy}>
@@ -3532,6 +3837,19 @@ const css = `
 .ch-key.shelf{background:linear-gradient(180deg,#2a3560,#1d2c55);border-color:#3b4c85;text-decoration:none;color:#dbe2ff}
 .ch-key.shelf .key-num{color:var(--amber)}
 .ch-key.shelf:hover{border-color:var(--amber);text-decoration:none}
+/* ארון הספרים → ייבוא */
+.shelf-link{color:#7a5410;font-weight:700;text-decoration:none;border-bottom:1px dashed #d8b06a}
+.shelf-link:hover{color:var(--amber-deep)}
+.shelf-search{
+  width:100%;box-sizing:border-box;border:1.5px solid #cfc8b4;background:#fffdf6;border-radius:10px;padding:10px 14px;
+  font-family:'Heebo',sans-serif;font-size:1rem;color:var(--ink);margin-bottom:10px;
+}
+.shelf-search:focus{outline:none;border-color:var(--amber)}
+.shelf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.shelf-chips .pill{padding:5px 12px;font-size:.82rem}
+.shelf-pick-head{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:12px}
+.shelf-pick-head .book-title{font-size:1.15rem}
+.shelf-screen .book-main:disabled{cursor:default;opacity:.6}
 .ch-key:disabled{cursor:default;opacity:.6}
 .key-num{font-family:'IBM Plex Mono',monospace;font-size:.78rem;color:var(--amber);letter-spacing:1px}
 .key-label{font-size:.92rem;font-weight:600}
