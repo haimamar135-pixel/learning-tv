@@ -7,7 +7,12 @@ import { createClient } from "@supabase/supabase-js";
 const SUPA_URL = "https://hghlesijwzpfdhmlvgiv.supabase.co";
 const SUPA_KEY = "sb_publishable_JsWZApJRwuzZId7iUPwUkA_EGlZfNNe";
 const supa = createClient(SUPA_URL, SUPA_KEY);
- 
+
+/* ─── ארון הספרים — הספרייה הפרטית (70 ספרי מקור) ───
+   אתר נפרד, לקריאה בלבד, לשימוש עצמי. noindex.
+   נפתח בלשונית חדשה; לא נוגע בספרים של הלומד. */
+const SHELF_URL = "https://aquamarine-muffin-1c019d.netlify.app";
+
 /* ─── מסך הלמידה · גרסת הספרייה ───
    חדש בגרסה זו:
    · שמירה מתמשכת (window.storage) — ספרים, תוצרים והתקדמות נשמרים בין ישיבות
@@ -2922,6 +2927,16 @@ export default function LearningTV() {
             <span className="key-num">🎬</span>
             <span className="key-label">אודיו/וידאו</span>
           </label>
+          <a
+            className="ch-key shelf"
+            href={SHELF_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="ארון הספרים — 70 ספרי מקור, נפתח בלשונית חדשה"
+          >
+            <span className="key-num">📚</span>
+            <span className="key-label">ארון הספרים</span>
+          </a>
         </div>
       )}
  
@@ -3514,6 +3529,9 @@ const css = `
 .ch-key.active{border-color:var(--amber);box-shadow:0 0 16px rgba(242,163,60,.35);color:#fff}
 .ch-key.cached .key-num{color:var(--teal)}
 .ch-key.newtext{border-style:dashed}
+.ch-key.shelf{background:linear-gradient(180deg,#2a3560,#1d2c55);border-color:#3b4c85;text-decoration:none;color:#dbe2ff}
+.ch-key.shelf .key-num{color:var(--amber)}
+.ch-key.shelf:hover{border-color:var(--amber);text-decoration:none}
 .ch-key:disabled{cursor:default;opacity:.6}
 .key-num{font-family:'IBM Plex Mono',monospace;font-size:.78rem;color:var(--amber);letter-spacing:1px}
 .key-label{font-size:.92rem;font-weight:600}
