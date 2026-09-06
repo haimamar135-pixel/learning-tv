@@ -9,3 +9,9 @@
   to = "https://aquamarine-muffin-1c019d.netlify.app/data/:splat"
   status = 200
   force = true
+
+# אפליקציית המובייל קוראת את ה-proxy מ-capacitor://localhost — כותרות CORS
+[[headers]]
+  for = "/shelf-data/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"

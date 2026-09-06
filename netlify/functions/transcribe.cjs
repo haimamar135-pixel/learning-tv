@@ -4,7 +4,7 @@
 
 const GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 
-exports.handler = async (event) => {
+const core = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: { message: "Method not allowed" } }) };
   }
@@ -66,4 +66,18 @@ exports.handler = async (event) => {
       body: JSON.stringify({ error: { message: "השרת לא הצליח לפנות למנוע התמלול: " + e.message } }),
     };
   }
+};
+
+/* ─── CORS ───
+   האתר קורא לפונקציה מאותו מקור ולא צריך את זה; אפליקציית המובייל (Capacitor)
+   קוראת מ-capacitor://localhost ולכן הדפדפן המוטמע דורש כותרות CORS. */
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
+exports.handler = async (event) => {
+  if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: CORS, body: "" };
+  const r = await core(event);
+  return { ...r, headers: { ...CORS, ...(r.headers || {}) } };
 };

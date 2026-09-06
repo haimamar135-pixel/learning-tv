@@ -1,0 +1,10 @@
+{
+  "appId": "co.lomedtv.app",
+  "appName": "מסך הלמידה",
+  "webDir": "dist",
+  "ios": {
+    "contentInset": "automatic",
+    "backgroundColor": "#0a1128"
+  },
+  "plugins": {}
+}

@@ -13,18 +13,32 @@ const supa = createClient(SUPA_URL, SUPA_KEY);
    נפתח בלשונית חדשה; לא נוגע בספרים של הלומד. */
 const SHELF_URL = "https://aquamarine-muffin-1c019d.netlify.app";
 
+/* ─── מובייל (Capacitor) ───
+   באתר, הפונקציות וה-proxy של הארון נקראים בכתובת יחסית (אותו מקור).
+   בתוך אפליקציית iOS/Android העמוד נטען מקבצים מקומיים (capacitor://localhost),
+   ולכן הקריאות צריכות כתובת מלאה של האתר החי. */
+const SITE_URL = "https://famous-rolypoly-1ab096.netlify.app";
+const IS_NATIVE = (() => {
+  try {
+    if (window.Capacitor && typeof window.Capacitor.isNativePlatform === "function") return window.Capacitor.isNativePlatform();
+    return location.protocol === "capacitor:" || location.protocol === "ionic:";
+  } catch { return false; }
+})();
+const API_BASE = IS_NATIVE ? SITE_URL : "";
+
 /* ─── הגשר: מהארון אל הלימוד ───
    הארון הוא אתר נפרד בלי כותרות CORS, לכן הנתונים נקראים דרך /shelf-data —
    proxy של נטליפיי (netlify.toml) שמגיש את data/ של הארון מאותו מקור.
    בפיתוח מקומי (vite) אין proxy — יש נפילה לכתובת הישירה. */
 const SHELF_DATA = "/shelf-data";
-/* גבול לייבוא אחד. הספרים נשמרים ב-localStorage (כ-5MB לכל הספרייה),
-   לכן ספר ענק (הזוהר, הסולם, אור החמה) נכנס שער/חלק — לא בבת אחת. */
-const SHELF_IMPORT_MAX = 250000;
+/* גבול לייבוא אחד. הספרים נשמרים ב-IndexedDB (אין גבול 5MB), אבל ספר ענק
+   (הזוהר, הסולם, אור החמה) עדיין נכנס שער/חלק — גם בשביל הסנכרון לענן
+   וגם כי ספר של 2,000 פרקים אינו יחידת לימוד. */
+const SHELF_IMPORT_MAX = 400000;
 
 async function shelfFetch(path) {
   try {
-    const r = await fetch(SHELF_DATA + path, { cache: "force-cache" });
+    const r = await fetch(API_BASE + SHELF_DATA + path, { cache: "force-cache" });
     if (r.ok) return await r.json();
     throw new Error("proxy " + r.status);
   } catch (e1) {
@@ -193,7 +207,7 @@ const PROMPTS = {
 async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
   let res;
   try {
-    res = await fetch("/.netlify/functions/claude", {
+    res = await fetch(API_BASE + "/.netlify/functions/claude", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(img ? { prompt, maxTokens, fast, img, imgType, raw: rawMode } : { prompt, maxTokens, fast, raw: rawMode }),
@@ -303,41 +317,125 @@ function splitToChapters(raw) {
   });
 }
  
-/* ─── אחסון מתמשך (localStorage) ───
-   נשמר במכשיר/דפדפן הנוכחי. לסנכרון בין מכשירים — שלב החשבונות (Supabase). */
+/* ─── אחסון מתמשך (IndexedDB) ───
+   נשמר במכשיר/דפדפן הנוכחי. עד צ'אט 8 הספרים ישבו ב-localStorage (גבול ~5MB לכל
+   הספרייה — שביר באייפון ובאפליקציה). עכשיו: IndexedDB, אחסון גדול ויציב.
+   בהפעלה הראשונה הספרים הקיימים עוברים מ-localStorage אוטומטית (ולא נמחקים משם —
+   ביטוח). לסנכרון בין מכשירים — Supabase. */
+const IDB_NAME = "lomedtv";
+const IDB_STORE = "kv";
+let idbPromise = null;
+function idbOpen() {
+  if (idbPromise) return idbPromise;
+  idbPromise = new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => { req.result.createObjectStore(IDB_STORE); };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    } catch (e) { reject(e); }
+  });
+  return idbPromise;
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).get(key);
+    rq.onsuccess = () => resolve(rq.result);
+    rq.onerror = () => reject(rq.error);
+  });
+}
+async function idbSet(key, value) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbDel(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    tx.objectStore(IDB_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbKeys() {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const rq = tx.objectStore(IDB_STORE).getAllKeys();
+    rq.onsuccess = () => resolve(rq.result || []);
+    rq.onerror = () => reject(rq.error);
+  });
+}
+/* הגירה חד-פעמית מ-localStorage. רצה פעם אחת לפני הטעינה הראשונה. */
+let migratedPromise = null;
+function migrateFromLocalStorage() {
+  if (migratedPromise) return migratedPromise;
+  migratedPromise = (async () => {
+    try {
+      const idxRaw = localStorage.getItem("ltv-books-index");
+      if (idxRaw) {
+        const existing = await idbGet("ltv-books-index");
+        /* רק אם ב-IndexedDB אין עדיין אינדקס בכלל (גם רשימה ריקה נחשבת "יש") */
+        if (existing === undefined) {
+          const idx = JSON.parse(idxRaw);
+          for (const e of idx) {
+            const raw = localStorage.getItem("ltv-book-" + e.id);
+            if (raw) await idbSet("ltv-book-" + e.id, JSON.parse(raw));
+          }
+          await idbSet("ltv-books-index", idx);
+          console.log("migrated", idx.length, "books to IndexedDB");
+        }
+      }
+    } catch (e) {
+      console.error("migration failed", e);
+    }
+  })();
+  return migratedPromise;
+}
 async function loadIndex() {
   try {
-    const v = localStorage.getItem("ltv-books-index");
-    return v ? JSON.parse(v) : [];
-  } catch {
+    await migrateFromLocalStorage();
+    const v = await idbGet("ltv-books-index");
+    return Array.isArray(v) ? v : [];
+  } catch (e) {
+    console.error("loadIndex failed", e);
     return [];
   }
 }
 async function saveIndex(idx) {
   try {
-    localStorage.setItem("ltv-books-index", JSON.stringify(idx));
+    await idbSet("ltv-books-index", idx);
   } catch (e) {
     console.error("saveIndex failed", e);
   }
 }
 async function loadBook(id) {
   try {
-    const v = localStorage.getItem("ltv-book-" + id);
-    return v ? JSON.parse(v) : null;
-  } catch {
+    await migrateFromLocalStorage();
+    const v = await idbGet("ltv-book-" + id);
+    return v || null;
+  } catch (e) {
+    console.error("loadBook failed", e);
     return null;
   }
 }
 async function saveBookToStorage(book) {
   try {
-    localStorage.setItem("ltv-book-" + book.id, JSON.stringify(book));
+    await idbSet("ltv-book-" + book.id, book);
   } catch (e) {
     console.error("saveBook failed", e);
   }
 }
 async function deleteBookFromStorage(id) {
   try {
-    localStorage.removeItem("ltv-book-" + id);
+    await idbDel("ltv-book-" + id);
   } catch (e) {
     console.error("deleteBook failed", e);
   }
@@ -371,14 +469,23 @@ function clearSyncStamp(bookId) {
 /* ─── גיבוי ושחזור (שלב 0 לפני Supabase) ───
    ⬇ מוריד קובץ JSON עם כל הספרים, ההערות, המרקרים והציונים.
    ⬆ משחזר מקובץ כזה. ביטוח לטביעת היד של הלומד. */
-function downloadBackup() {
+async function downloadBackup() {
   try {
     const data = {};
+    /* הספרים — מ-IndexedDB (נשמרים כמחרוזות JSON, כמו בגיבויים הישנים — תאימות מלאה) */
+    const idx = await loadIndex();
+    data["ltv-books-index"] = JSON.stringify(idx);
+    for (const e of idx) {
+      const b = await loadBook(e.id);
+      if (b) data["ltv-book-" + e.id] = JSON.stringify(b);
+    }
+    /* הגדרות קטנות שנשארו ב-localStorage */
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       /* חותמות הסנכרון שייכות למכשיר הזה בלבד — לא נכנסות לגיבוי,
          כדי ששחזור במכשיר אחר לא ישתיק שם הצעת הורדה לגיטימית מהענן. */
       if (k === "ltv-cloud-stamps") continue;
+      if (k && k.startsWith("ltv-book")) continue;
       if (k && (k.startsWith("ltv-") || k.startsWith("lomedtv-"))) data[k] = localStorage.getItem(k);
     }
     const payload = { app: "LOMED-TV", version: 1, savedAt: new Date().toISOString(), data };
@@ -399,7 +506,7 @@ function downloadBackup() {
 }
 function restoreBackupFile(file) {
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const payload = JSON.parse(reader.result);
       if (!payload || payload.app !== "LOMED-TV" || !payload.data) {
@@ -410,7 +517,24 @@ function restoreBackupFile(file) {
       const nBooks = keys.filter((k) => k.startsWith("ltv-book-")).length;
       const when = payload.savedAt ? new Date(payload.savedAt).toLocaleString("he-IL") : "";
       if (!window.confirm("לשחזר גיבוי מ-" + when + "?\nהקובץ מכיל " + nBooks + " ספרים.\nנתונים קיימים באותם שמות יוחלפו.")) return;
-      for (const k of keys) localStorage.setItem(k, payload.data[k]);
+      const restoredIdx = [];
+      for (const k of keys) {
+        const v = payload.data[k];
+        if (k === "ltv-books-index") { continue; }
+        if (k.startsWith("ltv-book-")) {
+          const b = typeof v === "string" ? JSON.parse(v) : v;
+          await saveBookToStorage(b);
+          restoredIdx.push({ id: b.id, title: b.title, chapters: (b.chapters || []).length, done: 0, updatedAt: Date.now() });
+        } else {
+          localStorage.setItem(k, v);
+        }
+      }
+      /* האינדקס: מהגיבוי אם יש, אחרת נבנה מהספרים ששוחזרו; ספרים קיימים שלא בגיבוי נשארים */
+      let idx = [];
+      try { idx = payload.data["ltv-books-index"] ? JSON.parse(payload.data["ltv-books-index"]) : restoredIdx; } catch { idx = restoredIdx; }
+      const cur = await loadIndex();
+      const ids = new Set(idx.map((e) => e.id));
+      await saveIndex([...idx, ...cur.filter((e) => !ids.has(e.id))]);
       alert("השחזור הושלם! המסך ייטען מחדש.");
       location.reload();
     } catch (e) {
@@ -709,7 +833,7 @@ function bufToBase64(buf) {
 }
 
 async function transcribeChunk(b64, hint) {
-  const res = await fetch("/.netlify/functions/transcribe", {
+  const res = await fetch(API_BASE + "/.netlify/functions/transcribe", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ audio: b64, lang: "he", hint: hint || "" }),
@@ -1254,6 +1378,8 @@ export default function LearningTV() {
   const [showCloud, setShowCloud] = useState(false);
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudMsg, setCloudMsg] = useState("");
+  const [cloudCode, setCloudCode] = useState("");      // קוד כניסה מהמייל (מובייל)
+  const [cloudSent, setCloudSent] = useState(false);   // נשלח מייל — להציג שדה קוד
   useEffect(() => {
     supa.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
     const { data: sub } = supa.auth.onAuthStateChange((_ev, session) => setCloudUser(session?.user || null));
@@ -1267,7 +1393,24 @@ export default function LearningTV() {
       email,
       options: { emailRedirectTo: window.location.origin },
     });
-    setCloudMsg(error ? "שגיאה: " + error.message : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר.");
+    if (error) { setCloudMsg("שגיאה: " + error.message); return; }
+    setCloudSent(true);
+    setCloudMsg(IS_NATIVE
+      ? "✅ נשלח! פתח את המייל והעתק לכאן את קוד הכניסה (6 ספרות)."
+      : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר. (או הזן כאן את הקוד מהמייל)");
+  }
+  /* כניסה עם קוד מהמייל — הדרך במובייל, שם הקישור נפתח בדפדפן ולא באפליקציה.
+     דורש שתבנית המייל ב-Supabase תכלול את {{ .Token }}. */
+  async function verifyCode() {
+    const email = cloudEmail.trim();
+    const token = cloudCode.replace(/\D/g, "");
+    if (!email || token.length < 6) { setCloudMsg("הזן את המייל ואת הקוד בן 6 הספרות מהמייל"); return; }
+    setCloudMsg("בודק קוד...");
+    const { error } = await supa.auth.verifyOtp({ email, token, type: "email" });
+    if (error) { setCloudMsg("הקוד לא התקבל: " + error.message); return; }
+    setCloudCode("");
+    setCloudSent(false);
+    setCloudMsg("✅ מחובר!");
   }
   async function cloudSignOut() {
     await supa.auth.signOut();
@@ -2504,7 +2647,7 @@ export default function LearningTV() {
                     </>
                   ) : (
                     <>
-                      <p>כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה.</p>
+                      <p>{IS_NATIVE ? "כניסה בלי סיסמה: כתוב את המייל שלך, נשלח אליו קוד כניסה." : "כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה."}</p>
                       <input
                         className="cloud-input"
                         type="email"
@@ -2515,9 +2658,27 @@ export default function LearningTV() {
                         onKeyDown={(e) => { if (e.key === "Enter") sendMagicLink(); }}
                       />
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={sendMagicLink}>📨 שלח לי קישור כניסה</button>
+                        <button className="cloud-btn" onClick={sendMagicLink}>{IS_NATIVE ? "📨 שלח לי קוד כניסה" : "📨 שלח לי קישור כניסה"}</button>
                         <button className="cloud-btn ghost" onClick={() => setShowCloud(false)}>המשך בלי חשבון</button>
                       </div>
+                      {(cloudSent || IS_NATIVE) && (
+                        <>
+                          <input
+                            className="cloud-input"
+                            type="text"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            dir="ltr"
+                            placeholder="קוד מהמייל · 6 ספרות"
+                            value={cloudCode}
+                            onChange={(e) => setCloudCode(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") verifyCode(); }}
+                          />
+                          <div className="cloud-actions">
+                            <button className="cloud-btn" onClick={verifyCode} disabled={cloudCode.replace(/\D/g, "").length < 6}>🔑 כניסה עם הקוד</button>
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
                   {cloudMsg && <p className="cloud-msg">{cloudMsg}</p>}
@@ -3422,6 +3583,8 @@ const css = `
   min-height:100vh;background:radial-gradient(120% 90% at 50% 0%,var(--studio-2),var(--studio) 70%);
   font-family:'Heebo',sans-serif;color:#e8eaf4;
   display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;
+  /* מובייל: לא להיכנס מתחת ל-notch ולפס הבית */
+  padding-top:calc(28px + env(safe-area-inset-top,0px));padding-bottom:calc(60px + env(safe-area-inset-bottom,0px));
 }
  
 .masthead{display:flex;align-items:baseline;gap:12px;margin-bottom:22px;flex-wrap:wrap;justify-content:center}
