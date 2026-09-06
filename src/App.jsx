@@ -1374,6 +1374,41 @@ export default function LearningTV() {
     });
   };
 
+  /* ─── הפנים: מסך הפתיחה — "מתי בפעם האחרונה ספר ענה לך בחזרה?" ───
+     מוצג בפעם הראשונה (אין lomedtv-opened), ובכל פעם שהלומד חוזר אליו דרך "ל · הפנים".
+     השאלה שהלומד נושא נשמרת (lomedtv-question) ומלווה אותו בספרייה ובקליטה כפתק ❓ —
+     הצעד הראשון של "השאלות הפתוחות שלי". */
+  const [showOpening, setShowOpening] = useState(() => {
+    try { return !localStorage.getItem("lomedtv-opened"); } catch { return true; }
+  });
+  const [openQ, setOpenQ] = useState(() => {
+    try { return localStorage.getItem("lomedtv-question") || ""; } catch { return ""; }
+  });
+  const openQRef = useRef(null);
+  const saveOpenQ = (q) => {
+    const v = (q || "").trim();
+    setOpenQ(v);
+    try { v ? localStorage.setItem("lomedtv-question", v) : localStorage.removeItem("lomedtv-question"); } catch {}
+  };
+  /* חמשת השערים: text → תיבת ההדבקה · photo → מצלמה · video → וידאו · file → קובץ שמע/וידאו · rec → מסך הקליטה (הקלטה) */
+  const enterFromOpening = (withQuestion, gate) => {
+    if (withQuestion) saveOpenQ(openQRef.current?.value);
+    try { localStorage.setItem("lomedtv-opened", new Date().toISOString()); } catch {}
+    setShowOpening(false);
+    setError(null);
+    const inputId = gate === "photo" ? "camera-scan-input" : gate === "video" ? "video-capture-input" : gate === "file" ? "media-transcribe-input" : null;
+    if (inputId) {
+      document.getElementById(inputId)?.click();
+      return;
+    }
+    if (gate === "text" || gate === "rec" || !index.length) {
+      setView("intake");
+      if (gate === "text") setTimeout(() => inputRef.current?.focus(), 80);
+    } else {
+      setView("library");
+    }
+  };
+
   /* ─── חשבון ענן (Supabase) — שלב 1: כניסה בקישור למייל ─── */
   const [cloudUser, setCloudUser] = useState(null);
   const [showCloud, setShowCloud] = useState(false);
@@ -2611,7 +2646,81 @@ export default function LearningTV() {
   return (
     <div className="studio" dir="rtl">
       <style>{css}</style>
- 
+
+      {/* ── הפנים: מסך הפתיחה ── */}
+      {showOpening && (
+        <div className="opening" dir="rtl" lang="he">
+          <div className="op-brand">
+            <div className="op-lamed" aria-label="למ״ד על השורה">
+              <div className="row">ב ר א ש י ת</div>
+              <div className="base" />
+              <div className="l">ל</div>
+            </div>
+            <div className="op-name">מסך הלמידה<small>חברותא שלא הולכת הביתה</small></div>
+          </div>
+
+          <header className="op-hero">
+            <h1>מתי בפעם האחרונה<br />ספר ענה לך בחזרה?</h1>
+            <p>יש לך ספרים שאתה חוזר אליהם שנים. הידע שלך גדל — והספר לא יודע מזה כלום. עד היום.</p>
+          </header>
+
+          <div className="op-vessel">
+            <label htmlFor="op-q">מה השאלה שאתה נושא איתך אל הספר?</label>
+            <div className="field">
+              <input
+                id="op-q"
+                ref={openQRef}
+                type="text"
+                defaultValue={openQ}
+                placeholder="למשל: מה חובתי בעולמי?"
+                onKeyDown={(e) => { if (e.key === "Enter") enterFromOpening(true, null); }}
+              />
+              <button className="go" onClick={() => enterFromOpening(true, null)}>היכנס עם השאלה</button>
+            </div>
+            <span className="skip">
+              אפשר גם <a href="#" onClick={(e) => { e.preventDefault(); enterFromOpening(false, null); }}>להיכנס בלי שאלה</a> — היא תגיע מתוך הלימוד
+            </span>
+          </div>
+
+          <div className="op-peek">
+            <div className="daf">
+              <div className="sefer">מסילת ישרים · פרק א — בביאור כלל חובת האדם בעולמו</div>
+              <p className="torah">
+                יְסוֹד הַחֲסִידוּת וְשֹׁרֶשׁ הָעֲבוֹדָה הַתְּמִימָה הוּא{" "}
+                <span className="hl">שֶׁיִּתְבָּרֵר וְיִתְאַמֵּת אֵצֶל הָאָדָם מַה חוֹבָתוֹ בְּעוֹלָמוֹ</span><span className="fn">[1]</span>,
+                וּלְמָה צָרִיךְ שֶׁיָּשִׂים מַבָּטוֹ וּמְגַמָּתוֹ בְּכָל אֲשֶׁר הוּא{" "}
+                <span className="un">עָמֵל כָּל יְמֵי חַיָּיו</span>.
+              </p>
+              <div className="note"><b>[1] ההערה שלך:</b> ❓ מה בין "חובתו" ל"מגמתו" — שני דברים או אחד?</div>
+              <svg className="thread" viewBox="0 0 640 290" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M 402 118 C 380 175, 300 150, 230 205" />
+              </svg>
+            </div>
+            <p className="cap">הדף שלך, כמו שהוא באמת בפנים: מרקר, קו, והערה שקשורה בחוט אל השורה שלה.</p>
+          </div>
+
+          <section className="op-gates">
+            <h2>חמישה שערים אל הספר</h2>
+            <p className="sub">מכל מקום שבו המציאות פוגשת אותך — היא נכנסת אל הדף</p>
+            <div className="gate-row">
+              <button className="g" onClick={() => enterFromOpening(true, "text")}><span className="ic">＋</span><span className="t">הדבק טקסט</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "photo")}><span className="ic">📷</span><span className="t">צלם דף</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "rec")}><span className="ic">🎙</span><span className="t">הקלט שיעור</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "video")}><span className="ic">🎥</span><span className="t">צלם וידאו</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "file")}><span className="ic">🎬</span><span className="t">קובץ שמע/וידאו</span></button>
+            </div>
+          </section>
+
+          <footer className="op-foot">
+            <p className="serif">יש כאן מי שמחכה ללמוד איתך.</p>
+            <p>בְּפִיךָ וּבִלְבָבְךָ · הלימוד קרוב</p>
+            {index.length > 0 && (
+              <button className="op-lib" onClick={() => enterFromOpening(false, null)}>↩ לספרייה שלי ({index.length})</button>
+            )}
+          </footer>
+        </div>
+      )}
+
       <header className="masthead">
         <span className="mast-dot" />
         <h1>מסך הלמידה</h1>
@@ -2781,6 +2890,13 @@ export default function LearningTV() {
                   <p className="intake-lead">
                     הדבק ספר, פרק או מאמר — או העלה קובץ — והמסך יהפוך אותו לסדרת פרקים עם ערוצי למידה: סיכום, מושגים, מפת חשיבה, מבחן ועוד. ההתקדמות נשמרת, כך שאפשר ללמוד ספר שלם לאורך זמן.
                   </p>
+                  {openQ && (
+                    <div className="my-q">
+                      <span className="my-q-ic">❓</span>
+                      <span className="my-q-body"><small>השאלה שאתה נושא איתך</small>{openQ}</span>
+                      <button className="my-q-x" onClick={() => saveOpenQ("")} title="להסיר את השאלה" aria-label="להסיר את השאלה">✕</button>
+                    </div>
+                  )}
                   <input ref={titleRef} className="intake-title" placeholder="שם הספר (למשל: אדיר במרום — הרמח״ל)" />
  
                   <input
@@ -2860,7 +2976,17 @@ export default function LearningTV() {
               {/* ── ספרייה ── */}
               {view === "library" && (
                 <div className="library">
-                  <p className="intake-lead">הספרים שלך. כל ספר שומר את הפרקים, התוצרים והציונים שלו.</p>
+                  <p className="intake-lead">
+                    הספרים שלך. כל ספר שומר את הפרקים, התוצרים והציונים שלו.
+                    <a href="#" className="to-opening" onClick={(e) => { e.preventDefault(); setShowOpening(true); }} title="חזרה למסך הפתיחה">ל · הפנים</a>
+                  </p>
+                  {openQ && (
+                    <div className="my-q">
+                      <span className="my-q-ic">❓</span>
+                      <span className="my-q-body"><small>השאלה שאתה נושא איתך</small>{openQ}</span>
+                      <button className="my-q-x" onClick={() => saveOpenQ("")} title="להסיר את השאלה" aria-label="להסיר את השאלה">✕</button>
+                    </div>
+                  )}
                   {fileBusy && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px" }}>⏳ {fileBusy}</div>}
                   {!fileBusy && recOn && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px", color: "#ff8a8a" }}>● מקליט… לסיום לחץ ⏹ למטה</div>}
                   {error && <div className="err">{error}</div>}
@@ -3600,7 +3726,7 @@ export default function LearningTV() {
  
 /* ─── עיצוב ─── */
 const css = `
-@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;600;800&family=IBM+Plex+Mono:wght@400;600&family=Frank+Ruhl+Libre:wght@500;700;900&display=swap');
  
 :root{
   --studio:#0d1226; --studio-2:#141a33;
@@ -3617,7 +3743,85 @@ const css = `
   /* מובייל: לא להיכנס מתחת ל-notch ולפס הבית */
   padding-top:calc(28px + env(safe-area-inset-top,0px));padding-bottom:calc(60px + env(safe-area-inset-bottom,0px));
 }
- 
+/* iOS: פס קבוע ואטום מאחורי שורת המצב — כדי שהפסים הדביקים (פרקים, מגילה) לא ייכנסו מתחת לשעון בגלילה */
+.studio::before{
+  content:"";position:fixed;top:0;left:0;right:0;z-index:500;pointer-events:none;
+  height:env(safe-area-inset-top,0px);background:var(--studio-2);
+}
+
+/* ── הפנים: מסך הפתיחה (שכבה מעל האולפן) ── */
+.opening{
+  --night:#171008; --klaf:#f2e7cd; --klaf-ink:#2c2314; --dim:#b7a276; --gold:#d9a441; --marker:#f5d76e; --line:#43341c;
+  position:fixed;inset:0;z-index:600;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:var(--night);color:var(--klaf);font-family:'Heebo',sans-serif;font-weight:300;line-height:1.7;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));
+}
+.opening::before{
+  content:"";position:fixed;top:0;left:0;right:0;z-index:2;height:env(safe-area-inset-top,0px);background:var(--night);
+}
+.opening button,.opening input{font-family:inherit}
+.opening :focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+.op-brand{display:flex;align-items:center;justify-content:center;gap:12px;padding:34px 20px 0}
+.op-lamed{position:relative;width:56px;height:56px;flex:none}
+.op-lamed .row{position:absolute;bottom:10px;right:0;left:0;text-align:center;font-family:'Frank Ruhl Libre',serif;font-size:19px;color:var(--dim);opacity:.45;letter-spacing:2px;white-space:nowrap;overflow:hidden}
+.op-lamed .l{position:absolute;bottom:6px;right:50%;transform:translateX(50%);font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:46px;line-height:1;color:var(--gold);text-shadow:0 0 22px rgba(217,164,65,.35)}
+.op-lamed .base{position:absolute;bottom:8px;right:2px;left:2px;height:1px;background:var(--line)}
+.op-name{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.3rem;line-height:1.3}
+.op-name small{display:block;font-family:'Heebo',sans-serif;font-weight:300;font-size:.78rem;color:var(--dim);letter-spacing:.06em}
+.op-hero{text-align:center;padding:44px 22px 8px;position:relative}
+.op-hero::before{content:'';position:absolute;inset:-120px 0 auto 0;height:560px;pointer-events:none;background:radial-gradient(ellipse 620px 380px at 50% 40%,rgba(217,164,65,.10),transparent 70%)}
+.op-hero h1{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:clamp(1.7rem,5.4vw,2.9rem);line-height:1.4;max-width:19ch;margin:0 auto;position:relative}
+.op-hero p{color:var(--dim);margin:14px auto 0;max-width:44ch;font-size:1rem;position:relative}
+.op-vessel{max-width:560px;margin:30px auto 0;padding:0 22px;position:relative}
+.op-vessel label{display:block;font-size:.92rem;color:var(--dim);margin-bottom:10px;text-align:center}
+.op-vessel .field{display:flex;gap:10px;align-items:center;background:rgba(242,231,205,.05);border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 16px;box-shadow:inset 0 2px 12px rgba(0,0,0,.35)}
+.op-vessel input{flex:1;background:none;border:none;color:var(--klaf);font-family:'Frank Ruhl Libre',serif;font-size:1.05rem;padding:10px 8px;min-width:0}
+.op-vessel input::placeholder{color:rgba(183,162,118,.55)}
+.op-vessel .go{background:var(--gold);color:var(--night);border:none;border-radius:9px;font-weight:500;font-size:.95rem;padding:11px 20px;white-space:nowrap;cursor:pointer}
+.op-vessel .go:hover{filter:brightness(1.08)}
+.op-vessel .skip{display:block;text-align:center;margin-top:12px;font-size:.85rem;color:var(--dim)}
+.op-vessel .skip a{color:var(--dim);text-decoration:underline;text-underline-offset:3px}
+@media(max-width:480px){.op-vessel .field{flex-direction:column;align-items:stretch;padding:8px} .op-vessel .go{width:100%}}
+.op-peek{max-width:640px;margin:56px auto 0;padding:0 18px;position:relative}
+.op-peek .daf{position:relative;background:var(--klaf);color:var(--klaf-ink);border-radius:10px 10px 0 0;padding:34px 38px 0;box-shadow:0 -2px 60px rgba(217,164,65,.13),0 -1px 0 rgba(242,231,205,.25);min-height:290px;overflow:hidden}
+.op-peek .daf::after{content:'';position:absolute;bottom:0;right:0;left:0;height:90px;background:linear-gradient(180deg,transparent,var(--night))}
+.op-peek .sefer{font-size:.8rem;color:#8a7248;margin-bottom:14px}
+.op-peek .torah{font-family:'Frank Ruhl Libre',serif;font-size:1.22rem;line-height:2.05;font-weight:500;max-width:34ch}
+.op-peek .hl{background:linear-gradient(180deg,transparent 12%,var(--marker) 12%,var(--marker) 88%,transparent 88%);padding:0 2px;border-radius:2px}
+.op-peek .un{border-bottom:2px solid #b5852f}
+.op-peek .fn{color:#a06a1f;font-size:.72em;vertical-align:super;font-weight:700}
+.op-peek .note{position:absolute;bottom:64px;left:26px;max-width:200px;background:#fff8e6;border:1px solid #e0c98f;border-radius:8px;padding:9px 12px;font-size:.82rem;line-height:1.55;color:#4a3a1a;box-shadow:0 3px 14px rgba(60,40,0,.18);transform:rotate(-1.2deg)}
+.op-peek .note b{font-weight:500;color:#8a5a10}
+.op-peek .thread{position:absolute;pointer-events:none;inset:0;width:100%;height:100%}
+.op-peek .thread path{fill:none;stroke:var(--gold);stroke-width:1.6;stroke-dasharray:4 5;opacity:.9}
+@media (prefers-reduced-motion:no-preference){.op-peek .thread path{stroke-dashoffset:220;animation:opSew 1.6s .5s ease-out forwards} @keyframes opSew{to{stroke-dashoffset:0}}}
+.op-peek .cap{text-align:center;color:var(--dim);font-size:.85rem;margin-top:14px}
+@media(max-width:480px){.op-peek .daf{padding:26px 22px 0} .op-peek .note{max-width:170px;left:12px;bottom:56px}}
+.op-gates{max-width:760px;margin:54px auto 0;padding:0 20px;text-align:center}
+.op-gates h2{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.25rem;margin-bottom:4px}
+.op-gates .sub{color:var(--dim);font-size:.9rem;margin-bottom:22px}
+.op-gates .gate-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+@media(max-width:640px){.op-gates .gate-row{grid-template-columns:repeat(2,1fr)} .op-gates .g:last-child{grid-column:span 2}}
+.op-gates .g{background:rgba(242,231,205,.04);border:1px solid var(--line);border-radius:12px;padding:18px 8px 14px;color:var(--klaf);display:flex;flex-direction:column;gap:6px;align-items:center;cursor:pointer;transition:border-color .2s,background .2s}
+.op-gates .g:hover{border-color:var(--gold);background:rgba(217,164,65,.07)}
+.op-gates .ic{font-size:1.5rem}
+.op-gates .t{font-size:.88rem;font-weight:400}
+.op-foot{text-align:center;padding:44px 20px 40px;color:var(--dim);font-size:.9rem}
+.op-foot .serif{font-family:'Frank Ruhl Libre',serif;color:var(--klaf);font-size:1.08rem}
+.op-foot p+p{margin-top:6px}
+.op-lib{margin-top:22px;background:none;border:1px solid var(--line);color:var(--klaf);border-radius:999px;padding:8px 18px;font-size:.9rem;cursor:pointer}
+.op-lib:hover{border-color:var(--gold);color:var(--gold)}
+
+/* ── השאלה שהלומד נושא — פתק ❓ בספרייה ובקליטה ── */
+.to-opening{float:left;font-size:.82rem;color:#8a6a2a;text-decoration:none;border:1px solid #d8c9a0;border-radius:999px;padding:1px 10px;margin-inline-start:10px;white-space:nowrap}
+.to-opening:hover{border-color:var(--amber-deep);color:var(--amber-deep)}
+.my-q{display:flex;align-items:center;gap:10px;margin:10px 0 14px;background:#fff8e6;border:1px solid #e0c98f;border-radius:10px;padding:9px 12px;box-shadow:0 3px 12px rgba(60,40,0,.10);transform:rotate(-.4deg)}
+.my-q-ic{font-size:1.1rem;flex:none}
+.my-q-body{flex:1;font-family:'Frank Ruhl Libre',serif;font-weight:500;font-size:1.02rem;line-height:1.45;color:#3a2c14}
+.my-q-body small{display:block;font-family:'Heebo',sans-serif;font-weight:400;font-size:.72rem;color:#8a6a2a;letter-spacing:.03em}
+.my-q-x{flex:none;background:none;border:none;color:#a08850;font-size:.95rem;cursor:pointer;padding:4px 6px;border-radius:6px}
+.my-q-x:hover{background:rgba(160,136,80,.15);color:#5a3a10}
+
 .masthead{display:flex;align-items:baseline;gap:12px;margin-bottom:22px;flex-wrap:wrap;justify-content:center}
 .mast-dot{width:10px;height:10px;border-radius:50%;background:var(--amber);box-shadow:0 0 12px var(--amber);align-self:center}
 .masthead h1{font-size:1.9rem;font-weight:800;letter-spacing:.5px}
@@ -3854,7 +4058,7 @@ const css = `
 .mark-btn.hl-p{background:#ffd6e8}
 @media print{
   body{background:#fff!important}
-  .masthead,.deck,.dial,.tv-chin,.tv-stand,.font-btns,.search-row,.search-panel,.flex-hint,.mark-bar,.fm-hint,.bar-title{display:none!important}
+  .masthead,.deck,.dial,.tv-chin,.tv-stand,.font-btns,.search-row,.search-panel,.flex-hint,.mark-bar,.fm-hint,.bar-title,.opening,.studio::before,.to-opening,.my-q-x{display:none!important}
   .tv-frame,.screen,.screen-body{position:static!important;box-shadow:none!important;border:none!important;background:#fff!important;color:#000!important;max-height:none!important;overflow:visible!important;zoom:1!important}
   .scroll-text{max-height:none!important;overflow:visible!important}
 }

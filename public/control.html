@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מרכז השליטה של LOMED·TV</title>
+<link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAFk0lEQVR4nO3dTU+UVxiH8TMDAyMIjNABGhpNayuxmvpCsQLaxqT2TYV1v0G/QZdNF1100c/RnWCidlNdSFOLDXbR8LLFREEL0RCkImSeLjAIR/5Y7xkc5pzrtwM5cEwunjlwzzOk2nJZB2wmXe4NYOciDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUCqLvcGXtnlH7sb6y3b/vr7v+7+86Tk+wkYVw5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGp8p4maPbzd8ecc0ninHPJ2nuTZP2bG/41SV58Z/J85eqbm3zM2qf75qe/p2b+LdX+X7+I4liVSjnnXMp7W3xskV8rnS72M5QXDyuQiAMScUAiDkjEAYk4IBEHJOLYLvOLK5V+ay5xbJerNx88XS6UexdFIY5tkSRuaPh+uXdRLOLYFiMTj+7NVvZjiqvE2cr5b/98DV+lsb568IeuTLXxm2fwxkxp91MWXDk299XJVnMZ03NLI2MPS7ufsiCOTaRSrv9Um3n50PBMIXn5h+18xLGJ4wea3spnbWufLheu3HxQ2v2UC3FsopjLxvXbc/OPV0q4mTIiDt+ehszpD5rNyy8GcRRdRRy+cz2t1VXGZ3BN3lmYnFoo7X7KiDg2SKfchT77Y0oYP8GuIY4Nug/m3mypta2dX1y5NjpX2v2UF3FsMFDEUfTK7xU/TPEQx3P5XE3v4T22tYXEXfqt4ocpHuJ47nxvq/lmglvjDwMYpniI45l0OnW+1/6YcvFGaJcNRxxreg7l8rka29rpuaVb4yEMUzzE8czA6Xbz2mCGKR7icM659ubaEwdztrUhDVM8xOGccxf62sy3tV4bDWeY4iEOV5VOnetpNS8fHA7qt6LrEYc7faS5uTFjWzs5FdQwxUMcRQ3oQ5rBvij2ODry2a4DTba1849Xrt8OapjiiT2O/r62rV6+ZUtXKv/OlK1FHUemKvXlybxtbZDDFE/UcXxyrCW323gUHRkLcJjiiTqOYgb0g5V/Q9tLxRvHvvZdR95ttK29N/skyGGKJ944irlsDA3fD3KY4ok0jtpM+vMTxqPo0+XC1UCHKZ5I4zhzvKWhznif8LXRufnFMIcpnkjjKO4oGvJvRdeLMY79HXWH3m6wrZ0IepjiiTGOgVP25/UEdmfK1qKLI1uTPtv9hm1t8MMUT3RxnO3O12erbGsvhz5M8UQXR7/1bsdC4i5FcxRdFVccnXvrO/fW29aOjD2cnlsq7X52uLji4Cj6SiKKoz5b9emHxqPo3dknIxOPSrqdChBRHJ+dyGdrjP/fS8P3kwiGKZ6I4jAfReMZpnhiiePwOw37O+psa38dnY1kmOKJJQ7zZcM5NxTiTdL/RxRxNNRVnzneYls7MbUweSeWYYoniji++Chfm4n6haptoojD/JgS2zDFE34cR99r3Ne+y7Y2tmGKJ/w4zM/riXCY4gk8jqbd1R8fNR5F/4hvmOIJPI5zJ1sz1pcjHor4KLoq5DhSRbwccZzDFE/IcXR1NnVY/zLGUJTDFE/IcZiPokvLhV+iHKZ4Um054/cWghfylQNFIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTjXw7YWtf79hftg9noeIlv0ePKAYk4IBEHJO54g8SVAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSP8Bsi9GE53KArQAAAAASUVORK5CYII=">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAFk0lEQVR4nO3dTU+UVxiH8TMDAyMIjNABGhpNayuxmvpCsQLaxqT2TYV1v0G/QZdNF1100c/RnWCidlNdSFOLDXbR8LLFREEL0RCkImSeLjAIR/5Y7xkc5pzrtwM5cEwunjlwzzOk2nJZB2wmXe4NYOciDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUAiDkjEAYk4IBEHJOKARByQiAMScUCqLvcGXtnlH7sb6y3b/vr7v+7+86Tk+wkYVw5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGp8p4maPbzd8ecc0ninHPJ2nuTZP2bG/41SV58Z/J85eqbm3zM2qf75qe/p2b+LdX+X7+I4liVSjnnXMp7W3xskV8rnS72M5QXDyuQiAMScUAiDkjEAYk4IBEHJOLYLvOLK5V+ay5xbJerNx88XS6UexdFIY5tkSRuaPh+uXdRLOLYFiMTj+7NVvZjiqvE2cr5b/98DV+lsb568IeuTLXxm2fwxkxp91MWXDk299XJVnMZ03NLI2MPS7ufsiCOTaRSrv9Um3n50PBMIXn5h+18xLGJ4wea3spnbWufLheu3HxQ2v2UC3FsopjLxvXbc/OPV0q4mTIiDt+ehszpD5rNyy8GcRRdRRy+cz2t1VXGZ3BN3lmYnFoo7X7KiDg2SKfchT77Y0oYP8GuIY4Nug/m3mypta2dX1y5NjpX2v2UF3FsMFDEUfTK7xU/TPEQx3P5XE3v4T22tYXEXfqt4ocpHuJ47nxvq/lmglvjDwMYpniI45l0OnW+1/6YcvFGaJcNRxxreg7l8rka29rpuaVb4yEMUzzE8czA6Xbz2mCGKR7icM659ubaEwdztrUhDVM8xOGccxf62sy3tV4bDWeY4iEOV5VOnetpNS8fHA7qt6LrEYc7faS5uTFjWzs5FdQwxUMcRQ3oQ5rBvij2ODry2a4DTba1849Xrt8OapjiiT2O/r62rV6+ZUtXKv/OlK1FHUemKvXlybxtbZDDFE/UcXxyrCW323gUHRkLcJjiiTqOYgb0g5V/Q9tLxRvHvvZdR95ttK29N/skyGGKJ944irlsDA3fD3KY4ok0jtpM+vMTxqPo0+XC1UCHKZ5I4zhzvKWhznif8LXRufnFMIcpnkjjKO4oGvJvRdeLMY79HXWH3m6wrZ0IepjiiTGOgVP25/UEdmfK1qKLI1uTPtv9hm1t8MMUT3RxnO3O12erbGsvhz5M8UQXR7/1bsdC4i5FcxRdFVccnXvrO/fW29aOjD2cnlsq7X52uLji4Cj6SiKKoz5b9emHxqPo3dknIxOPSrqdChBRHJ+dyGdrjP/fS8P3kwiGKZ6I4jAfReMZpnhiiePwOw37O+psa38dnY1kmOKJJQ7zZcM5NxTiTdL/RxRxNNRVnzneYls7MbUweSeWYYoniji++Chfm4n6haptoojD/JgS2zDFE34cR99r3Ne+y7Y2tmGKJ/w4zM/riXCY4gk8jqbd1R8fNR5F/4hvmOIJPI5zJ1sz1pcjHor4KLoq5DhSRbwccZzDFE/IcXR1NnVY/zLGUJTDFE/IcZiPokvLhV+iHKZ4Um054/cWghfylQNFIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTigEQckIgDEnFAIg5IxAGJOCARByTjXw7YWtf79hftg9noeIlv0ePKAYk4IBEHJO54g8SVAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSMQBiTggEQck4oBEHJCIAxJxQCIOSP8Bsi9GE53KArQAAAAASUVORK5CYII=">
+<meta name="apple-mobile-web-app-title" content="LOMED·TV">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --night:#1c1209; --panel:#281b0e; --panel2:#31220f;
+    --klaf:#efe2c4; --dim:#c9b892; --gold:#d9a441; --line:#4a3a20;
+    --tg-live:#7fb069; --tg-work:#d9a441; --tg-queue:#8a7d63; --tg-wait:#d1604f; --tg-focus:#5b9bd5;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--night);color:var(--klaf);font-family:'Heebo',sans-serif;font-weight:300;line-height:1.65;padding-bottom:60px}
+  .serif{font-family:'Frank Ruhl Libre',serif}
+  a{color:var(--gold);text-decoration:none} a:hover{text-decoration:underline}
+  button{font-family:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:2px;border-radius:3px}
+
+  header{padding:22px 18px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#241708,var(--night))}
+  .hrow{max-width:980px;margin:0 auto;display:flex;flex-wrap:wrap;align-items:baseline;gap:10px 16px}
+  h1{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:1.45rem}
+  h1 span{color:var(--gold)}
+  .meta{color:var(--dim);font-size:.85rem}
+  .quick{max-width:980px;margin:10px auto 0;display:flex;flex-wrap:wrap;gap:8px;font-size:.82rem}
+  .quick a{border:1px solid var(--line);border-radius:999px;padding:3px 13px;background:rgba(0,0,0,.25)}
+  .quick i{font-style:normal;border:1px solid var(--line);border-radius:999px;padding:3px 13px;color:var(--dim)}
+
+  .tabs{max-width:980px;margin:16px auto 0;padding:0 18px;display:flex;gap:8px}
+  .tabbtn{background:var(--panel);border:1px solid var(--line);border-bottom:none;color:var(--dim);
+    border-radius:9px 9px 0 0;padding:8px 18px;font-size:.9rem}
+  .tabbtn.on{color:var(--gold);background:var(--panel2);font-weight:500}
+  .tabwrap{max-width:980px;margin:0 auto;padding:0 18px}
+  .tab{display:none;border-top:1px solid var(--line);padding-top:20px}
+  .tab.on{display:block}
+
+  /* על השולחן */
+  .desk{border:1px solid var(--gold);border-radius:12px;background:rgba(217,164,65,.08);padding:16px 20px;margin-bottom:18px}
+  .desk .lbl{color:var(--gold);font-weight:500;font-size:.85rem;margin-bottom:4px}
+  .desk .what{font-size:1.05rem;font-weight:400}
+  .desk .how{color:var(--dim);font-size:.86rem;margin-top:5px}
+
+  /* מונים */
+  .counters{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+  @media(max-width:560px){.counters{grid-template-columns:repeat(2,1fr)}}
+  .cnt{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 8px;text-align:center}
+  .cnt b{display:block;font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:1.7rem;color:var(--gold)}
+  .cnt span{font-size:.78rem;color:var(--dim)}
+
+  h2{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.15rem;margin:26px 0 12px;color:var(--klaf)}
+  h2 small{font-family:'Heebo';font-weight:300;color:var(--dim);font-size:.8rem}
+
+  /* תגים — חמישה בלבד */
+  .tag{display:inline-block;font-size:.72rem;border-radius:999px;padding:1px 10px;border:1px solid;white-space:nowrap;font-weight:400;vertical-align:1px}
+  .t-live{color:var(--tg-live);border-color:var(--tg-live)}
+  .t-work{color:var(--tg-work);border-color:var(--tg-work)}
+  .t-queue{color:var(--tg-queue);border-color:var(--tg-queue)}
+  .t-wait{color:var(--tg-wait);border-color:var(--tg-wait)}
+  .t-focus{color:var(--tg-focus);border-color:var(--tg-focus)}
+
+  .toolbar{display:flex;justify-content:flex-end;margin-bottom:8px}
+  .toolbar button{background:none;border:1px solid var(--line);color:var(--dim);border-radius:7px;padding:4px 12px;font-size:.8rem}
+
+  /* עץ */
+  details.branch{border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:10px;overflow:hidden}
+  details.branch>summary{list-style:none;cursor:pointer;padding:11px 16px;font-weight:500;font-size:.98rem;display:flex;align-items:center;gap:10px}
+  details.branch>summary::-webkit-details-marker{display:none}
+  details.branch>summary .arr{margin-inline-start:auto;color:var(--dim);transition:transform .2s;font-size:.8rem}
+  details.branch[open]>summary .arr{transform:rotate(90deg)}
+  .node{border-top:1px solid rgba(74,58,32,.5);padding:10px 18px 11px}
+  .node .nm{font-weight:400;font-size:.93rem;display:flex;flex-wrap:wrap;align-items:baseline;gap:8px}
+  .node .rows{margin-top:3px;font-size:.84rem;color:var(--dim)}
+  .node .rows b{color:var(--klaf);font-weight:500}
+  .node .rows .nxt{color:var(--gold)}
+  .node .rows a{font-size:.82rem}
+
+  /* תוכנית */
+  ol.plan{list-style:none;counter-reset:p;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+  ol.plan li{counter-increment:p;padding:10px 44px 10px 16px;position:relative;font-size:.9rem;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+  ol.plan li::before{content:counter(p);position:absolute;right:15px;top:10px;font-family:'Frank Ruhl Libre',serif;font-weight:700;color:var(--gold)}
+  ol.plan li+li{border-top:1px solid rgba(74,58,32,.45)}
+  ol.plan .who{color:var(--dim);font-size:.78rem}
+  .hot{color:#e8956d;font-size:.75rem;font-weight:500}
+
+  .shelf,.docs,.timeline{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:6px 0}
+  .shelf div,.docs div,.timeline div{padding:7px 16px;font-size:.87rem}
+  .shelf div+div,.docs div+div,.timeline div+div{border-top:1px solid rgba(74,58,32,.4)}
+  .timeline b{color:var(--gold);font-weight:500;font-family:'Frank Ruhl Libre',serif;margin-inline-end:8px}
+  .docs .new{color:var(--gold)}
+
+  /* לשונית המבנה הקודם */
+  .old-hero{text-align:center;padding:26px 14px;border:1px solid var(--line);border-radius:10px;background:radial-gradient(ellipse 500px 260px at 50% 0%,#3a2810,var(--panel));margin-bottom:16px}
+  .old-hero h3{font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:1.5rem;line-height:1.35}
+  .old-hero p{color:var(--dim);font-size:.88rem;margin-top:8px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:720px){.cols{grid-template-columns:1fr}}
+  .box{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 16px;font-size:.86rem}
+  .box h4{color:var(--gold);font-weight:500;font-size:.92rem;margin-bottom:6px}
+  .box ol{padding-inline-start:18px;color:var(--klaf)}
+  .box li{margin-bottom:3px}
+  .legend{margin:14px 0 6px;font-size:.8rem;color:var(--dim);display:flex;flex-wrap:wrap;gap:10px}
+  footer{max-width:980px;margin:34px auto 0;padding:0 18px;text-align:center;color:var(--dim);font-size:.82rem}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <h1 class="serif">מרכז השליטה של <span>LOMED·TV</span> 📡</h1>
+    <div class="meta">עדכון אחרון: צ'אט 10 · 6.9.2026</div>
+  </div>
+  <div class="quick">
+    <a href="https://famous-rolypoly-1ab096.netlify.app" target="_blank" rel="noopener">🖥 האתר החי</a>
+    <a href="https://aquamarine-muffin-1c019d.netlify.app" target="_blank" rel="noopener">📚 הספרייה הפרטית (70)</a>
+    <a href="https://github.com/haimamar135-pixel/learning-tv" target="_blank" rel="noopener">GitHub</a>
+    <i>📄 סיכום-מעבר-לצאט-11 (בקבצי הפרויקט)</i>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tabbtn on" data-tab="main">המרכז</button>
+  <button class="tabbtn" data-tab="old">המבנה הקודם</button>
+</nav>
+
+<div class="tabwrap">
+
+<!-- ============ לשונית ראשית ============ -->
+<div class="tab on" id="tab-main">
+
+  <div class="desk">
+    <div class="lbl">🎯 על השולחן עכשיו</div>
+    <div class="what">להעלות את App.jsx <b>3,532</b> — האצת חילוץ השמע ×2</div>
+    <div class="how">הקובץ נמסר בפתיחת צ'אט 10 ← מחיקת App*.jsx ישנים מההורדות ← GitHub ← learning-tv/<b>src</b> ← Upload ← Commit עד הסוף ← נטליפיי 1–2 דק' ← "בוצע, תבדוק"</div>
+  </div>
+
+  <div class="counters">
+    <div class="cnt"><b id="c-nodes">–</b><span>צמתים במפה</span></div>
+    <div class="cnt"><b id="c-live">–</b><span>חיים באוויר</span></div>
+    <div class="cnt"><b id="c-tasks">–</b><span>משימות פתוחות</span></div>
+    <div class="cnt"><b id="c-wait">–</b><span>ממתינות להחלטה</span></div>
+  </div>
+
+  <div class="legend">
+    <span class="tag t-live">✓ חי</span><span class="tag t-work">● בעבודה</span><span class="tag t-queue">○ בתור</span><span class="tag t-wait">⏳ ממתין להחלטה</span><span class="tag t-focus">★ פוקוס</span>
+  </div>
+
+  <h2>א · מפת הענפים</h2>
+  <div class="toolbar"><button id="toggleAll">קפל הכל / פתח הכל</button></div>
+  <div id="tree">
+
+    <details class="branch" data-k="b1" open>
+      <summary>🖥 האפליקציה <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">שמונה ערוצים 00–07 <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ טקסט·סיכום·מבחן 5–20·כרטיסיות·מפה·מושגים·תרשים·הקראה; לוח שידורים וציונים</div></div>
+      <div class="node"><div class="nm">המגילה <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ מרקרים B/U/צבעים · הערות שוליים [1] · חיפוש חכם-עברית · מושג←מקור 🟢 · הדפסה 🖨 · סימנייה</div></div>
+      <div class="node"><div class="nm">תצוגת פרק — סימון קטעים (בקשה ג') <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ משפטים לחיצים + mark-bar מלא גם בפרק; זהות אינדקסים עם המגילה</div></div>
+      <div class="node"><div class="nm">הפנים החדשות — מסך פתיחה <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ שתי סקיצות מוכנות (עברית + אוניברסלית, צ'אט 10) · <span class="nxt">הבא ←</span> <b>נבנות כמקשה אחת עם שכבת האף, אחרי הפיילוט</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b2" open>
+      <summary>🚪 שערי המציאות <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">＋ טקסט · PDF · וורד <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ הדבקה/העלאה, חלוקה אוטומטית לפרקים</div></div>
+      <div class="node"><div class="nm">📷 צלם דף (OCR עברית) <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ עובד מהטלפון, כולל HEIC; חצאים 1600px</div></div>
+      <div class="node"><div class="nm">שדרוג הצלם למנוע מעמיק <span class="tag t-wait">⏳ ממתין להחלטה</span></div>
+        <div class="rows">✔ הצורך הוכח (דף "אור הבהיר": שגיאות בדפוס קבלי צפוף) · <span class="nxt">הבא ←</span> <b>אישור מייל 26s ← scanPiece ל-Sonnet + שדרוג הליטוש</b></div></div>
+      <div class="node"><div class="nm">🎙 הקלט שיעור (תמלול Groq) <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ נתחי 110 שנ' · quietCut · ליטוש "מילת הלשון" · 45 דק' ← 2–3 דק'</div></div>
+      <div class="node"><div class="nm">🎥🎬 וידאו — מסלול ב' <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ decodeViaElement: חילוץ PCM חי מ-MOV, wakeLock, אחוזים (3,527 בשידור)</div></div>
+      <div class="node"><div class="nm">האצת חילוץ ×2 <span class="tag t-wait">⏳ ממתין להחלטה</span></div>
+        <div class="rows">✔ הקוד מוכן (3,532) · <span class="nxt">הבא ←</span> <b>ההעלאה שעל השולחן — 45 דק' וידאו ≈ 23 דק' חילוץ</b></div></div>
+      <div class="node"><div class="nm">תמלול זורם 🎙⚡ <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ תוכנית מלאה כתובה (תוכנית-תמלול-זורם.md) · <span class="nxt">הבא ←</span> <b>מושב עבודה אחד כשיגיע התור</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b3" open>
+      <summary>☁ תשתית <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">Supabase — חשבונות + טבלאות + RLS <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ books/outputs/notes · קישור-קסם למייל · פרויקט lomed-tv פרנקפורט</div></div>
+      <div class="node"><div class="nm">סנכרון חוצה-מכשירים <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ שלב 3 מלא: כל פעולה ← ענן; הספרייה בטלפון ובמחשב</div></div>
+      <div class="node"><div class="nm">גיבוי ⬇⬆ <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ קובץ lomedtv-backup; שחזור מאומת</div></div>
+      <div class="node"><div class="nm">GitHub + Netlify <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ learning-tv ← famous-rolypoly · claude.cjs (82) · transcribe.cjs (69)</div></div>
+      <div class="node"><div class="nm">שער כניסה + מכסות <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows"><span class="nxt">הבא ←</span> <b>תנאי מוקדם לכל שיתוף קישור פומבי (הגנה על עלויות AI)</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b4" open>
+      <summary>🕯 הנשמה — הדיון התורני <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">מסמך הדיון — ח"י חלקים <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ 18 חלקים · 19 עקרונות · חמשת חוקי המנוע (8 חלקים נוספו בצ'אט 10) · <span class="nxt">הבא ←</span> <b>להעלות את גרסת ח"י לקבצי הפרויקט</b></div></div>
+      <div class="node"><div class="nm">🌟 הפיילוט — הדיון נטען כספר <span class="tag t-focus">★ פוקוס</span></div>
+        <div class="rows"><span class="nxt">הבא ←</span> <b>חיים הלומד הראשון בתוכו + טקס "לבוש התשובה" ביד</b> (שאלות "?" ← מרקר ירוק + "! תשובה ל-X")</div></div>
+      <div class="node"><div class="nm">דיון תעדוף האפיון (7 החלטות) <span class="tag t-wait">⏳ ממתין להחלטה</span></div>
+        <div class="rows">✔ הבסיס מוכן בסוף "שילוב-אפיון-המוח-הלומד" · <span class="nxt">הבא ←</span> <b>החלטת חיים מתי לקיים</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b5" open>
+      <summary>👃 שכבת האף — מנוע היחס <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">שדה השאלה בשער + לוח "השאלות הפתוחות שלי" <span class="tag t-focus">★ פוקוס</span></div>
+        <div class="rows">✔ מעוצב בסקיצה; השאלה ← הערת ❓ ראשונה · <span class="nxt">הבא ←</span> <b>לוח אל"פים בדרך ללמ"ד (עיקרון 17) — נבנה עם הפנים אחרי הפיילוט</b></div></div>
+      <div class="node"><div class="nm">הד הלימוד 🔔 <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows"><span class="nxt">הבא ←</span> <b>לפי חמשת חוקי המנוע: הצתה מחיסרון, עיתוי ארך-אפיים</b></div></div>
+      <div class="node"><div class="nm">לבוש התשובה 🧵 <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ באר צ'אט 10; מבנה נתונים: Relation שאלה↔משפט (= וא"ו) · <span class="nxt">הבא ←</span> <b>קוד רק אחרי שהטקס נבחן ביד בפיילוט</b></div></div>
+      <div class="node"><div class="nm">מצב מראה = מד השוואת-צורה <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ אפיון מלא (§11) + הגדרה מהדיון (עיקרון 16) · <span class="nxt">הבא ←</span> <b>פלט על קו האמצע: "מה קלטת" ו"מה חסר" בנשימה אחת</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b6" open>
+      <summary>📚 הספרייה <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">הספרייה הפרטית — 70 ספרים <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ נקלטה בפרויקט בית המדרש · <a href="https://aquamarine-muffin-1c019d.netlify.app" target="_blank" rel="noopener">aquamarine-muffin-1c019d.netlify.app</a></div></div>
+      <div class="node"><div class="nm">ספריית האפליקציה בענן <span class="tag t-live">✓ חי</span></div>
+        <div class="rows">✔ 13+ ספרים מסונכרנים (קל"ח · אדיר במרום · שער הכוונות · עץ חיים · ספרי תמלול וסריקה...)</div></div>
+      <div class="node"><div class="nm">מסלול ספריא לזוהר + "הוסף עמודים לספר קיים" <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows"><span class="nxt">הבא ←</span> <b>אחרי משימות הפתיחה של צ'אט 11</b></div></div>
+    </details>
+
+    <details class="branch" data-k="b7" open>
+      <summary>🔭 מעבר לאופק <span class="arr">◀</span></summary>
+      <div class="node"><div class="nm">חיפוש בהערות + "דף ההערות שלי" 🖨 <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ ההערות כבר בטבלת notes — תשתית מוכנה</div></div>
+      <div class="node"><div class="nm">חזרה מרווחת + גרף ידע <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ מפת יעד: §16 באפיון — צמיחה טבלה-טבלה</div></div>
+      <div class="node"><div class="nm">חברותא מקוונת △ + חוצת-שפות 🌐 <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ חזון מלא כתוב; Realtime כבר קיים ב-Supabase — מדרגה 1 קרובה</div></div>
+      <div class="node"><div class="nm">"הספר מקשיב לך קורא" 🎙📖 + הקורא החי 🌟 <span class="tag t-queue">○ בתור</span></div>
+        <div class="rows">✔ כל הרכיבים קיימים (הקלטה + Whisper + stemEq)</div></div>
+    </details>
+
+  </div>
+
+  <h2>ב · תוכנית העבודה <small>לפי דחיפות</small></h2>
+  <ol class="plan" id="plan">
+    <li><span class="hot">🔥 חם</span> העלאת App.jsx 3,532 + אימות curl <span class="who">· שערים</span> <span class="tag t-wait">⏳ ממתין להחלטה</span></li>
+    <li><span class="hot">🔥 חם</span> בדיקת 🎥 מהטלפון — "(×2)" באחוזים <span class="who">· שערים</span> <span class="tag t-queue">○ בתור</span></li>
+    <li><span class="hot">🔥 חם</span> המייל של נטליפיי (26 שניות) — פתוח מצ'אט 7! <span class="who">· שערים</span> <span class="tag t-wait">⏳ ממתין להחלטה</span></li>
+    <li><span class="hot">🔥 חם</span> הפיילוט: מסמך הדיון כספר + טקס לבוש התשובה <span class="who">· הנשמה</span> <span class="tag t-focus">★ פוקוס</span></li>
+    <li>העלאת מסמך הדיון (גרסת ח"י) לקבצי הפרויקט <span class="who">· הנשמה</span> <span class="tag t-wait">⏳ ממתין להחלטה</span></li>
+    <li>שכבת האף + הפנים החדשות — מקשה אחת <span class="who">· האף + האפליקציה</span> <span class="tag t-focus">★ פוקוס</span></li>
+    <li>בדיקות ותיקות: מבחן 20 · הדפסת מפה שנגררה · הדפסת עמוד עם הערות <span class="who">· האפליקציה</span> <span class="tag t-queue">○ בתור</span></li>
+    <li>שער כניסה + מכסות — לפני כל פרסום קישור <span class="who">· תשתית</span> <span class="tag t-queue">○ בתור</span></li>
+    <li>דיון תעדוף האפיון — 7 ההחלטות <span class="who">· הנשמה</span> <span class="tag t-wait">⏳ ממתין להחלטה</span></li>
+  </ol>
+
+  <h2>ג · מדף החלומות <small>נרשם — לא אבד</small></h2>
+  <div class="shelf">
+    <div>1 חברותא קולית · 2 "הרמח"ל עונה בלשונו" · 3 הטקסט שמכיר אותך</div>
+    <div>4 מחוון עומק 🎚 · 5 שרשרת ההיגיון · 6 מסע סוקרטי</div>
+    <div>7 מפת התורה · 8 ציר הזמן של רעיון · 9 המחשת הנמשל</div>
+    <div>10 גיליון החכמים · 12 "ספר הלימוד שלי" · 15 (שמור)</div>
+    <div>הגרסה האוניברסלית 🌍 — סקיצה חיה קיימת (קונפוציוס, 不憤不啟)</div>
+    <div>אסטרטגיית חמשת המעגלים המסחרית (ניתוח צ'אט 10)</div>
+    <div>הלמ"ד כסמל האפליקציה — אומצה בסקיצות ✓</div>
+  </div>
+
+  <h2>ד · מסמכי הפרויקט <small>החדש למעלה</small></h2>
+  <div class="docs">
+    <div class="new">📄 סיכום-מעבר-לצאט-11 (6.9, צ'אט 10) — הרציפות העדכנית</div>
+    <div class="new">🕯 הדיון-התורני-הפרצוף-הטכנולוגי — ח"י חלקים · 19 עקרונות (עודכן צ'אט 10)</div>
+    <div>🚦 תמרור-הכוונה-מעורבות-עם-הטקסט (31.8)</div>
+    <div>📐 שילוב-אפיון-המוח-הלומד (1.9)</div>
+    <div>🎙 תוכנית-תמלול-זורם (5.9)</div>
+    <div>☁ תוכנית-Supabase (31.8) · △ חזון-חברותא-מקוונת (1.9) · 🎬 סיפור-האפליקציה (1.9)</div>
+  </div>
+
+  <h2>ה · ציר זמן</h2>
+  <div class="timeline">
+    <div><b>עד 16.8</b>תשתית מלאה: 8 ערוצים, ספרייה, לוח שידורים, GitHub+Netlify</div>
+    <div><b>31.8</b>יום ההרחבה: מגילה בסימון משפטים, מרקרים, חיפוש-עברית, מפה צפה, הדפסה; נכתב התמרור</div>
+    <div><b>1.9</b>יום הענן: Supabase — טבלאות, RLS, חשבונות, הגירה; חזון החברותא</div>
+    <div><b>2.9</b>הסנכרון חצה מכשיר 📱 — הספרייה בטלפון; בקשה ג' נבנתה; ניתוח האפיון</div>
+    <div><b>4–5.9</b>שערי המציאות: 📷 OCR · 🎙 תמלול Groq · 🎥 מצלמה; דק השערים; הדיון התורני נפתח (חלקים א–ג)</div>
+    <div><b>6.9 (צ'אט 9)</b>הגבול, הלמ"ד והמאזניים: חלקים ד–י + חמשת חוקי המנוע; מסלול ב'; תוכנית תמלול זורם</div>
+    <div><b>6.9 (צ'אט 10)</b>צ'אט היחס: חלקים יא–ח"י (הוא"ו · הגשר · שפה=שכינה · הרגש · השוואת צורה · אֶל/לֹא · הנסירה · ציר העומק); חדר בקרה עם הנשמה במרכז; שתי סקיצות פנים; לבוש התשובה; מרכז השליטה הזה</div>
+  </div>
+
+</div>
+
+<!-- ============ לשונית: המבנה הקודם ============ -->
+<div class="tab" id="tab-old">
+  <div class="old-hero">
+    <div style="color:var(--gold);font-size:.85rem;margin-bottom:6px">חדר הבקרה של צ'אט 10 — הנשמה במרכז (ארכיון)</div>
+    <h3 class="serif">הטקסט הוא בן־שיח,<br>לא חומר גלם</h3>
+    <p>קרבה · טביעת יד · דו־שיח · עקיפה — וכל אלגוריתם יונק מן הדיון התורני</p>
+  </div>
+  <div class="cols">
+    <div class="box">
+      <h4>חמשת חוקי המנוע = חמשת איברי האלגוריתם</h4>
+      <ol>
+        <li><b>קלט</b> — מפת ההפסקים (לא זמן-מסך)</li>
+        <li><b>הצתה</b> — אין תוצר בלא חיסרון</li>
+        <li><b>פלט</b> — מילת הלשון (הסרת מכסה בלבד)</li>
+        <li><b>עיתוי</b> — ארך אפיים (שתיקה כברירת מחדל)</li>
+        <li><b>כיוון</b> — חוט אֶל השורה (ו' החיבור)</li>
+      </ol>
+    </div>
+    <div class="box">
+      <h4>שלוש הקומות</h4>
+      <ol>
+        <li>מה המערכת עושה — חמשת החוקים</li>
+        <li>מה היא לא — לא ה"בין" (השכינה שורה בין הלומד לטקסט)</li>
+        <li>מה אינה יכולה להיות — לא המים (הרגש שמור ללב)</li>
+      </ol>
+      <p style="color:var(--dim);margin-top:8px">מדד ההצלחה: מאזניים שהתיישבו · התכלית: לומד שיוצא אוהב את הספר</p>
+    </div>
+  </div>
+  <div class="box" style="margin-top:12px">
+    <h4>ח"י חלקי הדיון</h4>
+    <p>א הפרצוף · ב ריח וירח · ג האף והמשפט · ד הגבול · ה ההשגה כיחס · ו הלמ"ד · ז דו-כיווניות · ח מ"ל+ד' · ט היעד וחוקי המנוע · י היחס והמנוחה · יא ו' החיבור ויחס=ג' הויות · יב שונים אבל לא נפרדים · יג שפה=שכינה · יד הצינור לרגש · טו השוואת הצורה · טז אֶל/לֹא · יז הנסירה: המבדיל הוא המחבר · יח ציר העומק — המרחב שבו אוהבים</p>
+  </div>
+</div>
+
+</div>
+
+<footer>
+  <p class="serif" style="color:var(--klaf)">"יש כאן מי שמחכה ללמוד איתך"</p>
+  <p style="margin-top:4px">⚠️ חובה בסוף כל צ'אט: לעדכן את מרכז השליטה ולהגיש גרסה חדשה · תוכן משתנה, מבנה קבוע</p>
+</footer>
+
+<script>
+(function(){
+  // לשוניות
+  var btns = document.querySelectorAll('.tabbtn');
+  function setTab(id){
+    btns.forEach(function(b){b.classList.toggle('on', b.dataset.tab===id);});
+    document.getElementById('tab-main').classList.toggle('on', id==='main');
+    document.getElementById('tab-old').classList.toggle('on', id==='old');
+    try{localStorage.setItem('ltv-cc-tab', id);}catch(e){}
+  }
+  btns.forEach(function(b){b.addEventListener('click', function(){setTab(b.dataset.tab);});});
+  try{var t = localStorage.getItem('ltv-cc-tab'); if(t) setTab(t);}catch(e){}
+
+  // שמירת מצב קיפול
+  var branches = document.querySelectorAll('details.branch');
+  branches.forEach(function(d){
+    try{
+      var saved = localStorage.getItem('ltv-cc-'+d.dataset.k);
+      if(saved==='0') d.removeAttribute('open');
+      if(saved==='1') d.setAttribute('open','');
+    }catch(e){}
+    d.addEventListener('toggle', function(){
+      try{localStorage.setItem('ltv-cc-'+d.dataset.k, d.open?'1':'0');}catch(e){}
+    });
+  });
+  document.getElementById('toggleAll').addEventListener('click', function(){
+    var anyOpen = Array.prototype.some.call(branches, function(d){return d.open;});
+    branches.forEach(function(d){ d.open = !anyOpen; });
+  });
+
+  // מונים = ספירת תגים מדויקת (מחושב, לא ידני)
+  var tree = document.getElementById('tree'), plan = document.getElementById('plan');
+  document.getElementById('c-nodes').textContent = tree.querySelectorAll('.node').length;
+  document.getElementById('c-live').textContent  = tree.querySelectorAll('.tag.t-live').length;
+  document.getElementById('c-tasks').textContent = plan.querySelectorAll('li').length;
+  document.getElementById('c-wait').textContent  = plan.querySelectorAll('.tag.t-wait').length;
+})();
+</script>
+</body>
+</html>

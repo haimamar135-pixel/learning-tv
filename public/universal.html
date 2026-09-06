@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Learning Screen — Universal Face (sketch)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,500;0,700;0,900;1,400&family=Noto+Serif+SC:wght@500;700&family=Noto+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --night:#171008;
+    --klaf:#f2e7cd;
+    --klaf-ink:#2c2314;
+    --dim:#b7a276;
+    --gold:#d9a441;
+    --marker:#f5d76e;
+    --line:#43341c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--night);color:var(--klaf);
+    font-family:'Noto Sans',sans-serif;font-weight:300;line-height:1.7;min-height:100vh;
+  }
+  .serif{font-family:'Noto Serif',serif}
+  .sc{font-family:'Noto Serif SC','Noto Serif',serif}
+  a{color:var(--gold);text-decoration:none}
+  button{font-family:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+
+  /* ── mark: the stroke that rises from the line ── */
+  .brand{display:flex;align-items:center;justify-content:center;gap:14px;padding:34px 20px 0}
+  .mark{position:relative;width:120px;height:56px;flex:none}
+  .mark .row{
+    position:absolute;bottom:11px;left:0;right:0;text-align:center;
+    font-family:'Noto Serif SC','Noto Serif',serif;font-size:17px;color:var(--dim);opacity:.45;
+    letter-spacing:6px;white-space:nowrap;
+  }
+  .mark .base{position:absolute;bottom:9px;left:2px;right:2px;height:1px;background:var(--line)}
+  .mark svg{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);overflow:visible}
+  .mark svg path{stroke:var(--gold);stroke-width:3.4;fill:none;stroke-linecap:round;
+    filter:drop-shadow(0 0 10px rgba(217,164,65,.4))}
+  .brand .name{font-family:'Noto Serif',serif;font-weight:700;font-size:1.25rem}
+  .brand .name small{display:block;font-family:'Noto Sans';font-weight:300;font-size:.76rem;color:var(--dim);letter-spacing:.05em}
+
+  /* ── languages ── */
+  .langs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:18px;padding:0 16px}
+  .langs b{font-weight:400;font-size:.8rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:3px 12px}
+  .langs b.on{color:var(--night);background:var(--gold);border-color:var(--gold)}
+
+  /* ── hero ── */
+  .hero{text-align:center;padding:38px 22px 8px;position:relative}
+  .hero::before{
+    content:'';position:absolute;inset:-120px 0 auto 0;height:560px;pointer-events:none;
+    background:radial-gradient(ellipse 620px 380px at 50% 40%, rgba(217,164,65,.10), transparent 70%);
+  }
+  .hero h1{
+    font-family:'Noto Serif',serif;font-weight:700;
+    font-size:clamp(1.65rem,5.2vw,2.8rem);line-height:1.35;max-width:22ch;margin:0 auto;
+  }
+  .hero p{color:var(--dim);margin:14px auto 0;max-width:52ch;font-size:.98rem}
+
+  /* ── the vessel ── */
+  .vessel{max-width:560px;margin:28px auto 0;padding:0 22px}
+  .vessel label{display:block;font-size:.92rem;color:var(--dim);margin-bottom:10px;text-align:center}
+  .vessel .field{
+    display:flex;gap:10px;align-items:center;
+    background:rgba(242,231,205,.05);border:1px solid var(--line);border-radius:12px;
+    padding:6px 6px 6px 16px;box-shadow:inset 0 2px 12px rgba(0,0,0,.35);
+  }
+  .vessel input{
+    flex:1;background:none;border:none;color:var(--klaf);
+    font-family:'Noto Serif',serif;font-size:1.02rem;padding:10px 8px;min-width:0;
+  }
+  .vessel input::placeholder{color:rgba(183,162,118,.55)}
+  .vessel .go{
+    background:var(--gold);color:var(--night);border:none;border-radius:9px;
+    font-weight:500;font-size:.92rem;padding:11px 20px;white-space:nowrap;
+  }
+  .vessel .go:hover{filter:brightness(1.08)}
+  .vessel .skip{display:block;text-align:center;margin-top:12px;font-size:.84rem;color:var(--dim)}
+  .vessel .skip a{color:var(--dim);text-decoration:underline;text-underline-offset:3px}
+  .vessel .law{
+    text-align:center;margin-top:20px;font-size:.83rem;color:var(--dim);font-style:italic;
+  }
+  .vessel .law .sc{font-style:normal;color:var(--klaf)}
+
+  /* ── the peeking page: Analects ── */
+  .page-peek{max-width:640px;margin:52px auto 0;padding:0 18px;position:relative}
+  .daf{
+    position:relative;background:var(--klaf);color:var(--klaf-ink);
+    border-radius:10px 10px 0 0;padding:32px 38px 0;
+    box-shadow:0 -2px 60px rgba(217,164,65,.13), 0 -1px 0 rgba(242,231,205,.25);
+    min-height:300px;overflow:hidden;
+  }
+  .daf::after{
+    content:'';position:absolute;bottom:0;left:0;right:0;height:90px;
+    background:linear-gradient(180deg, transparent, var(--night));
+  }
+  .daf .sefer{font-size:.78rem;color:#8a7248;margin-bottom:14px}
+  .daf .torah{
+    font-family:'Noto Serif SC','Noto Serif',serif;font-size:1.45rem;line-height:2.1;font-weight:500;
+    max-width:30ch;
+  }
+  .daf .trans{font-family:'Noto Serif',serif;font-style:italic;font-size:.92rem;color:#6d5а33;color:#6d5a33;margin-top:10px;max-width:44ch}
+  .hl{background:linear-gradient(180deg, transparent 12%, var(--marker) 12%, var(--marker) 88%, transparent 88%);padding:0 2px;border-radius:2px}
+  .un{border-bottom:2px solid #b5852f}
+  .fn{color:#a06a1f;font-size:.68em;vertical-align:super;font-weight:700}
+  .note{
+    position:absolute;bottom:60px;right:26px;max-width:215px;
+    background:#fff8e6;border:1px solid #e0c98f;border-radius:8px;
+    padding:9px 12px;font-size:.8rem;line-height:1.55;color:#4a3a1a;
+    box-shadow:0 3px 14px rgba(60,40,0,.18);transform:rotate(1.2deg);
+  }
+  .note b{font-weight:500;color:#8a5a10}
+  .thread{position:absolute;pointer-events:none;inset:0}
+  .thread path{fill:none;stroke:var(--gold);stroke-width:1.6;stroke-dasharray:4 5;opacity:.9}
+  @media (prefers-reduced-motion:no-preference){
+    .thread path{stroke-dashoffset:220;animation:sew 1.6s .5s ease-out forwards}
+    @keyframes sew{to{stroke-dashoffset:0}}
+  }
+  .peek-caption{text-align:center;color:var(--dim);font-size:.85rem;margin-top:14px}
+
+  /* ── gates ── */
+  .gates{max-width:760px;margin:52px auto 0;padding:0 20px;text-align:center}
+  .gates h2{font-family:'Noto Serif',serif;font-weight:700;font-size:1.22rem;margin-bottom:4px}
+  .gates .sub{color:var(--dim);font-size:.88rem;margin-bottom:20px}
+  .gate-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  @media(max-width:640px){.gate-row{grid-template-columns:repeat(2,1fr)} .gate-row .g:last-child{grid-column:span 2}}
+  .g{
+    background:rgba(242,231,205,.04);border:1px solid var(--line);border-radius:12px;
+    padding:17px 8px 13px;color:var(--klaf);display:flex;flex-direction:column;gap:6px;align-items:center;
+    transition:border-color .2s, background .2s;
+  }
+  .g:hover{border-color:var(--gold);background:rgba(217,164,65,.07)}
+  .g .ic{font-size:1.45rem}
+  .g .t{font-size:.85rem;font-weight:400}
+  .subjects{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:20px}
+  .subjects i{font-style:normal;font-size:.8rem;color:var(--dim);border:1px solid var(--line);border-radius:999px;padding:3px 13px}
+
+  /* ── scales ── */
+  .scales{
+    max-width:560px;margin:50px auto 0;padding:18px 22px;text-align:center;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  }
+  .scales .icon{font-size:1.25rem;color:var(--gold)}
+  .scales p{font-size:.94rem;margin-top:4px}
+  .scales small{color:var(--dim);font-size:.82rem}
+
+  footer{text-align:center;padding:42px 20px 52px;color:var(--dim);font-size:.9rem}
+  footer .serif{color:var(--klaf);font-size:1.06rem}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <div class="mark" aria-label="A stroke rising from the line of text">
+    <div class="row">a&nbsp; 學&nbsp; あ&nbsp; א&nbsp; ω</div>
+    <div class="base"></div>
+    <svg width="34" height="46" viewBox="0 0 34 46"><path d="M 8 44 C 8 20, 14 10, 26 4"/></svg>
+  </div>
+  <div class="name">The Learning Screen<small>a study partner that never goes home</small></div>
+</div>
+
+<div class="langs" aria-label="Interface languages">
+  <b class="on">English</b><b>中文</b><b>日本語</b><b>עברית</b><b>Español</b><b>العربية</b><b>+</b>
+</div>
+
+<header class="hero">
+  <h1 class="serif">When did a book<br>last answer you back?</h1>
+  <p>There are texts you return to for years. Your understanding grows — and the text never knows. Whatever you study, wherever you're from: this screen was built for that moment.</p>
+</header>
+
+<div class="vessel">
+  <label for="q">What question are you carrying into your text?</label>
+  <div class="field">
+    <input id="q" type="text" placeholder="e.g., What does it really mean to practice?">
+    <button class="go">Enter with your question</button>
+  </div>
+  <span class="skip">Or <a href="#">enter without one</a> — it will find you as you read</span>
+  <p class="law"><span class="sc">不憤不啟</span> — "I do not open the way for one who is not yet striving." <span style="white-space:nowrap">— Confucius, Analects 7:8</span></p>
+</div>
+
+<div class="page-peek">
+  <div class="daf">
+    <div class="sefer">The Analects · Book I — Xue Er 學而第一</div>
+    <p class="torah sc">
+      子曰：<span class="hl">學而時習之，不亦說乎？</span><span class="fn">[1]</span><br>
+      有朋自遠方來，<span class="un">不亦樂乎</span>？
+    </p>
+    <p class="trans serif">The Master said: To learn, and in due time to practice what one has learned — is this not a joy? To have companions arrive from afar — is this not a delight?</p>
+    <div class="note"><b>[1] Your note:</b> ❓ Does 習 mean "review" or "practice in life"? The whole chapter turns on this.</div>
+    <svg class="thread" viewBox="0 0 640 300" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M 258 96 C 300 160, 360 150, 428 212"/>
+    </svg>
+  </div>
+  <p class="peek-caption">Your page, as it truly lives inside: a highlight, an underline, and a note tied by a thread to its own line.</p>
+</div>
+
+<section class="gates">
+  <h2 class="serif">Five gates into your text</h2>
+  <p class="sub">Wherever knowledge meets you — it enters the page. Any language, any subject.</p>
+  <div class="gate-row">
+    <a href="#" class="g"><span class="ic">＋</span><span class="t">Paste text</span></a>
+    <a href="#" class="g"><span class="ic">📷</span><span class="t">Scan a page</span></a>
+    <a href="#" class="g"><span class="ic">🎙</span><span class="t">Record a lecture</span></a>
+    <a href="#" class="g"><span class="ic">🎥</span><span class="t">Film</span></a>
+    <a href="#" class="g"><span class="ic">🎬</span><span class="t">Audio / video file</span></a>
+  </div>
+  <div class="subjects">
+    <i>Classical texts</i><i>Scientific papers</i><i>Law</i><i>Philosophy</i><i>Medicine</i><i>Language study</i><i>Lectures</i>
+  </div>
+</section>
+
+<section class="scales">
+  <div class="icon">⚖</div>
+  <p>Three of your questions settled this month — answered in the text's own words.</p>
+  <small>We don't count outputs here. We count scales that came to rest.</small>
+</section>
+
+<footer>
+  <p class="serif">Someone here is waiting to learn with you.</p>
+  <p style="margin-top:6px">Close to you — in your mouth and in your heart.</p>
+</footer>
+
+</body>
+</html>

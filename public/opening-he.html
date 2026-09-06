@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>מסך הלמידה — הפנים החדשות (סקיצה)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700;900&family=Heebo:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --night:#171008;     /* חדר הלימוד בלילה */
+    --klaf:#f2e7cd;      /* הדף המואר */
+    --klaf-ink:#2c2314;  /* דיו על קלף */
+    --dim:#b7a276;       /* קלף בצל */
+    --gold:#d9a441;      /* חוט הוא"ו */
+    --marker:#f5d76e;    /* מרקר צהוב */
+    --line:#43341c;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--night);
+    color:var(--klaf);
+    font-family:'Heebo',sans-serif;font-weight:300;line-height:1.7;
+    min-height:100vh;
+  }
+  .serif{font-family:'Frank Ruhl Libre',serif}
+  a{color:var(--gold);text-decoration:none}
+  button{font-family:inherit;cursor:pointer}
+  :focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+
+  /* ── הלוגו: למ"ד על השורה ── */
+  .brand{display:flex;align-items:center;justify-content:center;gap:12px;padding:34px 20px 0}
+  .lamed-mark{position:relative;width:56px;height:56px;flex:none}
+  .lamed-mark .row{
+    position:absolute;bottom:10px;right:0;left:0;text-align:center;
+    font-family:'Frank Ruhl Libre',serif;font-size:19px;color:var(--dim);opacity:.45;
+    letter-spacing:2px;white-space:nowrap;overflow:hidden;
+  }
+  .lamed-mark .l{
+    position:absolute;bottom:6px;right:50%;transform:translateX(50%);
+    font-family:'Frank Ruhl Libre',serif;font-weight:900;font-size:46px;line-height:1;
+    color:var(--gold);text-shadow:0 0 22px rgba(217,164,65,.35);
+  }
+  .lamed-mark .base{position:absolute;bottom:8px;right:2px;left:2px;height:1px;background:var(--line)}
+  .brand .name{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.3rem}
+  .brand .name small{display:block;font-family:'Heebo';font-weight:300;font-size:.78rem;color:var(--dim);letter-spacing:.06em}
+
+  /* ── הגיבור: השאלה ── */
+  .hero{
+    text-align:center;padding:44px 22px 8px;position:relative;
+  }
+  .hero::before{ /* אור העששית */
+    content:'';position:absolute;inset:-120px 0 auto 0;height:560px;pointer-events:none;
+    background:radial-gradient(ellipse 620px 380px at 50% 40%, rgba(217,164,65,.10), transparent 70%);
+  }
+  .hero h1{
+    font-family:'Frank Ruhl Libre',serif;font-weight:700;
+    font-size:clamp(1.7rem,5.4vw,2.9rem);line-height:1.4;max-width:19ch;margin:0 auto;
+  }
+  .hero p{color:var(--dim);margin:14px auto 0;max-width:44ch;font-size:1rem}
+
+  /* ── הכלי לפני האור: שדה השאלה ── */
+  .vessel{max-width:560px;margin:30px auto 0;padding:0 22px;position:relative}
+  .vessel label{display:block;font-size:.92rem;color:var(--dim);margin-bottom:10px;text-align:center}
+  .vessel .field{
+    display:flex;gap:10px;align-items:center;
+    background:rgba(242,231,205,.05);
+    border:1px solid var(--line);border-radius:12px;padding:6px 6px 6px 16px;
+    box-shadow:inset 0 2px 12px rgba(0,0,0,.35);
+  }
+  .vessel input{
+    flex:1;background:none;border:none;color:var(--klaf);
+    font-family:'Frank Ruhl Libre',serif;font-size:1.05rem;padding:10px 8px;min-width:0;
+  }
+  .vessel input::placeholder{color:rgba(183,162,118,.55)}
+  .vessel .go{
+    background:var(--gold);color:var(--night);border:none;border-radius:9px;
+    font-weight:500;font-size:.95rem;padding:11px 20px;white-space:nowrap;
+  }
+  .vessel .go:hover{filter:brightness(1.08)}
+  .vessel .skip{display:block;text-align:center;margin-top:12px;font-size:.85rem;color:var(--dim)}
+  .vessel .skip a{color:var(--dim);text-decoration:underline;text-underline-offset:3px}
+
+  /* ── הדף המציץ: פְּנים דרך הפָּנים ── */
+  .page-peek{
+    max-width:640px;margin:56px auto 0;padding:0 18px;position:relative;
+  }
+  .daf{
+    position:relative;background:var(--klaf);color:var(--klaf-ink);
+    border-radius:10px 10px 0 0;padding:34px 38px 0;
+    box-shadow:0 -2px 60px rgba(217,164,65,.13), 0 -1px 0 rgba(242,231,205,.25);
+    min-height:290px;overflow:hidden;
+  }
+  .daf::after{ /* הדף ממשיך מטה אל תוך האפליקציה */
+    content:'';position:absolute;bottom:0;right:0;left:0;height:90px;
+    background:linear-gradient(180deg, transparent, var(--night));
+  }
+  .daf .sefer{font-size:.8rem;color:#8a7248;margin-bottom:14px;font-family:'Heebo'}
+  .daf .torah{
+    font-family:'Frank Ruhl Libre',serif;font-size:1.22rem;line-height:2.05;font-weight:500;
+    max-width:34ch;
+  }
+  .hl{background:linear-gradient(180deg, transparent 12%, var(--marker) 12%, var(--marker) 88%, transparent 88%);padding:0 2px;border-radius:2px}
+  .un{border-bottom:2px solid #b5852f}
+  .fn{
+    color:#a06a1f;font-size:.72em;vertical-align:super;font-weight:700;cursor:default;
+  }
+  /* הערת הלומד + חוט הוא"ו */
+  .note{
+    position:absolute;bottom:64px;left:26px;max-width:200px;
+    background:#fff8e6;border:1px solid #e0c98f;border-radius:8px;
+    padding:9px 12px;font-size:.82rem;line-height:1.55;color:#4a3a1a;
+    box-shadow:0 3px 14px rgba(60,40,0,.18);
+    transform:rotate(-1.2deg);
+  }
+  .note b{font-weight:500;color:#8a5a10}
+  .thread{position:absolute;pointer-events:none;inset:0}
+  .thread path{
+    fill:none;stroke:var(--gold);stroke-width:1.6;stroke-dasharray:4 5;opacity:.9;
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .thread path{stroke-dashoffset:220;animation:sew 1.6s .5s ease-out forwards}
+    @keyframes sew{to{stroke-dashoffset:0}}
+  }
+  .peek-caption{text-align:center;color:var(--dim);font-size:.85rem;margin-top:14px}
+
+  /* ── חמשת השערים ── */
+  .gates{max-width:760px;margin:54px auto 0;padding:0 20px;text-align:center}
+  .gates h2{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.25rem;margin-bottom:4px}
+  .gates .sub{color:var(--dim);font-size:.9rem;margin-bottom:22px}
+  .gate-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+  @media(max-width:640px){.gate-row{grid-template-columns:repeat(2,1fr)} .gate-row .g:last-child{grid-column:span 2}}
+  .g{
+    background:rgba(242,231,205,.04);border:1px solid var(--line);border-radius:12px;
+    padding:18px 8px 14px;color:var(--klaf);display:flex;flex-direction:column;gap:6px;align-items:center;
+    transition:border-color .2s, background .2s;
+  }
+  .g:hover{border-color:var(--gold);background:rgba(217,164,65,.07)}
+  .g .ic{font-size:1.5rem}
+  .g .t{font-size:.88rem;font-weight:400}
+
+  /* ── המאזניים ── */
+  .scales{
+    max-width:560px;margin:52px auto 0;padding:18px 22px;text-align:center;
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  }
+  .scales .icon{font-size:1.3rem;color:var(--gold)}
+  .scales p{font-size:.95rem;color:var(--klaf);margin-top:4px}
+  .scales small{color:var(--dim);font-size:.82rem}
+
+  footer{
+    text-align:center;padding:44px 20px 54px;color:var(--dim);font-size:.9rem;
+  }
+  footer .serif{color:var(--klaf);font-size:1.08rem}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <div class="lamed-mark" aria-label="למ״ד על השורה">
+    <div class="row">ב ר א ש י ת</div>
+    <div class="base"></div>
+    <div class="l">ל</div>
+  </div>
+  <div class="name">מסך הלמידה<small>חברותא שלא הולכת הביתה</small></div>
+</div>
+
+<header class="hero">
+  <h1 class="serif">מתי בפעם האחרונה<br>ספר ענה לך בחזרה?</h1>
+  <p>יש לך ספרים שאתה חוזר אליהם שנים. הידע שלך גדל — והספר לא יודע מזה כלום. עד היום.</p>
+</header>
+
+<div class="vessel">
+  <label for="q">מה השאלה שאתה נושא איתך אל הספר?</label>
+  <div class="field">
+    <input id="q" type="text" placeholder="למשל: מה חובתי בעולמי?">
+    <button class="go">היכנס עם השאלה</button>
+  </div>
+  <span class="skip">אפשר גם <a href="#">להיכנס בלי שאלה</a> — היא תגיע מתוך הלימוד</span>
+</div>
+
+<div class="page-peek">
+  <div class="daf">
+    <div class="sefer">מסילת ישרים · פרק א — בביאור כלל חובת האדם בעולמו</div>
+    <p class="torah">
+      יְסוֹד הַחֲסִידוּת וְשֹׁרֶשׁ הָעֲבוֹדָה הַתְּמִימָה הוּא
+      <span class="hl">שֶׁיִּתְבָּרֵר וְיִתְאַמֵּת אֵצֶל הָאָדָם מַה חוֹבָתוֹ בְּעוֹלָמוֹ</span><span class="fn" id="fn1">[1]</span>,
+      וּלְמָה צָרִיךְ שֶׁיָּשִׂים מַבָּטוֹ וּמְגַמָּתוֹ בְּכָל אֲשֶׁר הוּא
+      <span class="un">עָמֵל כָּל יְמֵי חַיָּיו</span>.
+    </p>
+    <div class="note" id="note1"><b>[1] ההערה שלך:</b> ❓ מה בין "חובתו" ל"מגמתו" — שני דברים או אחד?</div>
+    <svg class="thread" viewBox="0 0 640 290" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M 402 118 C 380 175, 300 150, 230 205"/>
+    </svg>
+  </div>
+  <p class="peek-caption">הדף שלך, כמו שהוא באמת בפנים: מרקר, קו, והערה שקשורה בחוט אל השורה שלה.</p>
+</div>
+
+<section class="gates">
+  <h2 class="serif">חמישה שערים אל הספר</h2>
+  <p class="sub">מכל מקום שבו המציאות פוגשת אותך — היא נכנסת אל הדף</p>
+  <div class="gate-row">
+    <a href="#" class="g"><span class="ic">＋</span><span class="t">הדבק טקסט</span></a>
+    <a href="#" class="g"><span class="ic">📷</span><span class="t">צלם דף</span></a>
+    <a href="#" class="g"><span class="ic">🎙</span><span class="t">הקלט שיעור</span></a>
+    <a href="#" class="g"><span class="ic">🎥</span><span class="t">צלם וידאו</span></a>
+    <a href="#" class="g"><span class="ic">🎬</span><span class="t">קובץ שמע/וידאו</span></a>
+  </div>
+</section>
+
+<section class="scales">
+  <div class="icon">⚖</div>
+  <p>שלוש שאלות שלך התיישבו החודש — בלשון הספר.</p>
+  <small>כאן לא סופרים תוצרים. סופרים מאזניים שנחו.</small>
+</section>
+
+<footer>
+  <p class="serif">יש כאן מי שמחכה ללמוד איתך.</p>
+  <p style="margin-top:6px">בְּפִיךָ וּבִלְבָבְךָ · הלימוד קרוב</p>
+</footer>
+
+</body>
+</html>
