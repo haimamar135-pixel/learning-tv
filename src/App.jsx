@@ -442,6 +442,11 @@ async function decodeViaElement(file, onProgress) {
     const dur = el.duration;
     if (!isFinite(dur) || dur <= 0) throw new Error("no-play");
     if (dur > 9000) throw new Error("הקובץ ארוך מ-2.5 שעות. פצל אותו לחלקים קצרים יותר (או תמלל מהמחשב).");
+    const RATE = 2; // נגינה מוחשת ×2 בלי שימור גובה צליל — שקול לדגימת המקור בחצי הקצב
+    el.playbackRate = RATE;
+    try { el.preservesPitch = false; } catch {}
+    try { el.webkitPreservesPitch = false; } catch {}
+    try { el.mozPreservesPitch = false; } catch {}
     const Ctx = window.AudioContext || window.webkitAudioContext;
     const ctx = new Ctx();
     const srLive = ctx.sampleRate;
@@ -462,10 +467,10 @@ async function decodeViaElement(file, onProgress) {
       el.onerror = () => rej(new Error("no-play"));
     });
     try { await el.play(); } catch { throw new Error("play-blocked"); }
-    const mins = Math.max(1, Math.round(dur / 60));
+    const mins = Math.max(1, Math.round(dur / 60 / RATE));
     const iv = setInterval(() => {
       const pct = Math.min(99, Math.round((el.currentTime / dur) * 100));
-      onProgress?.(0, 0, "🎬 מחלץ שמע מהסרטון בזמן אמת… " + pct + "% (כ-" + mins + " דק' — השאר את המסך דולק)");
+      onProgress?.(0, 0, "🎬 מחלץ שמע מהסרטון (×2)… " + pct + "% (כ-" + mins + " דק' — השאר את המסך דולק)");
     }, 1000);
     try { await done; } finally { clearInterval(iv); }
     try { proc.disconnect(); src.disconnect(); silent.disconnect(); } catch {}
@@ -474,7 +479,7 @@ async function decodeViaElement(file, onProgress) {
     const mono = new Float32Array(total);
     let off = 0; for (const p of parts) { mono.set(p, off); off += p.length; }
     if (total < srLive) throw new Error("no-play");
-    return { mono, sr: srLive, dur };
+    return { mono, sr: srLive / RATE, dur };
   } finally { cleanup(); }
 }
 
