@@ -2,3 +2,10 @@
   command = "npm run build"
   publish = "dist"
   functions = "netlify/functions"
+
+# הגשר: מהארון אל הלימוד — data/ של הארון מוגש מאותו מקור (בלי CORS)
+[[redirects]]
+  from = "/shelf-data/*"
+  to = "https://aquamarine-muffin-1c019d.netlify.app/data/:splat"
+  status = 200
+  force = true
