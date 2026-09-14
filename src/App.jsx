@@ -188,17 +188,23 @@ const FLEX_ACTIONS = [
   { id: "cards", label: "כרטיסיות" },
 ];
  
+/* ─── השאלה שהלומד נושא נכנסת ללימוד ───
+   השאלה מהפנים (lomedtv-question) לא נשארת פתק בלבד: סיכום (01) עונה לה בפסקה משלו,
+   המבחן (05) מקדיש לה שאלה אחת, וההקראה (07) פותחת בה. הטקסט נשאר במרכז — השאלה
+   היא הזווית שממנה הלומד ניגש אליו. הצעד השני של "השאלות הפתוחות שלי" (תנאי מקדים ל"שיקוף"). */
+const qNote = (q) => (q ? `הלומד נושא איתו שאלה אישית: «${q}». ` : "");
+
 const PROMPTS = {
-  summary: (t) =>
-    `קרא את הטקסט הבא והחזר JSON בלבד במבנה: {"short":"סיכום קצר של 2-3 משפטים","long":"סיכום מפורט של 2-3 פסקאות"}. הטקסט:\n${t}`,
+  summary: (t, q = "") =>
+    `קרא את הטקסט הבא והחזר JSON בלבד במבנה: {"short":"סיכום קצר של 2-3 משפטים","long":"סיכום מפורט של 2-3 פסקאות"${q ? `,"forQuestion":"פסקה אחת: מה הטקסט הזה נותן לשאלה שהלומד נושא — במה הוא נוגע בה, מאיר אותה או משאיר אותה פתוחה. אם הטקסט לא נוגע בשאלה כלל, כתוב זאת בכנות במשפט אחד"` : ""}}. ${qNote(q)}הטקסט:\n${t}`,
   concepts: (t) =>
     `קרא את הטקסט הבא והחזר JSON בלבד במבנה: {"concepts":[{"term":"מושג","definition":"הגדרה קצרה"}],"rules":["כלל או עיקרון מהטקסט"]}. הפק עד 8 מושגים ועד 6 כללים. הטקסט:\n${t}`,
   mindmap: (t) =>
     `קרא את הטקסט הבא והחזר JSON בלבד של מפת חשיבה במבנה: {"topic":"הנושא המרכזי","children":[{"label":"ענף ראשי","children":[{"label":"תת-ענף"}]}]}. עד 5 ענפים ראשיים, עד 4 תתי-ענפים לכל אחד. הטקסט:\n${t}`,
   flow: (t) =>
     `קרא את הטקסט הבא והחזר JSON בלבד של תרשים זרימה לוגי (תהליך, רצף רעיונות או השתלשלות) במבנה: {"title":"כותרת התהליך","steps":["שלב 1","שלב 2"]}. בין 4 ל-8 שלבים. הטקסט:\n${t}`,
-  quiz: (t, n = 5, angle = "") =>
-    `קרא את הטקסט הבא וכתוב מבחן. החזר JSON בלבד במבנה: {"questions":[{"q":"שאלה","options":["א","ב","ג","ד"],"correct":0,"explanation":"הסבר קצר לתשובה הנכונה"}]}. בדיוק ${n} שאלות, correct הוא אינדקס התשובה הנכונה. ${angle}הטקסט:\n${t}`,
+  quiz: (t, n = 5, angle = "", q = "") =>
+    `קרא את הטקסט הבא וכתוב מבחן. החזר JSON בלבד במבנה: {"questions":[{"q":"שאלה","options":["א","ב","ג","ד"],"correct":0,"explanation":"הסבר קצר לתשובה הנכונה"}]}. בדיוק ${n} שאלות, correct הוא אינדקס התשובה הנכונה. ${angle}${q ? `${qNote(q)}שאלה אחת מתוך ה-${n} תבדוק מה הטקסט אומר ביחס לשאלה הזאת — התשובה הנכונה חייבת להישען על הטקסט עצמו. ` : ""}הטקסט:\n${t}`,
   cards: (t) =>
     `קרא את הטקסט הבא וצור כרטיסיות זיכרון. החזר JSON בלבד במבנה: {"cards":[{"front":"שאלה או מושג","back":"תשובה או הגדרה"}]}. בין 6 ל-10 כרטיסיות. הטקסט:\n${t}`,
 };
@@ -1003,7 +1009,7 @@ function chapterStatus(book, i) {
  
 /* ─── תצוגות הערוצים ─── */
  
-function SummaryView({ data }) {
+function SummaryView({ data, question }) {
   const [mode, setMode] = useState("long");
   return (
     <div>
@@ -1012,6 +1018,15 @@ function SummaryView({ data }) {
         <button className={"pill " + (mode === "short" ? "on" : "")} onClick={() => setMode("short")}>קצר</button>
       </div>
       <p className="prose">{mode === "long" ? data.long : data.short}</p>
+      {data.forQuestion && question && (
+        <div className="my-q my-q-answer">
+          <span className="my-q-ic">❓</span>
+          <span className="my-q-body">
+            <small>לשאלה שאתה נושא — «{question}»</small>
+            {data.forQuestion}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -1222,19 +1237,22 @@ function CardsView({ data }) {
   );
 }
  
-function TTSView({ text }) {
+function TTSView({ text, question }) {
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
   const [rate, setRate] = useState(1);
- 
+
   useEffect(() => () => window.speechSynthesis?.cancel(), [text]);
- 
+
+  /* ההקראה פותחת בשאלה שהלומד נושא — כדי שיקשיב לפרק מתוכה */
+  const spoken = question ? `השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת. ... ${text}` : text;
+
   const play = () => {
     const synth = window.speechSynthesis;
     if (!synth) return;
     if (paused) { synth.resume(); setPaused(false); return; }
     synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
+    const u = new SpeechSynthesisUtterance(spoken);
     u.lang = "he-IL";
     u.rate = rate;
     const heVoice = synth.getVoices().find((v) => v.lang && v.lang.startsWith("he"));
@@ -1265,6 +1283,12 @@ function TTSView({ text }) {
         ×{rate.toFixed(1)}
       </label>
       <p className="tts-note">ההקראה משתמשת בקולות הדפדפן — איכות העברית תלויה במכשיר. מוקרא הפרק הנוכחי בלבד.</p>
+      {question && (
+        <div className="my-q my-q-answer">
+          <span className="my-q-ic">❓</span>
+          <span className="my-q-body"><small>ההקראה פותחת בשאלה שאתה נושא</small>{question}</span>
+        </div>
+      )}
       <div className="tts-text">{text}</div>
     </div>
   );
@@ -1311,7 +1335,7 @@ function sentenceMatches(sentence, qWords) {
 /* בניית מבחן לפי מספר שאלות.
    כל 5 שאלות = קריאה נפרדת, וכולן רצות במקביל (10=2 קריאות, 20=4).
    כך אף קריאה לא חורגת ממגבלת הזמן של Netlify (~10 שניות). */
-async function buildQuiz(text, n) {
+async function buildQuiz(text, n, q = "") {
   const ANGLES = [
     "התמקד בשאלות ידע והבנה ישירה של הנאמר בטקסט. ",
     "התמקד בשאלות העמקה, הסקה וקשרים בין רעיונות. אל תחזור על שאלות בסיסיות. ",
@@ -1319,7 +1343,7 @@ async function buildQuiz(text, n) {
     "התמקד בשאלות יישום והשוואה בין חלקי הטקסט. ",
   ];
   const once = (size, k) =>
-    askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length] + "הסברים קצרים — עד 12 מילים. "), 1800, true);
+    askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length] + "הסברים קצרים — עד 12 מילים. ", k === 0 ? q : ""), 1800, true); // השאלה האישית — רק במנה הראשונה
   const withRetry = async (size, k) => {
     try { return await once(size, k); }
     catch (e) { if (isGateError(e)) throw e; return await once(size, k); } // ניסיון שני אוטומטי
@@ -2572,7 +2596,7 @@ export default function LearningTV() {
     setFlexResult(null);
     try {
       const FAST_IDS = ["cards", "concepts", "flow"];
-      const data = id === "quiz" ? await buildQuiz(t, qCount) : await askClaude(PROMPTS[id](t), 2000, FAST_IDS.includes(id));
+      const data = id === "quiz" ? await buildQuiz(t, qCount, openQ) : await askClaude(PROMPTS[id](t, openQ), 2000, FAST_IDS.includes(id));
       setFlexResult({ channel: id, data });
     } catch (e) {
       setFlexError(e.message || "ההפקה נכשלה. נסה שוב.");
@@ -2594,8 +2618,8 @@ export default function LearningTV() {
       const FAST_IDS = ["cards", "concepts", "flow"];
       const data =
         id === "quiz"
-          ? await buildQuiz(book.chapters[ci].text, qCount)
-          : await askClaude(PROMPTS[id](book.chapters[ci].text), 2000, FAST_IDS.includes(id));
+          ? await buildQuiz(book.chapters[ci].text, qCount, openQ)
+          : await askClaude(PROMPTS[id](book.chapters[ci].text, openQ), 2000, FAST_IDS.includes(id));
       await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } }, { k: "output", ci, ch: id });
     } catch (e) {
       setError(e.message || "השידור נכשל. נסה שוב.");
@@ -3294,7 +3318,7 @@ export default function LearningTV() {
                         <strong>{FLEX_ACTIONS.find((a) => a.id === flexResult.channel)?.label} · על הקטע שסימנת</strong>
                         <button className="mini-btn" onClick={() => setFlexResult(null)}>✕ חזרה לטקסט</button>
                       </div>
-                      {flexResult.channel === "summary" && <SummaryView data={flexResult.data} />}
+                      {flexResult.channel === "summary" && <SummaryView data={flexResult.data} question={openQ} />}
                       {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} />}
                       {flexResult.channel === "mindmap" && <MindmapView data={flexResult.data} />}
                       {flexResult.channel === "flow" && <FlowView data={flexResult.data} />}
@@ -3467,12 +3491,12 @@ export default function LearningTV() {
               )}
  
               {view === "tv" && channel === "tts" && !loading && cur && (
-                <TTSView key={key(chIdx, "tts")} text={cur.text} />
+                <TTSView key={key(chIdx, "tts")} text={cur.text} question={openQ} />
               )}
  
               {view === "tv" && channel && channel !== "tts" && channel !== "read" && !loading && !error && data && (
                 <>
-                  {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} />}
+                  {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} question={openQ} />}
                   {channel === "concepts" && <ConceptsView data={data} onTrace={traceToSource} />}
                   {channel === "mindmap" && <MindmapView data={data} />}
                   {channel === "flow" && <FlowView data={data} />}
@@ -3844,6 +3868,8 @@ const css = `
 .my-q-body{flex:1;font-family:'Frank Ruhl Libre',serif;font-weight:500;font-size:1.02rem;line-height:1.45;color:#3a2c14}
 .my-q-body small{display:block;font-family:'Heebo',sans-serif;font-weight:400;font-size:.72rem;color:#8a6a2a;letter-spacing:.03em}
 .my-q-x{flex:none;background:none;border:none;color:#a08850;font-size:.95rem;cursor:pointer;padding:4px 6px;border-radius:6px}
+.my-q-answer{margin-top:18px;align-items:flex-start;transform:rotate(.3deg)}
+.my-q-answer .my-q-body{font-size:.98rem;line-height:1.6;white-space:pre-wrap}
 .my-q-x:hover{background:rgba(160,136,80,.15);color:#5a3a10}
 
 .masthead{display:flex;align-items:baseline;gap:12px;margin-bottom:22px;flex-wrap:wrap;justify-content:center}
