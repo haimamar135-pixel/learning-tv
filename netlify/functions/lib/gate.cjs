@@ -10,6 +10,7 @@
    מכסות ברירת מחדל (ניתנות לשינוי במשתני סביבה בנטליפיי):
      DAILY_LIMIT_CLAUDE     = 60   קריאות ביום (סיכום, מבחן, כרטיסיות, OCR...)
      DAILY_LIMIT_TRANSCRIBE = 120  נתחי תמלול ביום (נתח ≈ 110 שניות → ~3.5 שעות)
+     DAILY_LIMIT_VOICE      = 12   חתיכות קול של "שיקוף" ביום (חתיכה ≈ 3.5 דקות → ~40 דקות)
    הטבלה נמצאת ב-supabase/usage_log.sql. */
 
 const SUPA_URL = process.env.SUPABASE_URL || "https://hghlesijwzpfdhmlvgiv.supabase.co";
@@ -18,6 +19,7 @@ const SUPA_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_JsWZApJRwuzZId
 const LIMITS = {
   claude: parseInt(process.env.DAILY_LIMIT_CLAUDE, 10) || 60,
   transcribe: parseInt(process.env.DAILY_LIMIT_TRANSCRIBE, 10) || 120,
+  voice: parseInt(process.env.DAILY_LIMIT_VOICE, 10) || 12, // חתיכות "שיקוף" ביום (חתיכה ≈ 3.5 דקות שמע)
 };
 
 const ADMINS = (process.env.ADMIN_EMAILS || "")

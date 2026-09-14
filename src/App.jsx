@@ -1006,6 +1006,93 @@ function chapterStatus(book, i) {
   const hasAny = CHANNELS.some((c) => book.results?.[`${i}:${c.id}`]);
   return hasAny ? "learning" : "new";
 }
+
+/* ─── כל טקסט הספר כמשפטים — האינדקס הגלובלי שבו נשמרים מרקרים והערות ───
+   משמש גם את המגילה (useMemo בתוך האפליקציה) וגם את "שיקוף" (מחוץ לה). */
+function bookSentences(book) {
+  const sentences = [];
+  const paraGroups = [];
+  const chapterRanges = []; // בקשה ג': טווח המשפטים הגלובלי של כל פרק — [התחלה, סוף)
+  if (!book) return { sentences, paraGroups, chapterRanges };
+  for (const c of book.chapters || []) {
+    const chStart = sentences.length;
+    const paras = (c.text || "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+    for (const p of paras) {
+      const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
+      const start = sentences.length;
+      for (const s of parts) {
+        const t = s.trim();
+        if (t) sentences.push(t);
+      }
+      if (sentences.length > start) paraGroups.push([start, sentences.length - start]);
+    }
+    chapterRanges.push([chStart, sentences.length]);
+  }
+  return { sentences, paraGroups, chapterRanges };
+}
+
+/* ─── 🎧 שיקוף (ערוץ 08) — חומר הגלם: השיחה של הלומד עם הספר ───
+   כמה "מילים" הלומד השאיר בספר: הערות + משפטים מסומנים. הכפתור מופיע מסף 3. */
+const MIRROR_MIN = 3;
+const MIRROR_LENGTHS = [
+  { id: "short", label: "קצר", mins: "כ-5 דק'", chunks: 2 },
+  { id: "medium", label: "בינוני", mins: "כ-10 דק'", chunks: 3 },
+  { id: "full", label: "מלא", mins: "כ-20 דק'", chunks: 6 },
+];
+function talkCount(book) {
+  if (!book) return 0;
+  const notes = Object.keys(book.notes || {}).filter((k) => (book.notes[k]?.t || "").trim()).length;
+  const marks = Object.keys(book.marks || {}).length;
+  return notes + marks;
+}
+/* ההערות והסימונים כטקסט — לפי סדר הופעתם בספר */
+function mirrorMaterial(book) {
+  const { sentences } = bookSentences(book);
+  const notes = Object.keys(book.notes || {})
+    .map(Number).filter((i) => !isNaN(i) && (book.notes[i]?.t || "").trim())
+    .sort((a, b) => a - b)
+    .map((i) => ({ src: (book.notes[i].src || sentences[i] || "").slice(0, 200), text: book.notes[i].t.trim() }));
+  const marks = Object.keys(book.marks || {})
+    .map(Number).filter((i) => !isNaN(i) && sentences[i])
+    .sort((a, b) => a - b)
+    .map((i) => {
+      const mk = book.marks[i] || {};
+      const s = sentences[i];
+      /* סימון של מילים בתוך המשפט — לוקחים רק אותן; אחרת המשפט כולו */
+      const ranges = Array.isArray(mk.w) ? mk.w.filter((r) => r.e > r.s) : [];
+      const text = ranges.length && !mk.hl && !mk.b && !mk.u
+        ? ranges.map((r) => s.slice(r.s, r.e).trim()).filter(Boolean).join(" … ")
+        : s;
+      return { text: text.slice(0, 240), color: mk.hl || (ranges.find((r) => r.hl) || {}).hl || "" };
+    })
+    .filter((m) => m.text);
+  return { notes, marks };
+}
+/* חלוקת התסריט לחתיכות של עד 1,900 תווים (גבול ElevenLabs: 2,000) — בלי לשבור רפליקה */
+function chunkScript(lines, max = 1900) {
+  const chunks = [];
+  let cur = [], n = 0;
+  for (const l of lines) {
+    const parts = l.t.length <= max ? [l.t] : (l.t.match(/[^.!?]+[.!?]+\s*|[^.!?]+$/g) || [l.t]);
+    for (const p of parts) {
+      const t = p.trim();
+      if (!t) continue;
+      if (n + t.length > max && cur.length) { chunks.push(cur); cur = []; n = 0; }
+      cur.push({ s: l.s, t });
+      n += t.length;
+    }
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+/* קובץ הקול נשמר גם במכשיר (IndexedDB) — להאזנה חוזרת בלי רשת */
+const voiceKey = (id) => "ltv-voice-" + id;
  
 /* ─── תצוגות הערוצים ─── */
  
@@ -1294,8 +1381,192 @@ function TTSView({ text, question }) {
   );
 }
  
+/* ─── 🎧 שיקוף — ערוץ 08 ───
+   שיחה שהתקיימה, מוחזרת כקול ("אור חוזר"): מורה ותלמידה משוחחים על ההערות
+   והסימונים שהלומד השאיר בספר — ועל השאלה שהוא נושא. הלומד מאזין; מדברים עליו
+   בגוף שלישי. שני שלבים: תסריט (Claude, קורא לפני שמשלמים) → קול (ElevenLabs).
+   הקובץ נשמר במכשיר (IndexedDB) ובענן (Supabase Storage, bucket voice). */
+async function postJson(path, body) {
+  const headers = await authHeaders();
+  let res;
+  try { res = await fetch(API_BASE + path, { method: "POST", headers, body: JSON.stringify(body) }); }
+  catch { throw new Error("בעיית רשת — הבקשה לא הגיעה לשרת"); }
+  const raw = await res.text();
+  let data;
+  try { data = JSON.parse(raw); } catch { throw new Error(`השרת החזיר תשובה לא תקינה [${res.status}]: ${raw.slice(0, 160)}`); }
+  const ge = gateError(res, data);
+  if (ge) throw ge;
+  if (!res.ok || data.error) throw new Error(data.error?.message || `שגיאה [${res.status}]`);
+  return data;
+}
+function MirrorView({ book, question, cloudUser, onSave }) {
+  const mirrors = book.flex?.mirrors || [];
+  const material = useMemo(() => mirrorMaterial(book), [book.id, book.notes, book.marks]);
+  const [name, setName] = useState(() => { try { return localStorage.getItem("lomedtv-name") || ""; } catch { return ""; } });
+  const [len, setLen] = useState("short");
+  const [script, setScript] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [playing, setPlaying] = useState(null); // { id, url }
+  const [delArm, setDelArm] = useState(null);
+  const audioRef = useRef(null);
+
+  useEffect(() => () => { if (playing?.url?.startsWith("blob:")) URL.revokeObjectURL(playing.url); }, [playing]);
+
+  const saveName = (v) => { setName(v); try { localStorage.setItem("lomedtv-name", v.trim()); } catch {} };
+
+  const writeScript = async () => {
+    setErr(""); setScript(null);
+    setBusy("Claude קורא את ההערות והסימונים שלך וכותב את השיחה…");
+    try {
+      const data = await postJson("/.netlify/functions/dialogue", {
+        title: book.title, question: question || "", learner: name.trim(), length: len,
+        notes: material.notes, marks: material.marks,
+      });
+      setScript(data);
+    } catch (e) { setErr(e.message); }
+    setBusy("");
+  };
+
+  const produce = async () => {
+    if (!script) return;
+    setErr("");
+    const chunks = chunkScript(script.lines);
+    const parts = [];
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        setBusy(`ElevenLabs מקליט… חלק ${i + 1} מתוך ${chunks.length}`);
+        const data = await postJson("/.netlify/functions/voice", { lines: chunks[i] });
+        parts.push(b64ToBytes(data.audio));
+      }
+      const blob = new Blob(parts, { type: "audio/mpeg" });
+      const id = Date.now().toString(36);
+      const uid = cloudUser?.id;
+      const path = uid ? `${uid}/${book.id}/${id}.mp3` : "";
+      setBusy("שומר במכשיר ובענן…");
+      try { await idbSet(voiceKey(id), blob); } catch (e) { console.warn("voice idb", e); }
+      let cloud = false;
+      if (path) {
+        const { error } = await supa.storage.from("voice").upload(path, blob, { contentType: "audio/mpeg", upsert: true });
+        if (error) console.warn("voice upload", error.message); else cloud = true;
+      }
+      const entry = { id, title: script.title, ts: Date.now(), chars: script.chars, bytes: blob.size, path: cloud ? path : "", lines: script.lines.length };
+      await onSave([entry, ...mirrors]);
+      setScript(null);
+      setPlaying({ id, url: URL.createObjectURL(blob) });
+    } catch (e) { setErr(e.message); }
+    setBusy("");
+  };
+
+  const play = async (m) => {
+    setErr("");
+    try {
+      let url = "";
+      try { const blob = await idbGet(voiceKey(m.id)); if (blob) url = URL.createObjectURL(blob); } catch {}
+      if (!url && m.path) {
+        const { data, error } = await supa.storage.from("voice").createSignedUrl(m.path, 3600);
+        if (error) throw new Error("הקובץ בענן לא זמין: " + error.message);
+        url = data.signedUrl;
+        /* להורדה למכשיר — כדי שבפעם הבאה יתנגן גם בלי רשת */
+        fetch(url).then((r) => r.ok ? r.blob() : null).then((b) => b && idbSet(voiceKey(m.id), b)).catch(() => {});
+      }
+      if (!url) throw new Error("הקובץ לא נמצא — לא במכשיר ולא בענן");
+      setPlaying({ id: m.id, url });
+      setTimeout(() => audioRef.current?.play?.().catch(() => {}), 50);
+    } catch (e) { setErr(e.message); }
+  };
+
+  const remove = async (m) => {
+    setDelArm(null);
+    if (playing?.id === m.id) setPlaying(null);
+    try { await idbDel(voiceKey(m.id)); } catch {}
+    if (m.path) { try { await supa.storage.from("voice").remove([m.path]); } catch {} }
+    await onSave(mirrors.filter((x) => x.id !== m.id));
+  };
+
+  const fmtDate = (ts) => new Date(ts).toLocaleDateString("he-IL", { day: "numeric", month: "short" });
+  const fmtMin = (chars) => { const m = chars / 550; return m < 1 ? "פחות מדקה" : `כ-${Math.round(m)} דק'`; };
+  const lenInfo = MIRROR_LENGTHS.find((l) => l.id === len);
+
+  return (
+    <div className="mirror">
+      <div className="guide-head">
+        <h2 className="guide-title">🎧 שיקוף · {book.title}</h2>
+        <span className="guide-meta">{material.notes.length} הערות · {material.marks.length} סימונים{question ? " · שאלה אחת" : ""}</span>
+      </div>
+      <p className="intake-lead">
+        שני קולות — מורה ותלמידה — משוחחים על מה שהשארת בספר: ההערות, הסימונים, והשאלה שאתה נושא.
+        אתה לא בשיחה; אתה מאזין לה. מה שלמדת, חוזר אליך כאור חוזר.
+      </p>
+
+      {mirrors.length > 0 && (
+        <div className="mirror-list">
+          {mirrors.map((m) => (
+            <div className={"mirror-row" + (playing?.id === m.id ? " on" : "")} key={m.id}>
+              <button className="mirror-play" onClick={() => play(m)} title="נגן">{playing?.id === m.id ? "🎧" : "▶"}</button>
+              <span className="mirror-body">
+                <span className="mirror-title">{m.title}</span>
+                <small>{fmtDate(m.ts)} · {fmtMin(m.chars)}{m.path ? " · ☁" : " · במכשיר בלבד"}</small>
+              </span>
+              {delArm === m.id
+                ? <button className="del confirm" onClick={() => remove(m)}>בטוח?</button>
+                : <button className="del" onClick={() => setDelArm(m.id)} title="מחק">✕</button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {playing && (
+        <audio ref={audioRef} className="mirror-audio" src={playing.url} controls autoPlay playsInline />
+      )}
+
+      {err && <div className="err">{err}</div>}
+      {busy && <div className="busy-line" style={{ display: "block", margin: "6px 0" }}>⏳ {busy}</div>}
+
+      {!script && !busy && (
+        <div className="mirror-new">
+          <div className="mirror-opts">
+            <label className="mirror-name">
+              איך לקרוא לך בשיחה?
+              <input value={name} onChange={(e) => saveName(e.target.value)} placeholder="הלומד" maxLength={40} />
+            </label>
+            <div className="pill-row" style={{ justifyContent: "flex-start", marginBottom: 0 }}>
+              {MIRROR_LENGTHS.map((l) => (
+                <button key={l.id} className={"pill" + (len === l.id ? " on" : "")} onClick={() => setLen(l.id)}>{l.label} · {l.mins}</button>
+              ))}
+            </div>
+          </div>
+          <button className="tts-btn" onClick={writeScript}>✍ כתוב את השיחה</button>
+          <p className="tts-note">קודם התסריט — תקרא אותו, ורק אז תחליט אם להפיק קול. הפקת קול נספרת במכסה היומית ({lenInfo.chunks} מתוך 12 חלקים ל{lenInfo.label}).</p>
+        </div>
+      )}
+
+      {script && !busy && (
+        <div className="mirror-script">
+          <div className="guide-head">
+            <h3 className="mirror-title">{script.title}</h3>
+            <span className="guide-meta">{script.lines.length} רפליקות · {fmtMin(script.chars)}</span>
+          </div>
+          <div className="mirror-lines">
+            {script.lines.map((l, i) => (
+              <p key={i} className={"mirror-line " + l.s}>
+                <b>{l.s === "t" ? "המורה" : "התלמידה"}</b>
+                {l.t.replace(/\[[a-z ]+\]\s*/gi, "")}
+              </p>
+            ))}
+          </div>
+          <div className="tts-controls">
+            <button className="tts-btn" onClick={produce}>🎧 הפק קול ({chunkScript(script.lines).length} חלקים)</button>
+            <button className="tts-btn ghost" onClick={writeScript}>↻ כתוב מחדש</button>
+            <button className="tts-btn ghost" onClick={() => setScript(null)}>✕ בטל</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── האפליקציה ─── */
- 
+
 /* ─── חיפוש בתוך הספר (קונקורדנציה חכמת-עברית) ───
    התאמה מדויקת + זיהוי תחיליות (ו/ה/ב/ל/מ/ש/כ וצירופיהן),
    התעלמות מגרשיים, וחיפוש רב-מילים (כל המילים חייבות להופיע במשפט). */
@@ -1786,7 +2057,7 @@ export default function LearningTV() {
       for (let i = 0; i < list.length; i++) {
         setPullMsg("מוריד " + (i + 1) + "/" + list.length + ": " + (list[i].title || "") + "...");
         const { book: nb, updatedAt } = await pullBook(list[i].id, cloudUser.id);
-        const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), updatedAt };
+        const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), talk: talkCount(nb), updatedAt };
         idx = [entry, ...idx.filter((b) => b.id !== nb.id)];
         if (book && book.id === nb.id) setBook(nb);
       }
@@ -1821,31 +2092,16 @@ export default function LearningTV() {
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
      גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
-  const { sentences, paraGroups, chapterRanges } = useMemo(() => {
-    if (!book) return { sentences: [], paraGroups: [], chapterRanges: [] };
-    const sentences = [];
-    const paraGroups = [];
-    const chapterRanges = []; // בקשה ג': טווח המשפטים הגלובלי של כל פרק — [התחלה, סוף)
-    for (const c of book.chapters) {
-      const chStart = sentences.length;
-      const paras = (c.text || "").split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
-      for (const p of paras) {
-        const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
-        const start = sentences.length;
-        for (const s of parts) {
-          const t = s.trim();
-          if (t) sentences.push(t);
-        }
-        if (sentences.length > start) paraGroups.push([start, sentences.length - start]);
-      }
-      chapterRanges.push([chStart, sentences.length]);
-    }
-    return { sentences, paraGroups, chapterRanges };
-  }, [book?.id, book?.chapters?.length]);
+  const { sentences, paraGroups, chapterRanges } = useMemo(() => bookSentences(book), [book?.id, book?.chapters?.length]);
  
   useEffect(() => {
     (async () => {
-      const idx = await loadIndex();
+      let idx = await loadIndex();
+      /* שיקוף: ספרים שנשמרו לפני שהאינדקס ידע לספור הערות וסימונים — משלימים פעם אחת */
+      if (idx.some((b) => b.talk === undefined)) {
+        idx = await Promise.all(idx.map(async (b) => b.talk === undefined ? { ...b, talk: talkCount(await loadBook(b.id)) } : b));
+        await saveIndex(idx);
+      }
       setIndex(idx);
       setView(idx.length ? "library" : "intake");
     })();
@@ -1867,6 +2123,7 @@ export default function LearningTV() {
       title: nextBook.title,
       chapters: nextBook.chapters.length,
       done: doneCount(nextBook),
+      talk: talkCount(nextBook),
       updatedAt: Date.now(),
     };
     const nextIdx = [entry, ...index.filter((b) => b.id !== nextBook.id)];
@@ -2138,6 +2395,18 @@ export default function LearningTV() {
     setView("guide");
   };
  
+  /* 🎧 שיקוף — נפתח מהספרייה או מלוח השידורים של הספר */
+  const openMirror = async (id) => {
+    const b = id && (!book || book.id !== id) ? await loadBook(id) : book;
+    if (!b) { setError("הספר לא נמצא באחסון."); return; }
+    setBook(b);
+    setChannel(null);
+    setError(null);
+    flick();
+    setView("mirror");
+  };
+  const saveMirrors = (mirrors) => persist({ ...book, flex: { ...(book.flex || {}), mirrors } }, { k: "meta" });
+
   const removeBook = async (id) => {
     const nextIdx = index.filter((b) => b.id !== id);
     setIndex(nextIdx);
@@ -2687,9 +2956,10 @@ export default function LearningTV() {
     : view === "scroll" ? "מגילה · לימוד גמיש"
     : view === "guide" ? "לוח שידורים"
     : view === "library" ? "ספריית השידורים"
+    : view === "mirror" ? "שיקוף · אור חוזר"
     : view === "shelf" ? "ארון הספרים · ייבוא ללימוד"
     : "קליטת טקסט";
-  const barNum = view === "tv" && active ? `CH ${active.num}` : view === "scroll" ? "CH ∞" : "CH 00";
+  const barNum = view === "tv" && active ? `CH ${active.num}` : view === "scroll" ? "CH ∞" : view === "mirror" ? "CH 08" : "CH 00";
  
   return (
     <div className="studio" dir="rtl">
@@ -3049,6 +3319,11 @@ export default function LearningTV() {
                           <span className="mini-fill" style={{ width: `${b.chapters ? (b.done / b.chapters) * 100 : 0}%` }} />
                         </span>
                       </button>
+                      {(b.talk || 0) >= MIRROR_MIN && (
+                        <button className="mirror-btn" onClick={() => openMirror(b.id)} title={`🎧 שיקוף — ${b.talk} הערות וסימונים בספר הזה`} aria-label="שיקוף">
+                          🎧<small>שיקוף</small>
+                        </button>
+                      )}
                       {deleteArm === b.id ? (
                         <button className="del confirm" onClick={() => removeBook(b.id)}>בטוח?</button>
                       ) : (
@@ -3142,6 +3417,10 @@ export default function LearningTV() {
               })()}
 
               {/* ── לוח שידורים של ספר ── */}
+              {view === "mirror" && book && (
+                <MirrorView key={book.id} book={book} question={openQ} cloudUser={cloudUser} onSave={saveMirrors} />
+              )}
+
               {view === "guide" && book && (
                 <div className="guide">
                   <div className="guide-head">
@@ -3687,6 +3966,29 @@ export default function LearningTV() {
             <span className="key-num">📜</span>
             <span className="key-label">מגילה — לימוד גמיש</span>
           </button>
+          {talkCount(book) >= MIRROR_MIN && (
+            <button className="ch-key mirror" onClick={() => openMirror(book.id)} title="שיקוף — השיחה שלך עם הספר, בקול">
+              <span className="key-num">🎧</span>
+              <span className="key-label">שיקוף</span>
+            </button>
+          )}
+          <button className="ch-key newtext" onClick={backToLibrary}>
+            <span className="key-num">↩</span>
+            <span className="key-label">חזרה לספרייה</span>
+          </button>
+        </div>
+      )}
+
+      {view === "mirror" && book && (
+        <div className="deck">
+          <button className="ch-key" onClick={() => { flick(); setView("guide"); }}>
+            <span className="key-num">📖</span>
+            <span className="key-label">לוח השידורים של הספר</span>
+          </button>
+          <button className="ch-key green" onClick={openScroll}>
+            <span className="key-num">📜</span>
+            <span className="key-label">מגילה — להוסיף הערות</span>
+          </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
             <span className="key-num">↩</span>
             <span className="key-label">חזרה לספרייה</span>
@@ -4017,6 +4319,36 @@ const css = `
 }
 .del.confirm{background:#fbe6e0;border-color:#e2a493;color:#8c3a25;font-weight:600;padding:0 10px}
  
+/* 🎧 שיקוף */
+.mirror-btn{
+  border:1.5px solid #d8b06a;background:#fff8e6;border-radius:12px;min-width:52px;padding:0 8px;
+  color:#7a5410;cursor:pointer;font-family:'Heebo',sans-serif;font-size:1.05rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+}
+.mirror-btn small{font-size:.62rem;font-weight:700;letter-spacing:.02em}
+.mirror-btn:hover{border-color:var(--amber-deep);background:#fff3d6}
+.ch-key.mirror{background:linear-gradient(180deg,#3a2b12,#241a0c);border-color:#6b4d1c;color:#f3e2bd}
+.ch-key.mirror .key-num{color:var(--amber)}
+.mirror{display:flex;flex-direction:column;gap:14px}
+.mirror-list{display:flex;flex-direction:column;gap:8px}
+.mirror-row{display:flex;align-items:center;gap:10px;background:#fffdf6;border:1.5px solid #e0d8c0;border-radius:12px;padding:8px 10px 8px 8px}
+.mirror-row.on{border-color:var(--amber-deep);background:#fff8e6}
+.mirror-play{border:none;background:#232323;color:#fff;border-radius:10px;min-width:44px;height:40px;font-size:1rem;cursor:pointer}
+.mirror-body{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.mirror-title{font-weight:800;font-size:1rem}
+.mirror-body small{color:var(--ink-soft);font-size:.8rem}
+.mirror-audio{width:100%;margin:2px 0 6px}
+.mirror-new{display:flex;flex-direction:column;gap:12px;align-items:flex-start;border-top:1px dashed #d8cfb4;padding-top:14px}
+.mirror-opts{display:flex;flex-direction:column;gap:10px;width:100%}
+.mirror-name{display:flex;align-items:center;gap:10px;font-size:.92rem;color:var(--ink-soft);flex-wrap:wrap}
+.mirror-name input{border:1.5px solid #cfc8b4;background:#fffdf6;border-radius:10px;padding:8px 12px;font-family:'Heebo',sans-serif;font-size:1rem;color:var(--ink);min-width:160px}
+.mirror-name input:focus{outline:none;border-color:var(--amber)}
+.mirror-script{display:flex;flex-direction:column;gap:12px;border-top:1px dashed #d8cfb4;padding-top:14px}
+.mirror-lines{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow:auto;padding:2px 2px 2px 6px}
+.mirror-line{line-height:1.75;font-size:1rem;padding:8px 12px;border-radius:12px;max-width:92%}
+.mirror-line b{display:block;font-size:.72rem;letter-spacing:.04em;color:var(--ink-soft);margin-bottom:2px}
+.mirror-line.t{background:#f3ecda;align-self:flex-start}
+.mirror-line.s{background:#e6f1ee;align-self:flex-end}
+
 /* לוח שידורים */
 .guide{display:flex;flex-direction:column;gap:14px}
 .guide-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
