@@ -203,14 +203,32 @@ const PROMPTS = {
     `קרא את הטקסט הבא וצור כרטיסיות זיכרון. החזר JSON בלבד במבנה: {"cards":[{"front":"שאלה או מושג","back":"תשובה או הגדרה"}]}. בין 6 ל-10 כרטיסיות. הטקסט:\n${t}`,
 };
  
+/* ─── השער: כל קריאה שעולה כסף נושאת את הטוקן של המשתמש המחובר ───
+   הפונקציות בנטליפיי (claude, transcribe) דוחות בקשה בלי טוקן (401) ובקשה
+   מעבר למכסה היומית (429). כאן מצרפים את הטוקן ומתרגמים את הדחייה להודעה. */
+const LOGIN_MSG = "כדי להשתמש בערוצי הלימוד יש להיכנס לחשבון — לחץ על ☁ למעלה";
+async function authHeaders() {
+  let token = null;
+  try { token = (await supa.auth.getSession()).data?.session?.access_token || null; } catch {}
+  if (!token) throw new Error(LOGIN_MSG);
+  return { "Content-Type": "application/json", Authorization: "Bearer " + token };
+}
+const isGateError = (e) => /להיכנס לחשבון|פג|המכסה/.test(e?.message || "");
+function gateError(res, data) {
+  if (res.status === 401 || data?.code === "login") return new Error(data?.error?.message || LOGIN_MSG);
+  if (res.status === 429 || data?.code === "quota") return new Error(data?.error?.message || "המכסה היומית נגמרה — מתחדשת בחצות");
+  return null;
+}
+
 /* ─── קריאה ל-Claude דרך Netlify Function ───
    המפתח נשמר בצד השרת (משתנה סביבה ANTHROPIC_API_KEY) ולא נחשף לדפדפן. */
 async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
+  const headers = await authHeaders();
   let res;
   try {
     res = await fetch(API_BASE + "/.netlify/functions/claude", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(img ? { prompt, maxTokens, fast, img, imgType, raw: rawMode } : { prompt, maxTokens, fast, raw: rawMode }),
     });
   } catch (e) {
@@ -227,6 +245,8 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
     throw new Error(`השרת החזיר תשובה לא תקינה [${res.status}]: ${raw.slice(0, 160)}`);
   }
  
+  const ge = gateError(res, data);
+  if (ge) throw ge;
   if (data.type === "error" || data.error) {
     throw new Error(`שגיאת API [${res.status}]: ${data.error?.message || ""}`);
   }
@@ -834,12 +854,15 @@ function bufToBase64(buf) {
 }
 
 async function transcribeChunk(b64, hint) {
+  const headers = await authHeaders();
   const res = await fetch(API_BASE + "/.netlify/functions/transcribe", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ audio: b64, lang: "he", hint: hint || "" }),
   });
   const data = await res.json().catch(() => ({}));
+  const ge = gateError(res, data);
+  if (ge) throw ge;
   if (!res.ok) throw new Error(data?.error?.message || "שגיאת תמלול (" + res.status + ")");
   return String(data.text || "").trim();
 }
@@ -865,6 +888,7 @@ async function transcribeMedia(file, onProgress, hint) {
     try {
       text = await transcribeChunk(b64, hint);
     } catch (e) {
+      if (isGateError(e)) throw e; // כניסה/מכסה — ניסיון שני לא יעזור
       onProgress?.(i + 1, total, " · ניסיון שני");
       text = await transcribeChunk(b64, hint); // ניסיון חוזר אחד — ואם נכשל, השגיאה עולה למעלה
     }
@@ -1298,7 +1322,7 @@ async function buildQuiz(text, n) {
     askClaude(PROMPTS.quiz(text, size, ANGLES[k % ANGLES.length] + "הסברים קצרים — עד 12 מילים. "), 1800, true);
   const withRetry = async (size, k) => {
     try { return await once(size, k); }
-    catch { return await once(size, k); } // ניסיון שני אוטומטי
+    catch (e) { if (isGateError(e)) throw e; return await once(size, k); } // ניסיון שני אוטומטי
   };
   const chunks = [];
   let left = n, k = 0;

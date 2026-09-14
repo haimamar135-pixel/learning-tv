@@ -1,6 +1,8 @@
  /* פונקציית שרת: מתווכת בין האפליקציה ל-Anthropic API.
    המפתח נלקח ממשתנה הסביבה ANTHROPIC_API_KEY ולא מגיע לדפדפן. */
 
+const { gate } = require("./lib/gate.cjs");
+
 const SYSTEM_PROMPT =
   "אתה מנוע למידה. החזר אך ורק אובייקט JSON תקין ומלא. בלי טקסט מקדים, בלי הסברים, בלי backticks. הקפד לסגור את כל הסוגריים. אם הטקסט ארוך, קצר את התוכן כדי שהתשובה תסתיים בתוך מגבלת האורך.";
 
@@ -8,6 +10,10 @@ const core = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: { message: "Method not allowed" } }) };
   }
+
+  /* השער: כניסה + מכסה יומית (lib/gate.cjs) */
+  const g = await gate(event, "claude");
+  if (g.reject) return g.reject;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -87,7 +93,7 @@ const core = async (event) => {
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: CORS, body: "" };

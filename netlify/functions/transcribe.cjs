@@ -2,12 +2,18 @@
    המפתח נלקח ממשתנה הסביבה GROQ_API_KEY ולא מגיע לדפדפן.
    מקבלת נתח אודיו יחיד (WAV 16kHz מונו, base64) ומחזירה { text }. */
 
+const { gate } = require("./lib/gate.cjs");
+
 const GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 
 const core = async (event) => {
   if (event.httpMethod !== "POST") {
     return { statusCode: 405, body: JSON.stringify({ error: { message: "Method not allowed" } }) };
   }
+
+  /* השער: כניסה + מכסה יומית (lib/gate.cjs) */
+  const g = await gate(event, "transcribe");
+  if (g.reject) return g.reject;
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
@@ -74,7 +80,7 @@ const core = async (event) => {
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 exports.handler = async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: CORS, body: "" };
