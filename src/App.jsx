@@ -1035,9 +1035,9 @@ function bookSentences(book) {
    כמה "מילים" הלומד השאיר בספר: הערות + משפטים מסומנים. הכפתור מופיע מסף 3. */
 const MIRROR_MIN = 3;
 const MIRROR_LENGTHS = [
-  { id: "short", label: "קצר", mins: "כ-5 דק'", chunks: 2 },
-  { id: "medium", label: "בינוני", mins: "כ-10 דק'", chunks: 3 },
-  { id: "full", label: "מלא", mins: "כ-20 דק'", chunks: 6 },
+  { id: "short", label: "קצר", mins: "כ-5 דק'", chunks: 4 },
+  { id: "medium", label: "בינוני", mins: "כ-10 דק'", chunks: 8 },
+  { id: "full", label: "מלא", mins: "כ-20 דק'", chunks: 16 },
 ];
 function talkCount(book) {
   if (!book) return 0;
@@ -1068,8 +1068,11 @@ function mirrorMaterial(book) {
     .filter((m) => m.text);
   return { notes, marks };
 }
-/* חלוקת התסריט לחתיכות של עד 1,900 תווים (גבול ElevenLabs: 2,000) — בלי לשבור רפליקה */
-function chunkScript(lines, max = 1900) {
+/* חלוקת התסריט לחתיכות של עד 700 תווים — בלי לשבור רפליקה.
+   צ'אט 16: חתיכה של 1,900 תווים לקחה ל-ElevenLabs יותר מ-60 שניות (תקרת נטליפיי) ונהרגה.
+   700 תווים ≈ 15–25 שניות לחתיכה — בטוח. תסריט קצר = 4–5 חלקים, המכסה היומית 30. */
+const VOICE_CHUNK = 700;
+function chunkScript(lines, max = VOICE_CHUNK) {
   const chunks = [];
   let cur = [], n = 0;
   for (const l of lines) {
@@ -1536,7 +1539,7 @@ function MirrorView({ book, question, cloudUser, onSave }) {
             </div>
           </div>
           <button className="tts-btn" onClick={writeScript}>✍ כתוב את השיחה</button>
-          <p className="tts-note">קודם התסריט — תקרא אותו, ורק אז תחליט אם להפיק קול. הפקת קול נספרת במכסה היומית ({lenInfo.chunks} מתוך 12 חלקים ל{lenInfo.label}).</p>
+          <p className="tts-note">קודם התסריט — תקרא אותו, ורק אז תחליט אם להפיק קול. הפקת קול נספרת במכסה היומית (כ-{lenInfo.chunks} מתוך 30 חלקים ל{lenInfo.label}).</p>
         </div>
       )}
 
