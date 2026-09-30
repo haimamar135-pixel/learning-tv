@@ -12,6 +12,14 @@
    פלט:  { title, lines:[{ s:"t"|"s", t:"..." }], chars } */
 
 const { gate, json } = require("./lib/gate.cjs");
+const { stream } = require("@netlify/functions");
+const { Readable } = require("stream");
+
+/* למה זרימה (צ'אט 16): תסריט בעברית של 2,600+ תווים לוקח ל-Claude 40–60 שניות.
+   חיבור "שקט" כל כך הרבה זמן נחתך בדרך (504 Inactivity Timeout) — לכן פותחים
+   את התשובה מיד ושולחים רווח כל 4 שניות עד שה-JSON מוכן. JSON.parse בלקוח
+   מתעלם מרווחים מובילים, ולכן App.jsx לא צריך להשתנות. */
+const HEARTBEAT_MS = 4000;
 
 /* אורך התסריט בתווים — ~550 תווים לדקת שמע ב-ElevenLabs */
 const LENGTHS = {
@@ -93,7 +101,20 @@ const core = async (event) => {
   const prompt = buildPrompt({ title, question, learner, notes, marks, target: len.chars });
   if (prompt.length > 30000) return json(400, { error: { message: "יותר מדי חומר לשיחה אחת — נסה ספר עם פחות הערות" } });
 
-  try {
+  /* מכאן — תשובה זורמת: סטטוס 200 נשלח מיד; שגיאה מכאן והלאה מגיעה כ-{error} בגוף. */
+  const out = new Readable({ read() {} });
+  const beat = setInterval(() => out.push(" "), HEARTBEAT_MS);
+  out.push(" ");
+  writeScript({ apiKey, prompt, len, title })
+    .then((r) => { clearInterval(beat); out.push(JSON.stringify(r)); out.push(null); })
+    .catch((e) => { clearInterval(beat); out.push(JSON.stringify({ error: { message: "השרת לא הצליח לפנות ל-API: " + e.message } })); out.push(null); });
+  return { statusCode: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }, body: out };
+};
+
+/* הקריאה ל-Claude — מחזירה את אובייקט התשובה (תסריט או {error}) */
+async function writeScript({ apiKey, prompt, len, title }) {
+  const fail = (message) => ({ error: { message } });
+  {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
@@ -105,29 +126,31 @@ const core = async (event) => {
       }),
     });
     const raw = await res.text();
-    if (!res.ok) return { statusCode: res.status, headers: { "Content-Type": "application/json" }, body: raw };
+    if (!res.ok) {
+      let m = `Claude API [${res.status}]`;
+      try { m += ": " + (JSON.parse(raw).error?.message || "").slice(0, 200); } catch {}
+      return fail(m);
+    }
     let data;
-    try { data = JSON.parse(raw); } catch { return json(502, { error: { message: "תשובה לא תקינה מה-API" } }); }
+    try { data = JSON.parse(raw); } catch { return fail("תשובה לא תקינה מה-API"); }
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
     const a = text.indexOf("{"), z = text.lastIndexOf("}");
-    if (a < 0 || z <= a) return json(502, { error: { message: "התסריט לא הגיע כ-JSON" } });
+    if (a < 0 || z <= a) return fail("התסריט לא הגיע כ-JSON");
     let script;
     try { script = JSON.parse(text.slice(a, z + 1).replace(/```json|```/g, "")); }
-    catch { return json(502, { error: { message: "התסריט נחתך באמצע — נסה אורך קצר יותר" } }); }
+    catch { return fail("התסריט נחתך באמצע — נסה אורך קצר יותר"); }
 
     const lines = (Array.isArray(script.lines) ? script.lines : [])
       .map((l) => ({ s: l && l.s === "s" ? "s" : "t", t: clip(l && l.t, 700) }))
       .filter((l) => l.t);
-    if (lines.length < 2) return json(502, { error: { message: "התסריט יצא ריק — נסה שוב" } });
+    if (lines.length < 2) return fail("התסריט יצא ריק — נסה שוב");
     const chars = lines.reduce((n, l) => n + l.t.length, 0);
-    return json(200, { title: clip(script.title, 80) || `שיקוף · ${title}`, lines, chars, minutes: Math.round(chars / 550 * 10) / 10 });
-  } catch (e) {
-    return json(502, { error: { message: "השרת לא הצליח לפנות ל-API: " + e.message } });
+    return { title: clip(script.title, 80) || `שיקוף · ${title}`, lines, chars, minutes: Math.round(chars / 550 * 10) / 10 };
   }
-};
+}
 
-exports.handler = async (event) => {
+exports.handler = stream(async (event) => {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: CORS, body: "" };
   const r = await core(event);
   return { ...r, headers: { ...CORS, ...(r.headers || {}) } };
-};
+});
