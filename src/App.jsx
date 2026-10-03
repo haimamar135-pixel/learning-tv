@@ -1009,9 +1009,9 @@ function chapterStatus(book, i) {
 
 /* ─── ✍️ שכבת הלומד צפה: הסרגל נצמד למשפט המסומן ונע איתו בגלילה ───
    העוגן: המשפט האחרון שסומן ([data-si] בתצוגת הפרק, #para- במגילה). כשהעוגן מחוץ למסך — הסרגל יושב בתחתית החלון. */
-function FloatingMarkBar({ anchorIdx, children }) {
+function FloatingMarkBar({ anchorIdx, drag, setDrag, children }) {
   const [pos, setPos] = useState(null);      // מיקום אוטומטי ליד העוגן
-  const [drag, setDrag] = useState(null);    // {x,y} אחרי שהלומד גרר — נשאר עד שהסימון מתבטל
+  /* drag = {x,y} אחרי שהלומד גרר — נשמר (localStorage) כדי שהסרגל יחזור לאותו מקום בכל סימון; לחיצה כפולה על הידית מחזירה למצב צמוד */
   const ref = useRef(null);
   useEffect(() => {
     const place = () => {
@@ -1056,7 +1056,7 @@ function FloatingMarkBar({ anchorIdx, children }) {
     : pos ? { top: pos.top } : { bottom: 12 };
   return (
     <div ref={ref} className={"mark-bar floating" + (drag ? " dragged" : "")} style={style}>
-      <span className="mark-grip" onMouseDown={onGrab} onTouchStart={onGrab} title="אחוז וגרור">⋮⋮</span>
+      <span className="mark-grip" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={() => setDrag(null)} title="אחוז וגרור · לחיצה כפולה: חזרה לצמוד למשפט">⋮⋮</span>
       {children}
     </div>
   );
@@ -1791,6 +1791,10 @@ export default function LearningTV() {
   const [transRes, setTransRes] = useState(null); // "גע ותרגם": {q,t,n?,err?,cached?}
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
+  const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
+  const toggleLayer = () => setLayerOn((v) => { try { localStorage.setItem("lomedtv-layer", v ? "off" : "on"); } catch {} return !v; });
+  const [barDrag, setBarDragState] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-layer-pos") || "null"); } catch { return null; } }); // מיקום הסרגל אחרי גרירה
+  const setBarDrag = (d) => { setBarDragState(d); try { d ? localStorage.setItem("lomedtv-layer-pos", JSON.stringify(d)) : localStorage.removeItem("lomedtv-layer-pos"); } catch {} };
   const [zoharForm, setZoharForm] = useState({ p: ZOHAR_DEFAULT_PARASHA, from: "", to: "", name: "" }); // 📜 שער הזוהר
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
@@ -3221,6 +3225,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
+                <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? "שכבת הלומד מוצגת — לחץ להסתיר" : "שכבת הלומד מוסתרת — לחץ להציג"} aria-label="שכבת הלומד">✍️</button>
                 <button
                   className={"font-btn" + (cloudUser ? (syncState === "err" ? " cloud-err" : " cloud-on") : "")}
                   onClick={() => setShowCloud(true)}
@@ -3890,8 +3895,8 @@ export default function LearningTV() {
                       ? "✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
                       : "קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף."}
                   </p>
-                  {(rangeIdx || wordSel) && (
-                    <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]}>
+                  {layerOn && (rangeIdx || wordSel) && (
+                    <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]} drag={barDrag} setDrag={setBarDrag}>
                       <span className="mark-title">✍️ שכבת הלומד:</span>
                       <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
                       <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -4206,8 +4211,8 @@ export default function LearningTV() {
             </div>
           )}
  
-          {selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
-            <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)}>
+          {layerOn && selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
+            <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)} drag={barDrag} setDrag={setBarDrag}>
               <span className="mark-title">✍️ שכבת הלומד:</span>
               <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
               <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -4614,6 +4619,8 @@ const css = `
 .mark-bar.floating .mark-btn{font-size:.82rem;padding:4px 9px;border-radius:7px}
 .mark-grip{cursor:grab;color:#9a8c6a;font-size:1.05rem;padding:0 4px;user-select:none;touch-action:none;letter-spacing:-3px}
 .mark-grip:active{cursor:grabbing}
+.layer-btn{opacity:.45}
+.layer-btn.on{opacity:1;border-color:var(--amber);box-shadow:0 0 6px rgba(242,163,60,.45)}
 @keyframes barIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
 .mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
