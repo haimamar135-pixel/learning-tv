@@ -1010,7 +1010,9 @@ function chapterStatus(book, i) {
 /* ─── ✍️ שכבת הלומד צפה: הסרגל נצמד למשפט המסומן ונע איתו בגלילה ───
    העוגן: המשפט האחרון שסומן ([data-si] בתצוגת הפרק, #para- במגילה). כשהעוגן מחוץ למסך — הסרגל יושב בתחתית החלון. */
 function FloatingMarkBar({ anchorIdx, children }) {
-  const [pos, setPos] = useState(null);
+  const [pos, setPos] = useState(null);      // מיקום אוטומטי ליד העוגן
+  const [drag, setDrag] = useState(null);    // {x,y} אחרי שהלומד גרר — נשאר עד שהסימון מתבטל
+  const ref = useRef(null);
   useEffect(() => {
     const place = () => {
       const el = anchorIdx == null ? null : document.querySelector(`[data-si="${anchorIdx}"], #para-${anchorIdx}`);
@@ -1020,16 +1022,44 @@ function FloatingMarkBar({ anchorIdx, children }) {
       const vh = window.innerHeight;
       const visible = r.bottom > (box ? box.top : 0) + 10 && r.top < (box ? box.bottom : vh) - 10;
       if (!visible) { setPos(null); return; }
-      const below = r.bottom + 8;
-      setPos({ top: below + 60 < vh ? below : Math.max(8, r.top - 62) });
+      const below = r.bottom + 6;
+      setPos({ top: below + 48 < vh ? below : Math.max(8, r.top - 50) });
     };
     place();
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
     return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [anchorIdx]);
-  const style = pos ? { top: pos.top } : { bottom: 12 };
-  return <div className="mark-bar floating" style={style}>{children}</div>;
+  /* אחיזה וגרירה — בעכבר ובאצבע */
+  const onGrab = (e) => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const p0 = e.touches ? e.touches[0] : e;
+    const dx = p0.clientX - r.left, dy = p0.clientY - r.top;
+    const move = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const x = Math.min(Math.max(4, p.clientX - dx), window.innerWidth - r.width - 4);
+      const y = Math.min(Math.max(4, p.clientY - dy), window.innerHeight - r.height - 4);
+      setDrag({ x, y });
+      if (ev.cancelable) ev.preventDefault();
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
+    e.preventDefault();
+  };
+  const style = drag
+    ? { top: drag.y, left: drag.x, transform: "none" }
+    : pos ? { top: pos.top } : { bottom: 12 };
+  return (
+    <div ref={ref} className={"mark-bar floating" + (drag ? " dragged" : "")} style={style}>
+      <span className="mark-grip" onMouseDown={onGrab} onTouchStart={onGrab} title="אחוז וגרור">⋮⋮</span>
+      {children}
+    </div>
+  );
 }
 
 /* ─── 📜 זוהר עם סולם צמוד (מעגל 18) ───
@@ -4578,7 +4608,12 @@ const css = `
 .fm-main{background:#1a2140;color:#fff;font-weight:700;z-index:2}
 .fm-sub{background:#fff;border:1.5px solid #d8d0ba;color:#232323;font-size:.82rem;z-index:1}
 .mark-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f7f3e8;border:1.5px solid #d8d0ba;border-radius:12px;padding:8px 12px;margin:0 auto 10px;max-width:860px;justify-content:center}
-.mark-bar.floating{position:fixed;left:50%;transform:translateX(-50%);z-index:60;margin:0;width:max-content;max-width:calc(100vw - 24px);box-shadow:0 8px 24px rgba(20,14,0,.28);border-color:var(--amber);animation:barIn .18s ease-out}
+.mark-bar.floating{position:fixed;left:50%;transform:translateX(-50%);z-index:60;margin:0;width:max-content;max-width:calc(100vw - 24px);box-shadow:0 8px 24px rgba(20,14,0,.28);border-color:var(--amber);animation:barIn .18s ease-out;gap:5px;padding:5px 8px;border-radius:10px}
+.mark-bar.floating.dragged{animation:none}
+.mark-bar.floating .mark-title{display:none}
+.mark-bar.floating .mark-btn{font-size:.82rem;padding:4px 9px;border-radius:7px}
+.mark-grip{cursor:grab;color:#9a8c6a;font-size:1.05rem;padding:0 4px;user-select:none;touch-action:none;letter-spacing:-3px}
+.mark-grip:active{cursor:grabbing}
 @keyframes barIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
 .mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
