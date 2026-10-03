@@ -1007,6 +1007,14 @@ function chapterStatus(book, i) {
   return hasAny ? "learning" : "new";
 }
 
+/* ─── זוהר עם סולם צמוד (מעגל 18): פסקת "הסולם:" = פירוש; הפסקה שלפניה (אות) = הארמית, מובלטת ─── */
+const isSulamPara = (sentences, g) => !!g && /^הסולם:/.test(sentences[g[0]] || "");
+function paraKind(sentences, groups, pi) {
+  if (isSulamPara(sentences, groups[pi])) return " sulam";
+  if (isSulamPara(sentences, groups[pi + 1])) return " zohar";
+  return "";
+}
+
 /* ─── כל טקסט הספר כמשפטים — האינדקס הגלובלי שבו נשמרים מרקרים והערות ───
    משמש גם את המגילה (useMemo בתוך האפליקציה) וגם את "שיקוף" (מחוץ לה). */
 function bookSentences(book) {
@@ -3614,7 +3622,7 @@ export default function LearningTV() {
                     <div className="scroll-text" ref={scrollBodyRef} onMouseUp={onScrollMouseUp}>
                       {paraGroups.map(([start, count], pi) => (
                         <div key={pi}>
-                          <p className="scroll-para">
+                          <p className={"scroll-para" + paraKind(sentences, paraGroups, pi)}>
                             {sentences.slice(start, start + count).map((s, j) => {
                               const i = start + j;
                               const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
@@ -3736,7 +3744,7 @@ export default function LearningTV() {
                       const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
                       if (!chParas.length) return cur.text; // ביטחון: אם אין משפטים — הטקסט כמו שהוא
                       return chParas.map(([start, count], pi) => (
-                        <p className="scroll-para" key={pi}>
+                        <p className={"scroll-para" + paraKind(sentences, chParas, pi)} key={pi}>
                           {sentences.slice(start, start + count).map((s, j) => {
                             const i = start + j;
                             const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
@@ -4543,6 +4551,8 @@ const css = `
 .read{display:flex;flex-direction:column;gap:16px}
 .read-sents{white-space:normal}
 .read-sents .scroll-para{padding:0;margin:0 0 14px}
+.scroll-para.zohar{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.2em;color:#1a1408;margin-bottom:6px}
+.scroll-para.sulam,.read-sents .scroll-para.sulam{color:#4d4636;border-inline-start:3px solid var(--amber);padding-inline-start:12px;margin-bottom:22px}
 .read-mark-hint{margin:0}
 .scan-mode-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f2ecff;border:1.5px solid #c9b8f2;border-radius:10px;padding:10px 14px;margin:10px 0;font-size:.98rem;color:#3a2a63}
 .scan-mode-title{font-weight:600}
