@@ -311,8 +311,8 @@ function splitToChapters(raw) {
   let chunks;
   if (explicit.length > 1) {
     chunks = explicit;
-  } else if (clean.length <= CHAPTER_LIMIT) {
-    chunks = [clean];
+  } else if (clean.length <= CHAPTER_LIMIT || /^(הסולם|פירוש):/m.test(clean)) {
+    chunks = [clean]; // מאמר זוהר עם סולם / דף מפורש נשאר שלם — לא נחתך לפי אורך
   } else {
     const paras = clean.split(/\n{2,}/);
     chunks = [];
@@ -1007,8 +1007,96 @@ function chapterStatus(book, i) {
   return hasAny ? "learning" : "new";
 }
 
-/* ─── זוהר עם סולם צמוד (מעגל 18): פסקת "הסולם:" = פירוש; הפסקה שלפניה (אות) = הארמית, מובלטת ─── */
-const isSulamPara = (sentences, g) => !!g && /^הסולם:/.test(sentences[g[0]] || "");
+/* ─── ✍️ שכבת הלומד צפה: הסרגל נצמד למשפט המסומן ונע איתו בגלילה ───
+   העוגן: המשפט האחרון שסומן ([data-si] בתצוגת הפרק, #para- במגילה). כשהעוגן מחוץ למסך — הסרגל יושב בתחתית החלון. */
+function FloatingMarkBar({ anchorIdx, children }) {
+  const [pos, setPos] = useState(null);
+  useEffect(() => {
+    const place = () => {
+      const el = anchorIdx == null ? null : document.querySelector(`[data-si="${anchorIdx}"], #para-${anchorIdx}`);
+      if (!el) { setPos(null); return; }
+      const r = el.getBoundingClientRect();
+      const box = el.closest(".screen-body")?.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const visible = r.bottom > (box ? box.top : 0) + 10 && r.top < (box ? box.bottom : vh) - 10;
+      if (!visible) { setPos(null); return; }
+      const below = r.bottom + 8;
+      setPos({ top: below + 60 < vh ? below : Math.max(8, r.top - 62) });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [anchorIdx]);
+  const style = pos ? { top: pos.top } : { bottom: 12 };
+  return <div className="mark-bar floating" style={style}>{children}</div>;
+}
+
+/* ─── 📜 זוהר עם סולם צמוד (מעגל 18) ───
+   פסקת "הסולם:" (או "פירוש:" מצלם דף חכם) = פירוש; הפסקה שלפניה (האות) = הארמית, מובלטת.
+   השער "משוך מאמר" מביא את הארמית ואת הסולם ישירות מספריא, לפי פרשה ואותיות — בלי עיבוד בדרך. */
+const SULAM_RE = /^(הסולם|פירוש):/;
+const isSulamPara = (sentences, g) => !!g && SULAM_RE.test(sentences[g[0]] || "");
+const SEFARIA = "https://www.sefaria.org/api";
+/* שמות הפרשות כפי שספריא קוראת להן ב-"Sulam on Zohar" — המספור של האותיות שם זהה לספר המודפס */
+const ZOHAR_PARSHIOT = [
+  ["Introduction", "הקדמת ספר הזוהר"], ["Bereshit I", "בראשית א"], ["Bereshit II", "בראשית ב"], ["Noach", "נח"],
+  ["Lech Lecha", "לך לך"], ["Vayera", "וירא"], ["Chayei Sara", "חיי שרה"], ["Toldot", "תולדות"], ["Vayetzei", "ויצא"],
+  ["Vayishlach", "וישלח"], ["Vayeshev", "וישב"], ["Miketz", "מקץ"], ["Vayigash", "ויגש"], ["Vayechi", "ויחי"],
+  ["Shemot", "שמות"], ["Vaera", "וארא"], ["Bo", "בא"], ["Beshalach", "בשלח"], ["Yitro", "יתרו"], ["Mishpatim", "משפטים"],
+  ["Terumah", "תרומה"], ["Sifra DiTzniuta", "ספרא דצניעותא"], ["Tetzaveh", "תצוה"], ["Ki Tisa", "כי תשא"],
+  ["Vayakhel", "ויקהל"], ["Pekudei", "פקודי"], ["Vayikra", "ויקרא"], ["Tzav", "צו"], ["Shmini", "שמיני"],
+  ["Tazria", "תזריע"], ["Metzora", "מצורע"], ["Achrei Mot", "אחרי מות"], ["Kedoshim", "קדושים"], ["Emor", "אמור"],
+  ["Behar", "בהר"], ["Bechukotai", "בחקותי"], ["Bamidbar", "במדבר"], ["Nasso", "נשא"], ["Idra Rabba", "אדרא רבא"],
+  ["Beha'alotcha", "בהעלותך"], ["Sh'lach", "שלח לך"], ["Korach", "קרח"], ["Chukat", "חקת"], ["Balak", "בלק"],
+  ["Pinchas", "פנחס"], ["Matot", "מטות"], ["Vaetchanan", "ואתחנן"], ["Eikev", "עקב"], ["Shoftim", "שופטים"],
+  ["Ki Teitzei", "כי תצא"], ["Vayeilech", "וילך"], ["Ha'Azinu", "האזינו"], ["Idra Zuta", "אדרא זוטא"],
+];
+const ZOHAR_DEFAULT_PARASHA = 13; // ויחי
+/* אות → מספר (קמג → 143). מקבל גם ספרות, גרשיים וגרש. 0 = לא תקין */
+function gematria(s) {
+  s = (s || "").trim();
+  if (/^\d+$/.test(s)) return +s;
+  const v = { א: 1, ב: 2, ג: 3, ד: 4, ה: 5, ו: 6, ז: 7, ח: 8, ט: 9, י: 10, כ: 20, ך: 20, ל: 30, מ: 40, ם: 40, נ: 50, ן: 50, ס: 60, ע: 70, פ: 80, ף: 80, צ: 90, ץ: 90, ק: 100, ר: 200, ש: 300, ת: 400 };
+  let n = 0;
+  for (const c of s) {
+    if (v[c]) n += v[c];
+    else if (!/["'״׳\s().]/.test(c)) return 0;
+  }
+  return n;
+}
+const stripTags = (h) => String(h || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+/* מושך מאמר: הסולם בבקשה אחת (טווח אותיות), לשון הזוהר דרך הקישורים של כל אות.
+   מחזיר טקסט במבנה שהתצוגה מכירה: "אות) ארמית" ואחריה פסקאות "הסולם: …" */
+async function fetchZoharArticle(en, he, from, to, name, onProgress) {
+  const enc = encodeURIComponent(en.replace(/ /g, "_"));
+  const j = async (u) => {
+    const r = await fetch(u);
+    if (!r.ok) throw new Error(`ספריא השיבה ${r.status}`);
+    return r.json();
+  };
+  onProgress?.("📜 מושך את הסולם מספריא…");
+  const sul = await j(`${SEFARIA}/v3/texts/Sulam_on_Zohar,_${enc}.${from}${to > from ? "-" + to : ""}`);
+  let st = sul?.versions?.[0]?.text;
+  if (!st || (Array.isArray(st) && !st.length)) throw new Error("לא נמצא הסולם לאותיות האלה");
+  if (to === from) st = [st];
+  const sulam = st.map((x) => (Array.isArray(x) ? x.flat(3) : [x]));
+  onProgress?.("📜 מושך את לשון הזוהר…");
+  const ots = [];
+  for (let n = from; n <= to; n++) ots.push(n);
+  const links = await Promise.all(
+    ots.map((n) => j(`${SEFARIA}/links/Sulam_on_Zohar,_${enc}.${n}?with_text=1`).catch(() => []))
+  );
+  const parts = ots.map((n, i) => {
+    const zl = (Array.isArray(links[i]) ? links[i] : []).find((l) => /^Zohar,/.test(l.ref || ""));
+    let ar = zl ? zl.he : "";
+    if (Array.isArray(ar)) ar = ar.flat(3).join(" ");
+    ar = stripTags(ar);
+    const segs = (sulam[i] || []).map(stripTags).filter(Boolean);
+    return [`${hebNum(n)}) ${ar || "(לשון הזוהר לאות הזאת לא נמצאה בספריא)"}`, ...segs.map((s) => "הסולם: " + s)].join("\n\n");
+  });
+  return `${name}\nזוהר ${he} · אותיות ${hebNum(from)}–${hebNum(to)} · מספריא\n\n${parts.join("\n\n")}`;
+}
 function paraKind(sentences, groups, pi) {
   if (isSulamPara(sentences, groups[pi])) return " sulam";
   if (isSulamPara(sentences, groups[pi + 1])) return " zohar";
@@ -1673,6 +1761,7 @@ export default function LearningTV() {
   const [transRes, setTransRes] = useState(null); // "גע ותרגם": {q,t,n?,err?,cached?}
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
+  const [zoharForm, setZoharForm] = useState({ p: ZOHAR_DEFAULT_PARASHA, from: "", to: "", name: "" }); // 📜 שער הזוהר
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
   const [flexLoading, setFlexLoading] = useState(null); // label בזמן הפקה
@@ -2165,6 +2254,37 @@ export default function LearningTV() {
       setView("guide");
     }
     return nb;
+  };
+
+  /* ── 📜 שער הזוהר: מאמר מספריא לפי פרשה ואותיות — נכנס כפרק לספר של אותה פרשה ── */
+  const importZohar = async () => {
+    const [en, he] = ZOHAR_PARSHIOT[zoharForm.p] || ZOHAR_PARSHIOT[ZOHAR_DEFAULT_PARASHA];
+    const from = gematria(zoharForm.from);
+    const to = zoharForm.to.trim() ? gematria(zoharForm.to) : from;
+    if (!from) { setError("כתוב מאיזו אות מתחיל המאמר (למשל קמג)."); return; }
+    if (!to || to < from) { setError("האות האחרונה צריכה להיות אחרי הראשונה."); return; }
+    if (to - from > 40) { setError("עד 40 אותיות במשיכה אחת — מאמר ארוך מזה נמשך בשני חלקים."); return; }
+    const name = zoharForm.name.trim() || `אותיות ${hebNum(from)}–${hebNum(to)}`;
+    setError(null);
+    setFileBusy("📜 פונה לספריא…");
+    try {
+      const text = await fetchZoharArticle(en, he, from, to, name, setFileBusy);
+      const title = `זוהר ${he} עם הסולם`;
+      const chapter = { title: name, text };
+      const existing = index.find((b) => b.title === title);
+      const prev = existing ? await loadBook(existing.id) : null;
+      if (prev) {
+        await persist({ ...prev, chapters: [...prev.chapters, chapter] }, { k: "full" });
+        flick();
+        setView("guide");
+      } else {
+        await buildBook(text, title, false, [chapter]);
+      }
+      setZoharForm((f) => ({ ...f, from: "", to: "", name: "" }));
+    } catch (e) {
+      setError("משיכת הזוהר נכשלה: " + (e?.message || e));
+    }
+    setFileBusy(null);
   };
 
   /* ── הגשר: מהארון אל הלימוד ── */
@@ -3273,6 +3393,21 @@ export default function LearningTV() {
                     </label>
                   </div>
 
+                  <div className="scan-mode-row zohar-row">
+                    <span className="scan-mode-title">📜 זוהר עם סולם צמוד — מאמר מספריא:</span>
+                    <select className="scan-mode-select" value={zoharForm.p} onChange={(e) => setZoharForm((f) => ({ ...f, p: +e.target.value }))} aria-label="פרשה">
+                      {ZOHAR_PARSHIOT.map(([en, he], i) => (
+                        <option key={en} value={i}>{he}</option>
+                      ))}
+                    </select>
+                    <input className="zohar-in" placeholder="מאות (קמג)" value={zoharForm.from} onChange={(e) => setZoharForm((f) => ({ ...f, from: e.target.value }))} aria-label="מאות" />
+                    <input className="zohar-in" placeholder="עד אות (קמו)" value={zoharForm.to} onChange={(e) => setZoharForm((f) => ({ ...f, to: e.target.value }))} aria-label="עד אות" />
+                    <input className="zohar-in wide" placeholder="שם המאמר (ארבע קשרין)" value={zoharForm.name} onChange={(e) => setZoharForm((f) => ({ ...f, name: e.target.value }))} aria-label="שם המאמר" />
+                    <button className="cam-btn" onClick={importZohar} disabled={!!fileBusy}>📜 משוך מאמר</button>
+                    <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
+                      הארמית והסולם לפי האותיות שבספר · מאמר חדש מצטרף לספר של אותה פרשה
+                    </span>
+                  </div>
                   <div className="scan-mode-row">
                     {!recOn ? (
                       <button className="rec-btn" onClick={startRec} disabled={!!fileBusy}>
@@ -3726,7 +3861,7 @@ export default function LearningTV() {
                       : "קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף."}
                   </p>
                   {(rangeIdx || wordSel) && (
-                    <div className="mark-bar">
+                    <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]}>
                       <span className="mark-title">✍️ שכבת הלומד:</span>
                       <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
                       <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -3736,7 +3871,7 @@ export default function LearningTV() {
                       <button className="mark-btn" onClick={addNote}>📝 הערה</button>
                       <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
                       <button className="mark-btn" onClick={clearSelection}>✕ בטל סימון</button>
-                    </div>
+                    </FloatingMarkBar>
                   )}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
@@ -4042,7 +4177,7 @@ export default function LearningTV() {
           )}
  
           {selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
-            <div className="mark-bar">
+            <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)}>
               <span className="mark-title">✍️ שכבת הלומד:</span>
               <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
               <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -4052,7 +4187,7 @@ export default function LearningTV() {
               <button className="mark-btn" onClick={addNote}>📝 הערה</button>
               <button className="mark-btn trans-btn" onClick={translateSel}>א⇄ע תרגם</button>
               <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
-            </div>
+            </FloatingMarkBar>
           )}
           {transBubble}
 
@@ -4443,6 +4578,8 @@ const css = `
 .fm-main{background:#1a2140;color:#fff;font-weight:700;z-index:2}
 .fm-sub{background:#fff;border:1.5px solid #d8d0ba;color:#232323;font-size:.82rem;z-index:1}
 .mark-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f7f3e8;border:1.5px solid #d8d0ba;border-radius:12px;padding:8px 12px;margin:0 auto 10px;max-width:860px;justify-content:center}
+.mark-bar.floating{position:fixed;left:50%;transform:translateX(-50%);z-index:60;margin:0;width:max-content;max-width:calc(100vw - 24px);box-shadow:0 8px 24px rgba(20,14,0,.28);border-color:var(--amber);animation:barIn .18s ease-out}
+@keyframes barIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
 .mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
 .mark-btn:hover{border-color:var(--amber)}
@@ -4557,6 +4694,11 @@ const css = `
 .scan-mode-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f2ecff;border:1.5px solid #c9b8f2;border-radius:10px;padding:10px 14px;margin:10px 0;font-size:.98rem;color:#3a2a63}
 .scan-mode-title{font-weight:600}
 .scan-mode-select{font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #c9b8f2;background:#fff;color:#3a2a63}
+.zohar-row{background:#fff6e6;border-color:#e8c88a;color:#5a3a10}
+.zohar-row .scan-mode-select{border-color:#e8c88a;color:#5a3a10}
+.zohar-in{font-family:'Heebo',sans-serif;font-size:.95rem;padding:6px 10px;border-radius:8px;border:1.5px solid #e8c88a;background:#fff;color:#5a3a10;width:118px}
+.zohar-in.wide{width:210px}
+.zohar-in:focus{outline:none;border-color:var(--amber)}
 .ch-key.smart{background:linear-gradient(180deg,#7a5cc4,#5d3fa8);border-color:#8f74d6}
 .ch-key.media{background:linear-gradient(180deg,#3f6fb5,#2a4f8f);border-color:#6f96d0}
 .ch-key.rec-on{background:linear-gradient(180deg,#b54848,#8f2f2f);border-color:#d07a7a;animation:recPulse 1.2s ease-in-out infinite}
