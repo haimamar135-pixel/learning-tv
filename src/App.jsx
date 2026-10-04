@@ -1,4 +1,5 @@
    import { useState, useEffect, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
 
@@ -1007,67 +1008,62 @@ function chapterStatus(book, i) {
   return hasAny ? "learning" : "new";
 }
 
-/* ─── ✍️ שכבת הלומד צפה: הסרגל נצמד למשפט המסומן ונע איתו בגלילה ───
-   העוגן: המשפט האחרון שסומן ([data-si] בתצוגת הפרק, #para- במגילה). כשהעוגן מחוץ למסך — הסרגל יושב בתחתית החלון. */
-function FloatingMarkBar({ anchorIdx, drag, setDrag, children }) {
-  const [pos, setPos] = useState(null);      // מיקום אוטומטי ליד העוגן
-  /* drag = {x,y} אחרי שהלומד גרר — נשמר (localStorage) כדי שהסרגל יחזור לאותו מקום בכל סימון; לחיצה כפולה על הידית מחזירה למצב צמוד */
+/* ─── ✍️ לשונית הלומד (צ'אט 19) ───
+   לא חלון צף: לשונית קטנה שנפתחת מעל המילה/השורה שלחצו עליה, עם חץ שמצביע עליה, ונעה איתה בגלילה.
+   העוגן: המילים שסומנו (.ws-pend) או המשפט ([data-si] בתצוגת הפרק, #para- במגילה) — ובתוכו השורה שבה הייתה הלחיצה.
+   מצוירת מחוץ ל-.screen-body (portal) כי ה-zoom של גודל הגופן שם מזיז כל position:fixed שבפנים — זה היה הבאג במק. */
+let LAST_POINT = null;
+if (typeof window !== "undefined") {
+  const rec = (e) => { const p = e.touches ? e.touches[0] : e; if (p && Number.isFinite(p.clientX)) LAST_POINT = { x: p.clientX, y: p.clientY }; };
+  window.addEventListener("pointerdown", rec, true);
+  window.addEventListener("pointerup", rec, true);
+  window.addEventListener("touchend", (e) => { const p = e.changedTouches && e.changedTouches[0]; if (p) LAST_POINT = { x: p.clientX, y: p.clientY }; }, true);
+}
+function FloatingMarkBar({ anchorIdx, word, children }) {
+  const [pos, setPos] = useState(null);
   const ref = useRef(null);
+  const offRef = useRef(null); // המרחק של השורה שנלחצה מראש המשפט + מיקום X בתוכו — כדי שהלשונית תישאר באותה שורה בגלילה
+  useEffect(() => { offRef.current = null; }, [anchorIdx, word]);
   useEffect(() => {
     const place = () => {
-      const el = anchorIdx == null ? null : document.querySelector(`[data-si="${anchorIdx}"], #para-${anchorIdx}`);
+      const el = word ? document.querySelector(".ws-pend") : anchorIdx == null ? null : document.querySelector(`[data-si="${anchorIdx}"], #para-${anchorIdx}`);
       if (!el) { setPos(null); return; }
       const r = el.getBoundingClientRect();
       const box = el.closest(".screen-body")?.getBoundingClientRect();
-      const vh = window.innerHeight;
-      const visible = r.bottom > (box ? box.top : 0) + 10 && r.top < (box ? box.bottom : vh) - 10;
-      if (!visible) { setPos(null); return; }
-      /* הסרגל נפתח מעל המקום שמסמנים (בקשת חיים, צ'אט 19) — ולא מכסה את מה שאחריו.
-         אם אין מקום מעל (המשפט בראש המסך) — מתחתיו. אופקית: מול אמצע המשפט, בתוך גבולות החלון */
+      const topLim = Math.max(0, box ? box.top : 0), botLim = Math.min(window.innerHeight, box ? box.bottom : window.innerHeight);
+      if (!(r.bottom > topLim + 10 && r.top < botLim - 10)) { setPos(null); return; }
+      if (!offRef.current) {
+        const rects = [...el.getClientRects()].filter((q) => q.width > 0);
+        let line = rects[0] || r;
+        if (LAST_POINT) {
+          const hit = rects.find((q) => LAST_POINT.y >= q.top - 2 && LAST_POINT.y <= q.bottom + 2);
+          line = hit || rects.reduce((best, q) => Math.abs((q.top + q.bottom) / 2 - LAST_POINT.y) < Math.abs((best.top + best.bottom) / 2 - LAST_POINT.y) ? q : best, line);
+        }
+        const x = LAST_POINT && LAST_POINT.x >= line.left - 4 && LAST_POINT.x <= line.right + 4 ? LAST_POINT.x : (line.left + line.right) / 2;
+        offRef.current = { dy: line.top - r.top, dyb: line.bottom - r.top, dx: x - r.left };
+      }
+      const o = offRef.current;
+      const lineTop = r.top + o.dy, lineBottom = r.top + o.dyb, cx = r.left + o.dx;
       const h = ref.current?.offsetHeight || 44, w = ref.current?.offsetWidth || 320;
-      const above = r.top - h - 8;
-      const top = above >= (box ? box.top : 0) + 4 ? above : r.bottom + 8;
-      const cx = (r.left + r.right) / 2;
-      const left = Math.min(Math.max(4, cx - w / 2), Math.max(4, window.innerWidth - w - 4));
-      setPos({ top, left });
+      const above = lineTop - h - 10;
+      const flip = above < topLim + 4;
+      const top = flip ? lineBottom + 10 : above;
+      const left = Math.min(Math.max(6, cx - w / 2), Math.max(6, window.innerWidth - w - 6));
+      setPos({ top, left, arrow: Math.min(Math.max(14, cx - left), w - 14), flip });
     };
     place();
+    const id = requestAnimationFrame(place);
     window.addEventListener("scroll", place, true);
     window.addEventListener("resize", place);
-    return () => { window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
-  }, [anchorIdx]);
-  /* אחיזה וגרירה — בעכבר ובאצבע */
-  const onGrab = (e) => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    const p0 = e.touches ? e.touches[0] : e;
-    const dx = p0.clientX - r.left, dy = p0.clientY - r.top;
-    const move = (ev) => {
-      const p = ev.touches ? ev.touches[0] : ev;
-      const x = Math.min(Math.max(4, p.clientX - dx), window.innerWidth - r.width - 4);
-      const y = Math.min(Math.max(4, p.clientY - dy), window.innerHeight - r.height - 4);
-      setDrag({ x, y });
-      if (ev.cancelable) ev.preventDefault();
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
-      window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
-    };
-    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
-    window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
-    e.preventDefault();
-  };
-  /* מיקום שנשמר מחלון גדול יותר לא יישאר מחוץ למסך — תמיד נצמד לגבולות החלון הנוכחי */
-  const w = ref.current?.offsetWidth || 320, h = ref.current?.offsetHeight || 40;
-  const style = drag
-    ? { top: Math.min(Math.max(4, drag.y), Math.max(4, window.innerHeight - h - 4)), left: Math.min(Math.max(4, drag.x), Math.max(4, window.innerWidth - w - 4)), transform: "none" }
-    : pos ? { top: pos.top, left: pos.left, transform: "none" } : { bottom: 12 };
-  return (
-    <div ref={ref} className={"mark-bar floating" + (drag ? " dragged" : "")} style={style}>
-      <span className="mark-grip" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={() => setDrag(null)} title="אחוז וגרור · לחיצה כפולה: חזרה לצמוד למשפט">⋮⋮</span>
+    return () => { cancelAnimationFrame(id); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [anchorIdx, word]);
+  const style = pos ? { top: pos.top, left: pos.left, "--arrow": pos.arrow + "px" } : { bottom: 12, left: "50%", transform: "translateX(-50%)" };
+  const node = (
+    <div ref={ref} className={"mark-bar floating" + (pos ? (pos.flip ? " below" : " above") : " parked")} style={style} dir="rtl">
       {children}
     </div>
   );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
 
 /* ─── 📜 זוהר עם סולם צמוד (מעגל 18) ───
@@ -1820,11 +1816,8 @@ export default function LearningTV() {
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
-  const [barDrag, setBarDragState] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-layer-pos") || "null"); } catch { return null; } }); // מיקום הסרגל אחרי גרירה
-  const setBarDrag = (d) => { setBarDragState(d); try { d ? localStorage.setItem("lomedtv-layer-pos", JSON.stringify(d)) : localStorage.removeItem("lomedtv-layer-pos"); } catch {} };
   const toggleLayer = () => {
     const next = !layerOn;
-    if (next) setBarDrag(null); // הדלקה = הסרגל חוזר להופיע צמוד למשפט המסומן, לא במקום ישן שאולי מחוץ למסך
     try { localStorage.setItem("lomedtv-layer", next ? "on" : "off"); } catch {}
     setLayerOn(next);
   };
@@ -2778,7 +2771,7 @@ export default function LearningTV() {
         if (r.hl) st.background = HL_COLORS[r.hl];
       }
       if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
-      nodes.push(<span key={k} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
+      nodes.push(<span key={k} className={isPend ? "ws-pend" : undefined} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
     }
     return nodes;
   };
@@ -3951,7 +3944,7 @@ export default function LearningTV() {
                       : "קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף."}
                   </p>
                   {layerOn && (rangeIdx || wordSel) && (
-                    <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]} drag={barDrag} setDrag={setBarDrag}>
+                    <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]} word={!!wordSel}>
                       <span className="mark-title">✍️ שכבת הלומד:</span>
                       <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
                       <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -4267,7 +4260,7 @@ export default function LearningTV() {
           )}
  
           {layerOn && selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
-            <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)} drag={barDrag} setDrag={setBarDrag}>
+            <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)} word={!!wordSel}>
               <span className="mark-title">✍️ שכבת הלומד:</span>
               <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
               <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
@@ -4668,15 +4661,16 @@ const css = `
 .fm-main{background:#1a2140;color:#fff;font-weight:700;z-index:2}
 .fm-sub{background:#fff;border:1.5px solid #d8d0ba;color:#232323;font-size:.82rem;z-index:1}
 .mark-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#f7f3e8;border:1.5px solid #d8d0ba;border-radius:12px;padding:8px 12px;margin:0 auto 10px;max-width:860px;justify-content:center}
-.mark-bar.floating{position:fixed;left:50%;transform:translateX(-50%);z-index:60;margin:0;width:max-content;max-width:calc(100vw - 24px);box-shadow:0 8px 24px rgba(20,14,0,.28);border-color:var(--amber);animation:barIn .18s ease-out;gap:5px;padding:5px 8px;border-radius:10px}
-.mark-bar.floating.dragged{animation:none}
+.mark-bar.floating{position:fixed;z-index:60;margin:0;width:max-content;max-width:calc(100vw - 24px);box-shadow:0 8px 24px rgba(20,14,0,.28);border-color:var(--amber);animation:barIn .16s ease-out;gap:5px;padding:5px 8px;border-radius:10px;font-size:16px}
 .mark-bar.floating .mark-title{display:none}
 .mark-bar.floating .mark-btn{font-size:.82rem;padding:4px 9px;border-radius:7px}
-.mark-grip{cursor:grab;color:#9a8c6a;font-size:1.05rem;padding:0 4px;user-select:none;touch-action:none;letter-spacing:-3px}
-.mark-grip:active{cursor:grabbing}
+/* החץ של הלשונית — מצביע על המילה/השורה שנלחצה */
+.mark-bar.floating.above::after,.mark-bar.floating.below::after{content:"";position:absolute;left:var(--arrow,50%);width:12px;height:12px;background:#f7f3e8;border:1.5px solid var(--amber);transform:translateX(-50%) rotate(45deg)}
+.mark-bar.floating.above::after{bottom:-7px;border-top:none;border-left:none}
+.mark-bar.floating.below::after{top:-7px;border-bottom:none;border-right:none}
 .layer-btn{opacity:.45}
 .layer-btn.on{opacity:1;border-color:var(--amber);box-shadow:0 0 6px rgba(242,163,60,.45)}
-@keyframes barIn{from{opacity:0;translate:0 6px}to{opacity:1;translate:0 0}}
+@keyframes barIn{from{opacity:0;translate:0 4px}to{opacity:1;translate:0 0}}
 .mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
 .mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
 .mark-btn:hover{border-color:var(--amber)}
