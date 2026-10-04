@@ -1108,7 +1108,33 @@ function VideoPanel({ sessionId, myName, onClose }) {
   const [tiles, setTiles] = useState([]); // [{id, name, local, videoTrack, audioTrack, speaking}]
   const [mic, setMic] = useState(true);
   const [cam, setCam] = useState(true);
-  const [big, setBig] = useState(false);
+  /* גודל (3 מדרגות) ומיקום (גרירה בכותרת) — נשמרים לפעם הבאה */
+  const SIZES = [220, 320, 560];
+  const [sizeIdx, setSizeIdx] = useState(() => { try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
+  const [pos, setPos] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-video-pos") || "null"); } catch { return null; } });
+  const panelRef = useRef(null);
+  const cycleSize = () => setSizeIdx((i) => { const n = (i + 1) % SIZES.length; try { localStorage.setItem("lomedtv-video-size", String(n)); } catch {} return n; });
+  const onGrab = (e) => {
+    if (e.target.closest("button")) return;
+    const r = panelRef.current?.getBoundingClientRect(); if (!r) return;
+    const p0 = e.touches ? e.touches[0] : e;
+    const dx = p0.clientX - r.left, dy = p0.clientY - r.top;
+    const move = (ev) => {
+      const p = ev.touches ? ev.touches[0] : ev;
+      const x = Math.min(Math.max(0, p.clientX - dx), window.innerWidth - r.width), y = Math.min(Math.max(0, p.clientY - dy), window.innerHeight - r.height);
+      setPos({ x, y });
+      if (ev.cancelable) ev.preventDefault();
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+      setPos((p) => { try { p ? localStorage.setItem("lomedtv-video-pos", JSON.stringify(p)) : localStorage.removeItem("lomedtv-video-pos"); } catch {} return p; });
+    };
+    window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+    window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
+    e.preventDefault();
+  };
+  const resetPos = () => { setPos(null); try { localStorage.removeItem("lomedtv-video-pos"); } catch {} };
   const roomRef = useRef(null);
   useEffect(() => {
     let room = null, dead = false;
@@ -1153,12 +1179,16 @@ function VideoPanel({ sessionId, myName, onClose }) {
   }, [sessionId]);
   const toggleMic = async () => { const r = roomRef.current; if (!r) return; const next = !mic; setMic(next); try { await r.localParticipant.setMicrophoneEnabled(next); } catch {} };
   const toggleCam = async () => { const r = roomRef.current; if (!r) return; const next = !cam; setCam(next); try { await r.localParticipant.setCameraEnabled(next); } catch {} };
+  const w = Math.min(SIZES[sizeIdx], window.innerWidth - 24);
+  const style = pos
+    ? { width: w, left: Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w)), top: Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - 120)), bottom: "auto" }
+    : { width: w };
   const node = (
-    <div className={"video-panel" + (big ? " big" : "")} dir="rtl">
-      <div className="video-head">
-        <span>📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
+    <div ref={panelRef} className="video-panel" style={style} dir="rtl">
+      <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={resetPos} title="אחוז וגרור · לחיצה כפולה: חזרה לפינה">
+        <span>⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
         <span className="video-btns">
-          <button className="mark-btn" onClick={() => setBig((b) => !b)} title="גדול/קטן">{big ? "⤡" : "⤢"}</button>
+          <button className="mark-btn" onClick={cycleSize} title="גודל: קטן / בינוני / גדול">{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
           <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
           <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
           <button className="mark-btn" onClick={onClose} title="צא מהחדר">✕</button>
@@ -2550,7 +2580,13 @@ export default function LearningTV() {
   const toggleFollow = () => setShare((sh) => sh ? { ...sh, follow: !sh.follow } : sh);
   const copyShareLink = async () => {
     const sh = shareRef.current; if (!sh) return;
-    const url = `${location.origin}${location.pathname}?join=${sh.code}`;
+    /* באפליקציה (Capacitor) הכתובת היא capacitor://localhost — הקישור חייב להצביע על האתר */
+    const url = `${IS_NATIVE ? SITE_URL + "/" : location.origin + location.pathname}?join=${sh.code}`;
+    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור, היכנס עם המייל שלך, ולחץ 📹 וידאו: ${url}`;
+    /* בטלפון: גיליון השיתוף (וואטסאפ וכו'); במחשב: העתקה ללוח */
+    if (navigator.share && (IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent))) {
+      try { await navigator.share({ title: "לימוד משותף", text, url }); return; } catch (e) { if (e?.name === "AbortError") return; }
+    }
     try { await navigator.clipboard.writeText(url); setShareCopied(true); setTimeout(() => setShareCopied(false), 1800); } catch { window.prompt("הקישור להזמנה:", url); }
   };
   /* הצטרפות מקישור ?join=CODE — אחרי שיש כניסה לחשבון */
@@ -5046,9 +5082,9 @@ const css = `
 .peer-cursor{display:inline-block;color:#fff;font-size:.68rem;border-radius:999px;padding:0 7px;margin-inline-end:5px;vertical-align:middle;font-weight:700;line-height:1.5}
 .peer-note{cursor:help;font-size:.8em}
 /* 📹 חלון הווידאו */
-.video-panel{position:fixed;left:12px;bottom:12px;z-index:65;width:min(300px,calc(100vw - 24px));background:#141a33;color:#e9ecf8;border:1.5px solid var(--amber);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);overflow:hidden;font-size:.85rem}
-.video-panel.big{width:min(640px,calc(100vw - 24px))}
-.video-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;background:#0d1226}
+.video-panel{position:fixed;left:12px;bottom:12px;z-index:65;width:min(320px,calc(100vw - 24px));background:#141a33;color:#e9ecf8;border:1.5px solid var(--amber);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);overflow:hidden;font-size:.85rem}
+.video-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;background:#0d1226;cursor:grab;user-select:none;touch-action:none}
+.video-head:active{cursor:grabbing}
 .video-btns{display:flex;gap:4px}
 .video-btns .mark-btn{padding:2px 7px;font-size:.85rem;background:#1d2c55;border-color:#2c3f70;color:#e9ecf8}
 .video-btns .mark-btn.off{background:#5a1d1d;border-color:#8a2d2d}
