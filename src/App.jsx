@@ -1,5 +1,6 @@
    import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { Room, RoomEvent, Track } from "livekit-client";
 import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
 
@@ -1098,7 +1099,93 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
 const SHARE_COLORS = ["#4aa3ff", "#ff7bb0", "#39d98a", "#f2a33c", "#b7a6f2", "#ff7b7b"];
 const makeShareCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let c = ""; for (let i = 0; i < 6; i++) c += A[Math.floor(Math.random() * A.length)]; return c; };
 const shareNameOf = (user) => (user?.user_metadata?.name || (user?.email || "").split("@")[0] || "לומד");
-function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied }) {
+/* 📹 חלון הווידאו של הלימוד המשותף — LiveKit (שלב ב).
+   הכרטיס מגיע מ-netlify/functions/livekit-token (רק לחברי השיעור). מצלמה + מיקרופון של הלומד,
+   והחברים באריחים קטנים. בטלפון: מי שמדבר גדול יותר (LiveKit מוריד רזולוציה לבד). */
+function VideoPanel({ sessionId, myName, onClose }) {
+  const [state, setState] = useState("connecting"); // connecting | on | error
+  const [msg, setMsg] = useState("");
+  const [tiles, setTiles] = useState([]); // [{id, name, local, videoTrack, audioTrack, speaking}]
+  const [mic, setMic] = useState(true);
+  const [cam, setCam] = useState(true);
+  const [big, setBig] = useState(false);
+  const roomRef = useRef(null);
+  useEffect(() => {
+    let room = null, dead = false;
+    const refresh = () => {
+      if (!room || dead) return;
+      const list = [];
+      const add = (p, local) => {
+        let videoTrack = null, audioTrack = null;
+        p.trackPublications.forEach((pub) => {
+          if (!pub.track) return;
+          if (pub.kind === Track.Kind.Video && pub.source !== Track.Source.ScreenShare) videoTrack = pub.track;
+          if (pub.kind === Track.Kind.Audio) audioTrack = pub.track;
+        });
+        list.push({ id: p.identity, name: p.name || p.identity, local, videoTrack, audioTrack, speaking: p.isSpeaking });
+      };
+      add(room.localParticipant, true);
+      room.remoteParticipants.forEach((p) => add(p, false));
+      setTiles(list);
+    };
+    (async () => {
+      try {
+        const headers = await authHeaders();
+        const res = await fetch(API_BASE + "/.netlify/functions/livekit-token", { method: "POST", headers, body: JSON.stringify({ session: sessionId, name: myName }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.error?.message || "שגיאה בקבלת כרטיס לחדר (" + res.status + ")");
+        if (dead) return;
+        room = new Room({ adaptiveStream: true, dynacast: true, videoCaptureDefaults: { resolution: { width: 640, height: 360, frameRate: 24 } } });
+        roomRef.current = room;
+        const evs = [RoomEvent.TrackSubscribed, RoomEvent.TrackUnsubscribed, RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted];
+        evs.forEach((e) => room.on(e, refresh));
+        room.on(RoomEvent.Disconnected, () => { if (!dead) { setState("error"); setMsg("החיבור לחדר נותק."); } });
+        await room.connect(data.url, data.token);
+        try { await room.localParticipant.enableCameraAndMicrophone(); }
+        catch (e) { setMsg("אין גישה למצלמה/מיקרופון — אשר הרשאה בדפדפן. " + (e?.message || "")); try { await room.localParticipant.setMicrophoneEnabled(true); } catch {} }
+        setState("on");
+        refresh();
+      } catch (e) {
+        if (!dead) { setState("error"); setMsg(e?.message || String(e)); }
+      }
+    })();
+    return () => { dead = true; try { room?.disconnect(); } catch {} roomRef.current = null; };
+  }, [sessionId]);
+  const toggleMic = async () => { const r = roomRef.current; if (!r) return; const next = !mic; setMic(next); try { await r.localParticipant.setMicrophoneEnabled(next); } catch {} };
+  const toggleCam = async () => { const r = roomRef.current; if (!r) return; const next = !cam; setCam(next); try { await r.localParticipant.setCameraEnabled(next); } catch {} };
+  const node = (
+    <div className={"video-panel" + (big ? " big" : "")} dir="rtl">
+      <div className="video-head">
+        <span>📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
+        <span className="video-btns">
+          <button className="mark-btn" onClick={() => setBig((b) => !b)} title="גדול/קטן">{big ? "⤡" : "⤢"}</button>
+          <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
+          <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
+          <button className="mark-btn" onClick={onClose} title="צא מהחדר">✕</button>
+        </span>
+      </div>
+      {msg && <div className="video-msg">{msg}</div>}
+      <div className="video-grid">
+        {tiles.map((t) => <VideoTile key={t.id} tile={t} />)}
+      </div>
+    </div>
+  );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
+}
+function VideoTile({ tile }) {
+  const vRef = useRef(null), aRef = useRef(null);
+  useEffect(() => { const el = vRef.current, tr = tile.videoTrack; if (!el || !tr) return; tr.attach(el); return () => { try { tr.detach(el); } catch {} }; }, [tile.videoTrack]);
+  useEffect(() => { const el = aRef.current, tr = tile.audioTrack; if (!el || !tr || tile.local) return; tr.attach(el); return () => { try { tr.detach(el); } catch {} }; }, [tile.audioTrack, tile.local]);
+  return (
+    <div className={"video-tile" + (tile.speaking ? " speaking" : "") + (tile.local ? " local" : "")}>
+      {tile.videoTrack ? <video ref={vRef} autoPlay playsInline muted={tile.local} /> : <div className="video-off">{tile.name}</div>}
+      {!tile.local && <audio ref={aRef} autoPlay />}
+      <span className="video-name">{tile.local ? "אתה" : tile.name}</span>
+    </div>
+  );
+}
+
+function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied, video, onVideo }) {
   const holderName = share.holder === me ? "אתה" : (peers[share.holder]?.name || share.hostName || "—");
   const online = Object.values(peers);
   return (
@@ -1110,6 +1197,7 @@ function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied 
       <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
       {share.holder !== me && <button className="mark-btn" onClick={onTake}>✋ קח את הדף</button>}
       {share.holder !== me && <button className={"mark-btn" + (share.follow ? " on" : "")} onClick={onFollow}>{share.follow ? "👁 עוקב" : "👁 חופשי"}</button>}
+      <button className={"mark-btn" + (video ? " on" : "")} onClick={onVideo}>{video ? "📹 סגור וידאו" : "📹 וידאו"}</button>
       <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
     </div>
   );
@@ -2406,6 +2494,7 @@ export default function LearningTV() {
   const [peers, setPeers] = useState({});     // uid → {uid, name, color, marks, notes, pos}
   const [shareMsg, setShareMsg] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
+  const [shareVideo, setShareVideo] = useState(false); // 📹 חלון הווידאו פתוח?
   const shareChanRef = useRef(null);
   const shareRef = useRef(null);
   useEffect(() => { shareRef.current = share; }, [share]);
@@ -2450,7 +2539,7 @@ export default function LearningTV() {
   const leaveShare = async () => {
     const sh = shareRef.current;
     if (sh && sh.hostId === myUid) { try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
-    setShare(null); setPeers({});
+    setShare(null); setPeers({}); setShareVideo(false);
   };
   const takePage = async () => {
     const sh = shareRef.current; if (!sh || !myUid) return;
@@ -4215,7 +4304,8 @@ export default function LearningTV() {
                     </FloatingMarkBar>
                   )}
                   {noteEditor}
-                  {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} />}
+                  {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
+                  {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} onClose={() => setShareVideo(false)} />}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
@@ -4955,6 +5045,21 @@ const css = `
 .scroll-sent.peer-here{outline:2px dashed var(--peer,#4aa3ff);outline-offset:2px;border-radius:4px}
 .peer-cursor{display:inline-block;color:#fff;font-size:.68rem;border-radius:999px;padding:0 7px;margin-inline-end:5px;vertical-align:middle;font-weight:700;line-height:1.5}
 .peer-note{cursor:help;font-size:.8em}
+/* 📹 חלון הווידאו */
+.video-panel{position:fixed;left:12px;bottom:12px;z-index:65;width:min(300px,calc(100vw - 24px));background:#141a33;color:#e9ecf8;border:1.5px solid var(--amber);border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);overflow:hidden;font-size:.85rem}
+.video-panel.big{width:min(640px,calc(100vw - 24px))}
+.video-head{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 10px;background:#0d1226}
+.video-btns{display:flex;gap:4px}
+.video-btns .mark-btn{padding:2px 7px;font-size:.85rem;background:#1d2c55;border-color:#2c3f70;color:#e9ecf8}
+.video-btns .mark-btn.off{background:#5a1d1d;border-color:#8a2d2d}
+.video-msg{padding:6px 10px;color:#f8c778;font-size:.8rem}
+.video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:4px;padding:4px}
+.video-tile{position:relative;aspect-ratio:4/3;background:#0a1128;border-radius:8px;overflow:hidden;border:2px solid transparent}
+.video-tile.speaking{border-color:var(--green,#39d98a)}
+.video-tile video{width:100%;height:100%;object-fit:cover;display:block}
+.video-tile.local video{transform:scaleX(-1)}
+.video-off{display:flex;align-items:center;justify-content:center;height:100%;color:#a7b0cf;font-size:1rem}
+.video-name{position:absolute;bottom:4px;right:6px;background:rgba(0,0,0,.55);color:#fff;font-size:.72rem;padding:1px 7px;border-radius:999px}
 /* 📝 עורך ההערה */
 .note-ed-back{position:fixed;inset:0;z-index:70;background:rgba(10,12,30,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:barIn .14s ease-out}
 .note-ed{background:#fffdf6;color:#232323;border:1.5px solid var(--amber);border-radius:14px;padding:14px 16px;width:min(520px,100%);box-shadow:0 14px 40px rgba(0,0,0,.35);font-family:inherit;font-size:16px}
