@@ -1008,6 +1008,90 @@ function chapterStatus(book, i) {
   return hasAny ? "learning" : "new";
 }
 
+/* ─── 📝 עורך ההערה (צ'אט 19): כתיבה או דיבור ───
+   במקום חלון prompt של הדפדפן: חלונית עם תיבת טקסט וכפתור 🎙. הדיבור — קודם זיהוי הדיבור של הדפדפן (מיידי, בעברית);
+   אם אין (למשל בתוך האפליקציה) — הקלטה קצרה ותמלול באותו צינור של "הקלטה חיה" (Whisper). */
+const SpeechRec = typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
+function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
+  const [txt, setTxt] = useState(initial || "");
+  const [mode, setMode] = useState(null);   // null | "listen" | "rec" | "busy"
+  const [msg, setMsg] = useState("");
+  const [sec, setSec] = useState(0);
+  const live = useRef(null);
+  const ta = useRef(null);
+  useEffect(() => { ta.current?.focus(); return () => stopAll(); }, []);
+  const append = (t) => setTxt((v) => (v ? v.replace(/\s+$/, "") + " " : "") + t.trim());
+  const stopAll = () => {
+    try { live.current?.rec?.stop(); } catch {}
+    try { live.current?.mr?.stop(); } catch {}
+    if (live.current?.iv) clearInterval(live.current.iv);
+    live.current = null;
+  };
+  const startMic = async () => {
+    if (mode) { stopAll(); if (mode === "listen") setMode(null); return; }
+    setMsg("");
+    if (SpeechRec) {
+      try {
+        const rec = new SpeechRec();
+        rec.lang = "he-IL"; rec.continuous = true; rec.interimResults = true;
+        let finalText = "", base = null;
+        rec.onstart = () => { base = null; setMode("listen"); };
+        rec.onresult = (ev) => {
+          let interim = ""; finalText = "";
+          for (let k = 0; k < ev.results.length; k++) { const r = ev.results[k]; if (r.isFinal) finalText += r[0].transcript + " "; else interim += r[0].transcript; }
+          setTxt((v) => { if (base === null) base = v; return (base ? base.replace(/\s+$/, "") + " " : "") + (finalText + interim).trim(); });
+        };
+        rec.onerror = (ev) => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { setMsg("אין גישה למיקרופון — אשר הרשאה בדפדפן."); } else if (ev.error !== "aborted" && ev.error !== "no-speech") setMsg("זיהוי הדיבור נכשל (" + ev.error + ") — מנסה הקלטה."); };
+        rec.onend = () => { live.current = null; setMode(null); };
+        live.current = { rec };
+        rec.start();
+        return;
+      } catch {}
+    }
+    /* חלופה: הקלטה ← תמלול */
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      const chunks = [];
+      mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        if (live.current?.iv) clearInterval(live.current.iv);
+        live.current = null;
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        if (blob.size < 3000) { setMode(null); setMsg("ההקלטה קצרה מדי."); return; }
+        setMode("busy"); setMsg("⏳ מתמלל…");
+        try { const t = await transcribe(blob); if (t) append(t); setMsg(""); }
+        catch (e) { setMsg("התמלול נכשל: " + (e?.message || e)); }
+        setMode(null);
+      };
+      live.current = { mr, iv: setInterval(() => setSec((x) => x + 1), 1000) };
+      setSec(0); setMode("rec"); mr.start(1000);
+    } catch { setMsg("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון ונסה שוב."); }
+  };
+  const node = (
+    <div className="note-ed-back" onMouseDown={(e) => { if (e.target === e.currentTarget) { stopAll(); onCancel(); } }}>
+      <div className="note-ed" dir="rtl" role="dialog">
+        <div className="note-ed-head">📝 הערה על הקטע</div>
+        {src && <div className="note-ed-src">«{src}»</div>}
+        <textarea ref={ta} className="note-ed-ta" rows={4} value={txt} onChange={(e) => setTxt(e.target.value)} placeholder="כתוב כאן — או לחץ על המיקרופון ודבר" />
+        <div className="note-ed-row">
+          <button type="button" className={"mark-btn note-mic" + (mode ? " on" : "")} onClick={startMic} disabled={mode === "busy"}>
+            {mode === "listen" ? "⏹ עצור — מקשיב…" : mode === "rec" ? `⏹ עצור (${sec} שנ׳)` : mode === "busy" ? "⏳ מתמלל…" : "🎙 דבר"}
+          </button>
+          <span className="note-ed-msg">{msg}</span>
+        </div>
+        <div className="note-ed-row note-ed-actions">
+          <button type="button" className="ch-key gold note-ed-save" onClick={() => { stopAll(); onSave(txt); }}>שמור</button>
+          {initial ? <button type="button" className="mark-btn" onClick={() => { stopAll(); onSave(""); }}>🗑 מחק הערה</button> : null}
+          <button type="button" className="mark-btn" onClick={() => { stopAll(); onCancel(); }}>ביטול</button>
+        </div>
+      </div>
+    </div>
+  );
+  return typeof document !== "undefined" ? createPortal(node, document.body) : node;
+}
+
 /* ─── ✍️ לשונית הלומד (צ'אט 19) ───
    לא חלון צף: לשונית קטנה שנפתחת מעל המילה/השורה שלחצו עליה, עם חץ שמצביע עליה, ונעה איתה בגלילה.
    העוגן: המילים שסומנו (.ws-pend) או המשפט ([data-si] בתצוגת הפרק, #para- במגילה) — ובתוכו השורה שבה הייתה הלחיצה.
@@ -2820,27 +2904,31 @@ export default function LearningTV() {
 
   /* הערות שוליים חיות: הערה אישית על משפט, נשמרת עם הספר */
   const noteVal = (n) => (typeof n === "string" ? n : n?.t || "");
-  const addNote = async () => {
+  const [noteEd, setNoteEd] = useState(null); // {i, initial, clear} — עורך ההערה הפתוח
+  const saveNote = async (i, txt, clear) => {
+    const notes = { ...(book.notes || {}) };
+    if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
+    else delete notes[i];
+    setNoteEd(null);
+    await persist({ ...book, notes }, { k: "note", i });
+    if (clear) { setSelStart(null); setSelEnd(null); setDragText(""); setWordSel(null); }
+  };
+  const addNote = () => {
     if (!rangeIdx && !wordSel) return;
     const i = wordSel ? wordSel.i : rangeIdx[0];
-    const existing = noteVal(book.notes?.[i]);
-    const txt = window.prompt("✏️ הערה על הקטע (השאר ריק למחיקה):", existing);
-    if (txt === null) return;
-    const notes = { ...(book.notes || {}) };
-    if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
-    else delete notes[i];
-    await persist({ ...book, notes }, { k: "note", i });
-    setSelStart(null); setSelEnd(null); setDragText(""); setWordSel(null);
+    setNoteEd({ i, initial: noteVal(book.notes?.[i]), clear: true });
   };
-  const editNote = async (i) => {
-    const existing = noteVal(book.notes?.[i]);
-    const txt = window.prompt("✏️ הערה (השאר ריק למחיקה):", existing);
-    if (txt === null) return;
-    const notes = { ...(book.notes || {}) };
-    if (txt.trim()) notes[i] = { t: txt.trim(), src: (sentences[i] || "").slice(0, 160) };
-    else delete notes[i];
-    await persist({ ...book, notes }, { k: "note", i });
-  };
+  const editNote = (i) => setNoteEd({ i, initial: noteVal(book.notes?.[i]), clear: false });
+  const noteEditor = noteEd && (
+    <NoteEditor
+      key={noteEd.i}
+      initial={noteEd.initial}
+      src={(sentences[noteEd.i] || "").slice(0, 90)}
+      transcribe={(blob) => transcribeMedia(blob, null, "הערה קצרה של לומד")}
+      onSave={(t) => saveNote(noteEd.i, t, noteEd.clear)}
+      onCancel={() => setNoteEd(null)}
+    />
+  );
   const [flashIdx, setFlashIdx] = useState(null);
   const jumpToSentence = (i) => {
     document.getElementById("para-" + i)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -3956,6 +4044,7 @@ export default function LearningTV() {
                       <button className="mark-btn" onClick={clearSelection}>✕ בטל סימון</button>
                     </FloatingMarkBar>
                   )}
+                  {noteEditor}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
@@ -4273,6 +4362,7 @@ export default function LearningTV() {
             </FloatingMarkBar>
           )}
           {transBubble}
+          {noteEditor}
 
           {selectedText && !flexResult && !flexLoading && (
             <div className="deck">
@@ -4668,6 +4758,19 @@ const css = `
 .mark-bar.floating.above::after,.mark-bar.floating.below::after{content:"";position:absolute;left:var(--arrow,50%);width:12px;height:12px;background:#f7f3e8;border:1.5px solid var(--amber);transform:translateX(-50%) rotate(45deg)}
 .mark-bar.floating.above::after{bottom:-7px;border-top:none;border-left:none}
 .mark-bar.floating.below::after{top:-7px;border-bottom:none;border-right:none}
+/* 📝 עורך ההערה */
+.note-ed-back{position:fixed;inset:0;z-index:70;background:rgba(10,12,30,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:barIn .14s ease-out}
+.note-ed{background:#fffdf6;color:#232323;border:1.5px solid var(--amber);border-radius:14px;padding:14px 16px;width:min(520px,100%);box-shadow:0 14px 40px rgba(0,0,0,.35);font-family:inherit;font-size:16px}
+.note-ed-head{font-weight:800;margin-bottom:6px}
+.note-ed-src{font-size:.85rem;color:#6c6449;margin-bottom:8px;line-height:1.5}
+.note-ed-ta{width:100%;box-sizing:border-box;font-family:inherit;font-size:1.05rem;line-height:1.6;padding:10px 12px;border-radius:10px;border:1.5px solid #cfc8b4;background:#fff;color:#232323;resize:vertical}
+.note-ed-ta:focus{outline:none;border-color:var(--amber)}
+.note-ed-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.note-ed-actions{justify-content:flex-start}
+.note-ed-save{padding:8px 18px;font-size:1rem}
+.note-ed-msg{font-size:.85rem;color:#8a3b12}
+.note-mic.on{border-color:#d33;background:#fff0ee;animation:micPulse 1.2s ease-in-out infinite}
+@keyframes micPulse{0%,100%{box-shadow:0 0 0 0 rgba(220,50,50,.35)}50%{box-shadow:0 0 0 6px rgba(220,50,50,0)}}
 .layer-btn{opacity:.45}
 .layer-btn.on{opacity:1;border-color:var(--amber);box-shadow:0 0 6px rgba(242,163,60,.45)}
 @keyframes barIn{from{opacity:0;translate:0 4px}to{opacity:1;translate:0 0}}
