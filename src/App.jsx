@@ -1022,8 +1022,14 @@ function FloatingMarkBar({ anchorIdx, drag, setDrag, children }) {
       const vh = window.innerHeight;
       const visible = r.bottom > (box ? box.top : 0) + 10 && r.top < (box ? box.bottom : vh) - 10;
       if (!visible) { setPos(null); return; }
-      const below = r.bottom + 6;
-      setPos({ top: below + 48 < vh ? below : Math.max(8, r.top - 50) });
+      /* הסרגל נפתח מעל המקום שמסמנים (בקשת חיים, צ'אט 19) — ולא מכסה את מה שאחריו.
+         אם אין מקום מעל (המשפט בראש המסך) — מתחתיו. אופקית: מול אמצע המשפט, בתוך גבולות החלון */
+      const h = ref.current?.offsetHeight || 44, w = ref.current?.offsetWidth || 320;
+      const above = r.top - h - 8;
+      const top = above >= (box ? box.top : 0) + 4 ? above : r.bottom + 8;
+      const cx = (r.left + r.right) / 2;
+      const left = Math.min(Math.max(4, cx - w / 2), Math.max(4, window.innerWidth - w - 4));
+      setPos({ top, left });
     };
     place();
     window.addEventListener("scroll", place, true);
@@ -1055,7 +1061,7 @@ function FloatingMarkBar({ anchorIdx, drag, setDrag, children }) {
   const w = ref.current?.offsetWidth || 320, h = ref.current?.offsetHeight || 40;
   const style = drag
     ? { top: Math.min(Math.max(4, drag.y), Math.max(4, window.innerHeight - h - 4)), left: Math.min(Math.max(4, drag.x), Math.max(4, window.innerWidth - w - 4)), transform: "none" }
-    : pos ? { top: pos.top } : { bottom: 12 };
+    : pos ? { top: pos.top, left: pos.left, transform: "none" } : { bottom: 12 };
   return (
     <div ref={ref} className={"mark-bar floating" + (drag ? " dragged" : "")} style={style}>
       <span className="mark-grip" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={() => setDrag(null)} title="אחוז וגרור · לחיצה כפולה: חזרה לצמוד למשפט">⋮⋮</span>
@@ -4670,7 +4676,7 @@ const css = `
 .mark-grip:active{cursor:grabbing}
 .layer-btn{opacity:.45}
 .layer-btn.on{opacity:1;border-color:var(--amber);box-shadow:0 0 6px rgba(242,163,60,.45)}
-@keyframes barIn{from{opacity:0;transform:translateX(-50%) translateY(6px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes barIn{from{opacity:0;translate:0 6px}to{opacity:1;translate:0 0}}
 .mark-title{font-weight:800;font-size:.9rem;color:#6c6449}
 .mark-btn{font-family:inherit;font-size:.85rem;padding:6px 12px;border-radius:9px;border:1.5px solid #cfc8b4;background:#fffdf6;color:#232323;cursor:pointer}
 .mark-btn:hover{border-color:var(--amber)}
