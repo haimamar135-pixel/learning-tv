@@ -1051,8 +1051,10 @@ function FloatingMarkBar({ anchorIdx, drag, setDrag, children }) {
     window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
     e.preventDefault();
   };
+  /* מיקום שנשמר מחלון גדול יותר לא יישאר מחוץ למסך — תמיד נצמד לגבולות החלון הנוכחי */
+  const w = ref.current?.offsetWidth || 320, h = ref.current?.offsetHeight || 40;
   const style = drag
-    ? { top: drag.y, left: drag.x, transform: "none" }
+    ? { top: Math.min(Math.max(4, drag.y), Math.max(4, window.innerHeight - h - 4)), left: Math.min(Math.max(4, drag.x), Math.max(4, window.innerWidth - w - 4)), transform: "none" }
     : pos ? { top: pos.top } : { bottom: 12 };
   return (
     <div ref={ref} className={"mark-bar floating" + (drag ? " dragged" : "")} style={style}>
@@ -1094,6 +1096,26 @@ function gematria(s) {
     else if (!/["'״׳\s().]/.test(c)) return 0;
   }
   return n;
+}
+/* רשימת המאמרים של פרשה: הגבולות מחלוקת ספריא (shape — אורכי המאמרים), השמות מקובץ המפתח public/zohar-names.json (לפי סדר) */
+let zoharNamesCache = null;
+async function fetchZoharArticles(en) {
+  const enc = encodeURIComponent(en.replace(/ /g, "_"));
+  const r = await fetch(`${SEFARIA}/shape/Zohar,_${enc}`);
+  if (!r.ok) throw new Error(`ספריא ${r.status}`);
+  const j = await r.json();
+  const lens = (Array.isArray(j) ? j[0] : j)?.chapters;
+  if (!Array.isArray(lens) || !lens.length) throw new Error("אין חלוקה למאמרים");
+  if (!zoharNamesCache) {
+    try { zoharNamesCache = await (await fetch("/zohar-names.json")).json(); } catch { zoharNamesCache = {}; }
+  }
+  const names = zoharNamesCache?.[en] || [];
+  let at = 1;
+  return lens.map((len, i) => {
+    const a = { n: i + 1, from: at, to: at + len - 1, name: names[i] || "" };
+    at += len;
+    return a;
+  });
 }
 const stripTags = (h) => String(h || "").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 /* מושך מאמר: הסולם בבקשה אחת (טווח אותיות), לשון הזוהר דרך הקישורים של כל אות.
@@ -1792,9 +1814,15 @@ export default function LearningTV() {
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
-  const toggleLayer = () => setLayerOn((v) => { try { localStorage.setItem("lomedtv-layer", v ? "off" : "on"); } catch {} return !v; });
   const [barDrag, setBarDragState] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-layer-pos") || "null"); } catch { return null; } }); // מיקום הסרגל אחרי גרירה
   const setBarDrag = (d) => { setBarDragState(d); try { d ? localStorage.setItem("lomedtv-layer-pos", JSON.stringify(d)) : localStorage.removeItem("lomedtv-layer-pos"); } catch {} };
+  const toggleLayer = () => {
+    const next = !layerOn;
+    if (next) setBarDrag(null); // הדלקה = הסרגל חוזר להופיע צמוד למשפט המסומן, לא במקום ישן שאולי מחוץ למסך
+    try { localStorage.setItem("lomedtv-layer", next ? "on" : "off"); } catch {}
+    setLayerOn(next);
+  };
+  const [zoharArts, setZoharArts] = useState(null); // רשימת המאמרים של הפרשה שנבחרה (מספריא)
   const [zoharForm, setZoharForm] = useState({ p: ZOHAR_DEFAULT_PARASHA, from: "", to: "", name: "" }); // 📜 שער הזוהר
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
@@ -2319,6 +2347,21 @@ export default function LearningTV() {
       setError("משיכת הזוהר נכשלה: " + (e?.message || e));
     }
     setFileBusy(null);
+  };
+
+  useEffect(() => {
+    if (view !== "intake") return;
+    const [en] = ZOHAR_PARSHIOT[zoharForm.p] || [];
+    if (!en) return;
+    let live = true;
+    setZoharArts(null);
+    fetchZoharArticles(en).then((a) => live && setZoharArts(a)).catch(() => live && setZoharArts([]));
+    return () => { live = false; };
+  }, [view, zoharForm.p]);
+  const pickZoharArticle = (v) => {
+    const a = zoharArts?.find((x) => String(x.n) === v);
+    if (!a) return;
+    setZoharForm((f) => ({ ...f, from: hebNum(a.from), to: hebNum(a.to), name: a.name || `מאמר ${a.n}` }));
   };
 
   /* ── הגשר: מהארון אל הלימוד ── */
@@ -3433,6 +3476,12 @@ export default function LearningTV() {
                     <select className="scan-mode-select" value={zoharForm.p} onChange={(e) => setZoharForm((f) => ({ ...f, p: +e.target.value }))} aria-label="פרשה">
                       {ZOHAR_PARSHIOT.map(([en, he], i) => (
                         <option key={en} value={i}>{he}</option>
+                      ))}
+                    </select>
+                    <select className="scan-mode-select" value="" onChange={(e) => pickZoharArticle(e.target.value)} aria-label="מאמר" disabled={!zoharArts || !zoharArts.length}>
+                      <option value="">{zoharArts === null ? "טוען מאמרים…" : zoharArts.length ? `בחר מאמר (${zoharArts.length})` : "אין רשימה — מלא אותיות ידנית"}</option>
+                      {(zoharArts || []).map((a) => (
+                        <option key={a.n} value={a.n}>{(a.name || `מאמר ${a.n}`) + " · " + hebNum(a.from) + (a.to > a.from ? "–" + hebNum(a.to) : "")}</option>
                       ))}
                     </select>
                     <input className="zohar-in" placeholder="מאות (קמג)" value={zoharForm.from} onChange={(e) => setZoharForm((f) => ({ ...f, from: e.target.value }))} aria-label="מאות" />
