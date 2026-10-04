@@ -1092,6 +1092,29 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
   return typeof document !== "undefined" ? createPortal(node, document.body) : node;
 }
 
+/* ─── 🕯 לימוד משותף — שלב א (צ'אט 19) ───
+   של השורש, לא של הלבוש: הרכיבים כאן מקבלים "ספר" ו"משתמש" בלבד. "חברותא" הוא רק השם שבית המדרש נותן לזה.
+   הדף המשותף רץ על ערוץ Supabase Realtime (broadcast + presence) — בלי שרת נוסף. הווידאו (LiveKit) — שלב ב. */
+const SHARE_COLORS = ["#4aa3ff", "#ff7bb0", "#39d98a", "#f2a33c", "#b7a6f2", "#ff7b7b"];
+const makeShareCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let c = ""; for (let i = 0; i < 6; i++) c += A[Math.floor(Math.random() * A.length)]; return c; };
+const shareNameOf = (user) => (user?.user_metadata?.name || (user?.email || "").split("@")[0] || "לומד");
+function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied }) {
+  const holderName = share.holder === me ? "אתה" : (peers[share.holder]?.name || share.hostName || "—");
+  const online = Object.values(peers);
+  return (
+    <div className="share-bar" dir="rtl">
+      <span className="share-title">🕯 לימוד משותף</span>
+      <span className="share-code" title="קוד ההזמנה">{share.code}</span>
+      <button className="mark-btn" onClick={onCopy}>{copied ? "✓ הועתק" : "🔗 העתק קישור"}</button>
+      <span className="share-who">{online.length ? online.map((p) => <span key={p.uid} className="share-peer" style={{ "--c": p.color }}>{p.name}</span>) : <span className="share-wait">מחכה לחבר…</span>}</span>
+      <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
+      {share.holder !== me && <button className="mark-btn" onClick={onTake}>✋ קח את הדף</button>}
+      {share.holder !== me && <button className={"mark-btn" + (share.follow ? " on" : "")} onClick={onFollow}>{share.follow ? "👁 עוקב" : "👁 חופשי"}</button>}
+      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
+    </div>
+  );
+}
+
 /* ─── ✍️ לשונית הלומד (צ'אט 19) ───
    לא חלון צף: לשונית קטנה שנפתחת מעל המילה/השורה שלחצו עליה, עם חץ שמצביע עליה, ונעה איתה בגלילה.
    העוגן: המילים שסומנו (.ws-pend) או המשפט ([data-si] בתצוגת הפרק, #para- במגילה) — ובתוכו השורה שבה הייתה הלחיצה.
@@ -2376,6 +2399,153 @@ export default function LearningTV() {
     await saveBookToStorage(nextBook);
     await saveIndex(nextIdx);
     if (sync) queueSync({ ...sync, book: nextBook });
+  };
+
+  /* ── 🕯 לימוד משותף: מצב, ערוץ, אירועים ── */
+  const [share, setShare] = useState(null);   // {id, code, hostId, hostName, holder, follow, bookId}
+  const [peers, setPeers] = useState({});     // uid → {uid, name, color, marks, notes, pos}
+  const [shareMsg, setShareMsg] = useState("");
+  const [shareCopied, setShareCopied] = useState(false);
+  const shareChanRef = useRef(null);
+  const shareRef = useRef(null);
+  useEffect(() => { shareRef.current = share; }, [share]);
+  const myUid = cloudUser?.id || null;
+  const myShareColor = (uid) => SHARE_COLORS[Math.abs([...(uid || "")].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)) % SHARE_COLORS.length];
+  const shareSend = (event, payload) => { try { shareChanRef.current?.send({ type: "broadcast", event, payload: { ...payload, from: cloudRef.current?.id } }); } catch {} };
+  const openSharedBook = async (row, isHost) => {
+    const snap = row.book || {};
+    let b;
+    if (isHost) { b = book; }
+    else {
+      const id = "shared-" + row.code;
+      const existing = await loadBook(id);
+      b = existing || { id, title: snap.title || "לימוד משותף", chapters: snap.chapters || [], results: {}, progress: {}, marks: {}, notes: {}, flex: {} };
+      await persist(b, { k: "meta" });
+    }
+    setShare({ id: row.id, code: row.code, hostId: row.host, hostName: row.host_name || "", holder: row.holder || row.host, follow: !isHost, bookId: b.id });
+    setPeers({});
+    setBook(b);
+    setChIdx(0);
+    setChannel("read");
+    setError(null);
+    setView("tv");
+  };
+  const startShare = async () => {
+    if (!book) return;
+    if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להזמין ללימוד משותף."); return; }
+    setShareMsg("");
+    const code = makeShareCode();
+    const snap = { id: book.id, title: book.title, chapters: (book.chapters || []).map((c) => ({ title: c.title, text: c.text })) };
+    const { data, error } = await supa.from("sessions").insert({ code, host: cloudUser.id, host_name: shareNameOf(cloudUser), book: snap, holder: cloudUser.id }).select("*").single();
+    if (error) { setShareMsg("לא הצלחתי לפתוח שיעור: " + error.message); return; }
+    await openSharedBook(data, true);
+  };
+  const joinShare = async (code) => {
+    if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להצטרף ללימוד המשותף."); return; }
+    setShareMsg("");
+    const { data, error } = await supa.rpc("join_session", { p_code: code, p_name: shareNameOf(cloudUser), p_color: myShareColor(cloudUser.id) });
+    if (error || !data) { setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + (error ? " (" + error.message + ")" : "")); return; }
+    await openSharedBook(data, data.host === cloudUser.id);
+  };
+  const leaveShare = async () => {
+    const sh = shareRef.current;
+    if (sh && sh.hostId === myUid) { try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
+    setShare(null); setPeers({});
+  };
+  const takePage = async () => {
+    const sh = shareRef.current; if (!sh || !myUid) return;
+    try { await supa.from("sessions").update({ holder: myUid }).eq("id", sh.id); } catch {}
+    setShare({ ...sh, holder: myUid, follow: false });
+    shareSend("holder", { uid: myUid });
+  };
+  const toggleFollow = () => setShare((sh) => sh ? { ...sh, follow: !sh.follow } : sh);
+  const copyShareLink = async () => {
+    const sh = shareRef.current; if (!sh) return;
+    const url = `${location.origin}${location.pathname}?join=${sh.code}`;
+    try { await navigator.clipboard.writeText(url); setShareCopied(true); setTimeout(() => setShareCopied(false), 1800); } catch { window.prompt("הקישור להזמנה:", url); }
+  };
+  /* הצטרפות מקישור ?join=CODE — אחרי שיש כניסה לחשבון */
+  const pendingJoinRef = useRef(null);
+  useEffect(() => { try { const c = new URLSearchParams(location.search).get("join"); if (c) { pendingJoinRef.current = c.toUpperCase(); history.replaceState(null, "", location.pathname); } } catch {} }, []);
+  useEffect(() => {
+    if (pendingJoinRef.current && cloudUser && view !== "boot") { const c = pendingJoinRef.current; pendingJoinRef.current = null; setShowOpening(false); joinShare(c); }
+  }, [cloudUser, view]);
+  /* הערוץ: presence (מי כאן) + broadcast (סימונים, הערות, מיקום, מחזיק הדף) */
+  useEffect(() => {
+    if (!share || !myUid) return;
+    const ch = supa.channel("session:" + share.id, { config: { broadcast: { self: false }, presence: { key: myUid } } });
+    shareChanRef.current = ch;
+    const upsertPeer = (uid, patch) => setPeers((ps) => uid === myUid ? ps : { ...ps, [uid]: { uid, name: "", color: myShareColor(uid), marks: {}, notes: {}, ...(ps[uid] || {}), ...patch } });
+    ch.on("presence", { event: "sync" }, () => {
+      const st = ch.presenceState();
+      setPeers((ps) => {
+        const next = {};
+        for (const uid of Object.keys(st)) { if (uid === myUid) continue; const meta = st[uid][0] || {}; next[uid] = { uid, color: myShareColor(uid), marks: {}, notes: {}, ...(ps[uid] || {}), name: meta.name || ps[uid]?.name || "לומד" }; }
+        return next;
+      });
+    });
+    ch.on("broadcast", { event: "layer" }, ({ payload }) => upsertPeer(payload.from, { marks: payload.marks || {}, notes: payload.notes || {} }));
+    ch.on("broadcast", { event: "pos" }, ({ payload }) => {
+      upsertPeer(payload.from, { pos: { ch: payload.ch, si: payload.si } });
+      const sh = shareRef.current;
+      if (sh && sh.follow && payload.from === sh.holder) {
+        if (payload.ch !== chIdxRef.current) { setChIdx(payload.ch); setChannel("read"); setView("tv"); }
+        setTimeout(() => document.querySelector(`[data-si="${payload.si}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" }), payload.ch !== chIdxRef.current ? 350 : 0);
+      }
+    });
+    ch.on("broadcast", { event: "holder" }, ({ payload }) => setShare((sh) => sh ? { ...sh, holder: payload.uid, follow: payload.uid !== myUid } : sh));
+    ch.on("broadcast", { event: "hello" }, () => { const b = bookRef.current; shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} }); });
+    ch.on("broadcast", { event: "closed" }, () => { setShare(null); setPeers({}); setShareMsg("המארח סיים את הלימוד המשותף."); });
+    ch.subscribe(async (status) => {
+      if (status === "SUBSCRIBED") {
+        await ch.track({ name: shareNameOf(cloudRef.current), color: myShareColor(myUid) });
+        const b = bookRef.current;
+        shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} });
+        shareSend("hello", {});
+      }
+    });
+    return () => { if (shareRef.current?.hostId === myUid) { try { ch.send({ type: "broadcast", event: "closed", payload: {} }); } catch {} } supa.removeChannel(ch); shareChanRef.current = null; };
+  }, [share?.id, myUid]);
+  const bookRef = useRef(null); useEffect(() => { bookRef.current = book; }, [book]);
+  const chIdxRef = useRef(0); useEffect(() => { chIdxRef.current = chIdx; }, [chIdx]);
+  /* הסימונים וההערות שלי יוצאים לחבר בכל שינוי (עם השהיה קצרה) */
+  useEffect(() => {
+    if (!share || !book || book.id !== share.bookId) return;
+    const t = setTimeout(() => shareSend("layer", { marks: book.marks || {}, notes: book.notes || {} }), 250);
+    return () => clearTimeout(t);
+  }, [share?.id, book?.marks, book?.notes]);
+  /* מחזיק הדף משדר איפה הוא — המשפט הראשון שנראה במסך */
+  useEffect(() => {
+    if (!share || share.holder !== myUid) return;
+    let last = -1, t = null;
+    const report = () => {
+      const box = document.querySelector(".screen-body"); if (!box) return;
+      const top = box.getBoundingClientRect().top + 8;
+      const els = box.querySelectorAll(".read-sents [data-si]");
+      let si = -1;
+      for (const el of els) { if (el.getBoundingClientRect().bottom >= top) { si = parseInt(el.getAttribute("data-si"), 10); break; } }
+      if (si < 0 || si === last) return;
+      last = si;
+      shareSend("pos", { ch: chIdxRef.current, si });
+    };
+    const onScroll = () => { clearTimeout(t); t = setTimeout(report, 300); };
+    window.addEventListener("scroll", onScroll, true);
+    const t0 = setTimeout(report, 600);
+    return () => { window.removeEventListener("scroll", onScroll, true); clearTimeout(t); clearTimeout(t0); };
+  }, [share?.id, share?.holder, myUid, chIdx, view, channel]);
+  /* השכבה של החברים על משפט i: מרקר/הערה/סמן */
+  const peerLayer = (i) => {
+    if (!share) return null;
+    let cls = "", title = "", color = null, note = null, here = null;
+    for (const p of Object.values(peers)) {
+      const mk = p.marks?.[i];
+      if (mk && (mk.hl || mk.b || mk.u || (mk.w && mk.w.length))) { cls += " peer-hl"; color = color || p.color; title += (title ? " · " : "") + p.name + " סימן"; }
+      const n = p.notes?.[i]; const nt = typeof n === "string" ? n : n?.t;
+      if (nt) { note = { name: p.name, color: p.color, t: nt }; }
+      if (p.pos && p.pos.ch === chIdx && p.pos.si === i) here = p;
+    }
+    if (!cls && !note && !here) return null;
+    return { cls: cls + (here ? " peer-here" : ""), color: color || here?.color || note?.color, title, note, here };
   };
  
   const buildBook = async (text, forcedTitle, stayInLibrary = false, presetChapters = null) => {
@@ -4045,6 +4215,7 @@ export default function LearningTV() {
                     </FloatingMarkBar>
                   )}
                   {noteEditor}
+                  {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} />}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
@@ -4057,6 +4228,7 @@ export default function LearningTV() {
                             const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
                             const isStart = selStart !== null && i === selStart && selEnd === null;
                             const mk = book.marks?.[i];
+                            const pl = peerLayer(i);
                             return (
                               <span
                                 key={i}
@@ -4064,11 +4236,16 @@ export default function LearningTV() {
                                 className={
                                   "scroll-sent clickable " +
                                   (inRange || isStart ? "in-range " : "") +
-                                  (book.notes?.[i] ? "has-note " : "")
+                                  (book.notes?.[i] ? "has-note " : "") +
+                                  (pl ? pl.cls : "")
                                 }
+                                style={pl ? { "--peer": pl.color } : undefined}
+                                title={pl?.title || undefined}
                                 onClick={() => onReadSentClick(i)}
                               >
+                                {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
                                 {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null)}
+                                {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
                                 {book.notes?.[i] && (
                                   <sup
                                     className="note-pin"
@@ -4290,12 +4467,17 @@ export default function LearningTV() {
               <span className="key-label">שיקוף</span>
             </button>
           )}
+          <button className="ch-key share" onClick={share ? () => { setChannel("read"); setView("tv"); } : startShare} title="לימוד משותף — אותו דף, שני לומדים, בזמן אמת">
+            <span className="key-num">🕯</span>
+            <span className="key-label">{share ? "חזרה ללימוד המשותף" : "לימוד משותף"}</span>
+          </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
             <span className="key-num">↩</span>
             <span className="key-label">חזרה לספרייה</span>
           </button>
         </div>
       )}
+      {shareMsg && <p className="share-msg" dir="rtl">{shareMsg} <button className="mark-btn" onClick={() => setShareMsg("")}>✕</button></p>}
 
       {view === "mirror" && book && (
         <div className="deck">
@@ -4758,6 +4940,21 @@ const css = `
 .mark-bar.floating.above::after,.mark-bar.floating.below::after{content:"";position:absolute;left:var(--arrow,50%);width:12px;height:12px;background:#f7f3e8;border:1.5px solid var(--amber);transform:translateX(-50%) rotate(45deg)}
 .mark-bar.floating.above::after{bottom:-7px;border-top:none;border-left:none}
 .mark-bar.floating.below::after{top:-7px;border-bottom:none;border-right:none}
+/* 🕯 לימוד משותף */
+.share-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff8e6;border:1.5px solid var(--amber);border-radius:12px;padding:7px 12px;margin:0 0 12px;font-size:.9rem;color:#4a3a1a}
+.share-title{font-weight:800}
+.share-code{font-family:'IBM Plex Mono',monospace;letter-spacing:.12em;background:#fff;border:1px solid #e0c98f;border-radius:6px;padding:2px 8px;font-weight:600}
+.share-who{display:flex;gap:6px;flex-wrap:wrap}
+.share-peer{background:var(--c);color:#fff;border-radius:999px;padding:1px 9px;font-size:.82rem;font-weight:600}
+.share-wait{color:#8a7a55;font-size:.85rem}
+.share-holder{font-size:.85rem}
+.share-bar .mark-btn.on{border-color:var(--amber);background:#fdeed3}
+.share-msg{max-width:860px;margin:10px auto;background:#fff8e6;border:1px solid #e0c98f;border-radius:10px;padding:8px 12px;color:#4a3a1a;display:flex;gap:10px;align-items:center;justify-content:space-between}
+.ch-key.share{border-color:#b7a6f2}
+.scroll-sent.peer-hl{box-shadow:inset 0 -3px 0 var(--peer,#4aa3ff);border-radius:3px}
+.scroll-sent.peer-here{outline:2px dashed var(--peer,#4aa3ff);outline-offset:2px;border-radius:4px}
+.peer-cursor{display:inline-block;color:#fff;font-size:.68rem;border-radius:999px;padding:0 7px;margin-inline-end:5px;vertical-align:middle;font-weight:700;line-height:1.5}
+.peer-note{cursor:help;font-size:.8em}
 /* 📝 עורך ההערה */
 .note-ed-back{position:fixed;inset:0;z-index:70;background:rgba(10,12,30,.45);display:flex;align-items:center;justify-content:center;padding:16px;animation:barIn .14s ease-out}
 .note-ed{background:#fffdf6;color:#232323;border:1.5px solid var(--amber);border-radius:14px;padding:14px 16px;width:min(520px,100%);box-shadow:0 14px 40px rgba(0,0,0,.35);font-family:inherit;font-size:16px}
