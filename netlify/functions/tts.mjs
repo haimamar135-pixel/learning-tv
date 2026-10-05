@@ -58,19 +58,44 @@ export default async (req) => {
 };
 
 async function speak({ apiKey, text }) {
-  const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE}/with-timestamps?output_format=${encodeURIComponent(FORMAT)}`, {
+  /* נטליפיי הורגת את הפונקציה ב-60 שניות בלי הודעה ("תשובה לא תקינה [200]"). עוצרים בעצמנו ב-50 ואומרים מה קרה. */
+  const t0 = Date.now();
+  const ac = new AbortController();
+  const killer = setTimeout(() => ac.abort(), 50000);
+  let res;
+  try {
+    res = await fetchEleven(apiKey, text, ac.signal);
+  } catch (e) {
+    clearTimeout(killer);
+    if (e.name === "AbortError") return { error: { message: `ElevenLabs (${MODEL}) לא סיים תוך 50 שניות על ${text.length} תווים — החתיכה ארוכה מדי למודל הזה` } };
+    throw e;
+  }
+  return finish(res, text, t0, killer);
+}
+
+function fetchEleven(apiKey, text, signal) {
+  return fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE}/with-timestamps?output_format=${encodeURIComponent(FORMAT)}`, {
+    signal,
     method: "POST",
     headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
     /* language_code נשלח רק אם הוגדר ELEVEN_TTS_LANG — turbo/flash דוחים "he"; eleven_v3 מזהה עברית לבד */
     body: JSON.stringify({ text, model_id: MODEL, ...(process.env.ELEVEN_TTS_LANG ? { language_code: process.env.ELEVEN_TTS_LANG } : {}) }),
   });
+}
+
+async function finish(res, text, t0, killer) {
   if (!res.ok) {
+    clearTimeout(killer);
     const errText = await res.text();
     let msg = errText.slice(0, 300);
     try { const j = JSON.parse(errText); msg = (j.detail && (j.detail.message || j.detail.status)) || j.message || msg; } catch {}
     return { error: { message: "ElevenLabs: " + msg }, status: res.status };
   }
-  const j = await res.json();
+  let j;
+  try { j = await res.json(); } catch (e) {
+    if (e.name === "AbortError") return { error: { message: `ElevenLabs (${MODEL}) התחיל לענות אבל לא סיים תוך 50 שניות (${text.length} תווים)` } };
+    throw e;
+  } finally { clearTimeout(killer); }
   const audio = j.audio_base64 || "";
   if (audio.length < 1000) return { error: { message: "ElevenLabs החזיר קובץ ריק" } };
   const al = j.alignment || j.normalized_alignment || {};
@@ -85,5 +110,5 @@ async function speak({ apiKey, text }) {
   }
   const ends = Array.isArray(al.character_end_times_seconds) ? al.character_end_times_seconds : [];
   const dur = ends.length ? ends[ends.length - 1] : (times.length ? times[times.length - 1] : 0);
-  return { audio, mime: "audio/mpeg", chars: text.length, bytes: Math.floor(audio.length * 0.75), times: times.map((t) => Math.round(t * 1000) / 1000), dur, model: MODEL };
+  return { audio, mime: "audio/mpeg", chars: text.length, bytes: Math.floor(audio.length * 0.75), times: times.map((t) => Math.round(t * 1000) / 1000), dur, model: MODEL, ms: Date.now() - t0 };
 }
