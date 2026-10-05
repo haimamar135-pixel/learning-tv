@@ -2662,7 +2662,7 @@ export default function LearningTV() {
   const [readerOn, setReaderOn] = useState(false);
   const [readPos, setReadPos] = useState(null);
   const [readerStart, setReaderStart] = useState(null);
-  /* הגלילה בזמן ההקראה: השורה הנקראת יושבת בקביעות בשליש העליון של המסך, והדף גולש אליה ברצף (בלי קפיצות).
+  /* הגלילה בזמן ההקראה: השורה הנקראת יושבת בקביעות מעט מעל מרכז המסך, והדף גולש אליה ברצף (בלי קפיצות).
      נגיעה/גלגלת של הלומד משהה את המעקב ל-4 שניות. */
   const reading = readPos != null;
   useEffect(() => {
@@ -2678,7 +2678,7 @@ export default function LearningTV() {
       const done = sent.querySelectorAll(".kara-done");
       const el = done.length ? done[done.length - 1] : sent;
       const r = el.getBoundingClientRect(), b = sb.getBoundingClientRect();
-      const diff = (done.length ? r.top + r.height / 2 : r.top + 14) - (b.top + b.height / 3);
+      const diff = (done.length ? r.top + r.height / 2 : r.top + 14) - (b.top + b.height * 0.42); /* השורה הנקראת: מעט מעל מרכז המסך, תמיד באותו גובה */
       if (Math.abs(diff) < 1.5) return;
       const step = diff * 0.045;
       sb.scrollTop += Math.abs(step) < 0.6 ? Math.sign(diff) * 0.6 : step;
