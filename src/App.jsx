@@ -4992,7 +4992,11 @@ const css = `
 .studio{height:100vh;height:100dvh;min-height:0;overflow:hidden;padding:14px 16px 10px;
   padding-top:calc(12px + env(safe-area-inset-top,0px));padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
 .studio>.masthead{flex:none;margin-bottom:10px}
-.studio>.tv{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.studio>.tv{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;width:auto;max-width:100%;aspect-ratio:16/10}
+@media (max-width:900px){.studio>.tv{width:100%;aspect-ratio:auto}}
+.bezel{padding:clamp(12px,1.4vw,26px);border-radius:clamp(18px,2vw,34px)}
+.tv-neck{width:clamp(90px,8vw,160px)}
+.tv-base{width:clamp(260px,22vw,440px)}
 .studio>.tv .bezel{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
 .studio>.tv .screen{flex:1 1 auto;min-height:0}
 .studio>.tv .screen-body{max-height:none;-webkit-overflow-scrolling:touch}
@@ -5093,7 +5097,7 @@ const css = `
 .masthead h1{font-size:1.9rem;font-weight:800;letter-spacing:.5px}
 .mast-sub{color:#9aa1c4;font-size:.95rem}
  
-.tv{width:100%;max-width:860px}
+.tv{width:100%;max-width:1500px} /* צ'אט 20: הטלוויזיה גדלה עד שהיא נוגעת בגובה או ברוחב של המסך, ושומרת על הפרופורציה של טלוויזיה */
 .bezel{
   background:linear-gradient(180deg,#232a4c,#171d3a);
   border:1px solid #323b68;border-radius:26px;padding:16px;
@@ -5163,7 +5167,7 @@ const css = `
 .cloud-btn.ghost{opacity:.75}
 .cloud-msg{font-size:.85rem;color:#ffd27a;margin-top:10px}
 .screen-body{
-  flex:1;background:var(--paper);color:var(--ink);padding:26px 30px;overflow-y:auto;max-height:560px;
+  flex:1;background:var(--paper);color:var(--ink);padding:26px clamp(26px,4vw,90px);overflow-y:auto;max-height:560px;
   background-image:radial-gradient(rgba(0,0,0,.03) 1px,transparent 1px);background-size:5px 5px;
 }
 .prose{line-height:1.9;font-size:1.05rem;white-space:pre-wrap}
@@ -5589,7 +5593,7 @@ const css = `
 .ch-key.green{background:linear-gradient(180deg,#25695e,#1e5c52);border-color:#2a7a6e;color:#eafff9}
 .ch-key.green .key-num{color:#9fe8d9}
 .brand{font-family:'IBM Plex Mono',monospace;font-size:.72rem;letter-spacing:5px;color:#6e769c}
-.deck{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;max-width:860px}
+.deck{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;max-width:1500px}
 .ch-key{
   display:flex;flex-direction:column;align-items:center;gap:4px;min-width:104px;
   background:linear-gradient(180deg,#212844,var(--key));border:1px solid var(--key-edge);
