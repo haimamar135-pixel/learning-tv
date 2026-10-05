@@ -1964,6 +1964,55 @@ function CardsView({ data, layer }) {
   );
 }
  
+/* ─── ❔ המדריך בתוך האפליקציה (צ'אט 20) ───
+   אותו מקור כמו דף המדריך לבודקים (public/guide/steps.json): צעדים עם צילום, טקסט ועצה.
+   נפתח כשכבה מעל המסך בלחיצה על ❔, ו"חזרה ללימוד" מחזיר בדיוק למקום שהיה. 🔊 מקריא את הצעד. */
+function HelpView({ onClose }) {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [k, setK] = useState(() => { try { return +sessionStorage.getItem("lomedtv-help-k") || 0; } catch { return 0; } });
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => { fetch("/guide/steps.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(r.status))).then(setData).catch((e) => setErr("המדריך לא נטען: " + e.message)); }, []);
+  useEffect(() => { try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} window.speechSynthesis?.cancel(); setSpeaking(false); }, [k]);
+  useEffect(() => () => window.speechSynthesis?.cancel(), []);
+  const steps = data?.steps || [];
+  const st = steps[k];
+  const speak = () => {
+    const synth = window.speechSynthesis; if (!synth || !st) return;
+    if (speaking) { synth.cancel(); setSpeaking(false); return; }
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(speakable(`${st.title}. ${st.text} ${st.tip || ""}`).text);
+    u.lang = "he-IL"; const v = pickHebrewVoice(synth); if (v) u.voice = v;
+    u.onend = () => setSpeaking(false); u.onerror = () => setSpeaking(false);
+    synth.speak(u); setSpeaking(true);
+  };
+  return (
+    <div className="help" dir="rtl" role="dialog" aria-label="המדריך">
+      <div className="help-head">
+        <span className="help-title">❔ המדריך · {steps.length ? `${k + 1} / ${steps.length}` : ""}</span>
+        <button className="tts-btn sm" onClick={onClose}>↩ חזרה ללימוד</button>
+      </div>
+      {err && <div className="err">{err}</div>}
+      {!data && !err && <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את המדריך…</p></div>}
+      {st && (
+        <div className="help-body">
+          <div className="help-nav">
+            <button className="tts-btn ghost sm" onClick={() => setK((x) => Math.max(0, x - 1))} disabled={k === 0}>→ הקודם</button>
+            <button className={"tts-btn sm " + (speaking ? "" : "ghost")} onClick={speak}>{speaking ? "⏹ עצור" : "🔊 הקרא"}</button>
+            <button className="tts-btn ghost sm" onClick={() => setK((x) => Math.min(steps.length - 1, x + 1))} disabled={k >= steps.length - 1}>הבא ←</button>
+          </div>
+          <h2 className="help-h"><span className="n">{k + 1}</span>{st.title}</h2>
+          <p className="help-text">{st.text}</p>
+          {st.tip && <div className="help-tip">💡 {st.tip}</div>}
+          {st.shot && <img className="help-shot" src={"/guide/shots/" + st.shot} alt={st.title} loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+          <div className="help-dots">{steps.map((x, i) => <button key={x.id} className={"help-dot " + (i === k ? "on" : "")} onClick={() => setK(i)} title={x.title} />)}</div>
+          <div className="help-foot">המדריך המלא, עם טופס משוב: <a href={SITE_URL + "/guide/"} target="_blank" rel="noopener noreferrer">famous-rolypoly…/guide</a></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── 🔊 הקראה כקריוקי (צ'אט 20) ───
    ההקראה לא מחליפה את הדף: נגן קטן יושב מעל טקסט הפרק, הדף נשאר עם הסימונים וההערות,
    המשפט הנקרא מואר, המילים שכבר נקראו מתמלאות בצבע, והדף גולל בעקבות הקריאה.
@@ -2017,7 +2066,23 @@ function pickHebrewVoice(synth) {
   const score = (v) => (/premium/i.test(v.voiceURI + v.name) ? 3 : /enhanced/i.test(v.voiceURI + v.name) ? 2 : /compact/i.test(v.voiceURI) ? 0 : 1);
   return vs.sort((a, b) => score(b) - score(a))[0] || null;
 }
-function Reader({ items, question, startAt, onPos, onClose }) {
+/* 🎙 קול איכותי: חתיכות של עד ~1,200 תווים (טקסט מנוקה), כל חתיכה = קובץ MP3 + זמני תווים.
+   מפתח החתיכה כולל תמצית של הטקסט: אותו פרק באותו מצב = אותם קבצים, גם במכשיר אחר (דרך הענן). */
+const TTS_CHUNK = 1200;
+const ttsKey = (store, mode, n, text) => `tts:${store}:${mode}:${n}:${textHash(text)}`;
+function buildChunks(queue) {
+  const chunks = []; let cur = null;
+  for (let k = 0; k < queue.length; k++) {
+    const { text, map } = speakable(queue[k].text);
+    const t = text.trim(); if (!t) continue;
+    if (!cur || cur.text.length + t.length + 1 > TTS_CHUNK) { cur = { text: "", parts: [] }; chunks.push(cur); }
+    const off = cur.text.length ? cur.text.length + 1 : 0;
+    cur.text = cur.text ? cur.text + " " + t : t;
+    cur.parts.push({ k, i: queue[k].i, off, len: t.length, map, orig: queue[k].text });
+  }
+  return chunks;
+}
+function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta }) {
   /* items: [{i, kind, text}] — המשפטים של הפרק בסדר הדף; kind = "zohar" | "sulam" | "" */
   const hasSulam = items.some((x) => x.kind === "sulam");
   const [mode, setMode] = useState("all");
@@ -2029,18 +2094,96 @@ function Reader({ items, question, startAt, onPos, onClose }) {
   const [mini, setMini] = useState(true); // true = רק השורה בסרגל; false = לוח ההגדרות פתוח
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem("lomedtv-kara") || "amber"; } catch { return "amber"; } });
   const [showColors, setShowColors] = useState(false);
+  const [hq, setHq] = useState(() => { try { return localStorage.getItem("lomedtv-tts-hq") === "on"; } catch { return false; } }); // 🎙 קול איכותי
+  const [hqBusy, setHqBusy] = useState("");   // "מפיק חלק 1 מתוך 3…"
+  const [hqErr, setHqErr] = useState("");
+  const audioRef = useRef(null), chunkRef = useRef(null), hqRef = useRef(hq);
+  useEffect(() => { hqRef.current = hq; try { localStorage.setItem("lomedtv-tts-hq", hq ? "on" : "off"); } catch {} }, [hq]);
   useEffect(() => { stateRef.current = state; }, [state]);
   useEffect(() => {
     try { localStorage.setItem("lomedtv-tts-rate", String(rate)); } catch {}
     const changed = rateRef.current !== rate; rateRef.current = rate;
+    if (audioRef.current) audioRef.current.playbackRate = rate; // בקול האיכותי הקצב משתנה מיד
     /* הדפדפן מקבל קצב רק בתחילת משפט: אם משנים באמצע, מתחילים את המשפט הנוכחי מחדש בקצב החדש */
-    if (changed && stateRef.current === "playing" && posRef.current >= 0) speakAt(posRef.current);
+    if (changed && !hqRef.current && stateRef.current === "playing" && posRef.current >= 0) speakAt(posRef.current);
   }, [rate]);
   useEffect(() => { try { localStorage.setItem("lomedtv-kara", theme); } catch {} document.documentElement.setAttribute("data-kara", theme); return () => document.documentElement.removeAttribute("data-kara"); }, [theme]);
-  const stopAll = () => { window.speechSynthesis?.cancel(); clearInterval(timerRef.current); uRef.current = null; };
-  useEffect(() => () => { stopAll(); onPos?.(null); }, []);
+  const stopAll = () => { window.speechSynthesis?.cancel(); clearInterval(timerRef.current); uRef.current = null; chunkRef.current = null; try { audioRef.current?.pause(); } catch {} };
+  useEffect(() => () => { stopAll(); onPos?.(null); if (audioRef.current?.src) URL.revokeObjectURL(audioRef.current.src); }, []);
   const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
 
+  /* ── 🎙 המנוע של הקול האיכותי ── */
+  const chunks = useMemo(() => buildChunks(queue), [queue]);
+  const chunkKey = (n) => ttsKey(store, mode, n, chunks[n]?.text || "");
+  const getChunk = async (n) => {
+    const key = chunkKey(n), c = chunks[n];
+    let blob = null, times = null;
+    try { blob = await idbGet(voiceKey(key)); times = await idbGet(voiceKey(key) + ":t"); } catch {}
+    if (blob && times) return { blob, times };
+    const meta = ttsMeta?.[key];
+    if (meta?.path && uid) {
+      try {
+        const [a, t] = await Promise.all([supa.storage.from("voice").createSignedUrl(meta.path, 3600), supa.storage.from("voice").createSignedUrl(meta.path.replace(/\.mp3$/, ".json"), 3600)]);
+        if (!a.error && !t.error) {
+          const [ab, tj] = await Promise.all([fetch(a.data.signedUrl).then((r) => r.ok ? r.blob() : null), fetch(t.data.signedUrl).then((r) => r.ok ? r.json() : null)]);
+          if (ab && tj) { blob = ab; times = tj; idbSet(voiceKey(key), blob).catch(() => {}); idbSet(voiceKey(key) + ":t", times).catch(() => {}); return { blob, times }; }
+        }
+      } catch {}
+    }
+    setHqBusy(`🎙 מפיק קול… חלק ${n + 1} מתוך ${chunks.length}`);
+    const data = await postJson("/.netlify/functions/tts", { text: c.text });
+    if (data.error) throw new Error(data.error.message || "שגיאה בהפקת הקול");
+    blob = new Blob([b64ToBytes(data.audio)], { type: data.mime || "audio/mpeg" });
+    times = data.times || [];
+    try { await idbSet(voiceKey(key), blob); await idbSet(voiceKey(key) + ":t", times); } catch {}
+    if (uid) {
+      const path = `${uid}/${store.split(":")[0]}/tts-${textHash(c.text)}.mp3`;
+      try {
+        const up = await supa.storage.from("voice").upload(path, blob, { contentType: "audio/mpeg", upsert: true });
+        if (!up.error) {
+          await supa.storage.from("voice").upload(path.replace(/\.mp3$/, ".json"), new Blob([JSON.stringify(times)], { type: "application/json" }), { contentType: "application/json", upsert: true });
+          onTtsMeta?.(key, { path, chars: c.text.length, at: Date.now() });
+        }
+      } catch {}
+    }
+    setHqBusy("");
+    return { blob, times };
+  };
+  const posFromTime = (c, times, t) => {
+    /* חיפוש בינארי: התו האחרון שהתחיל לפני t */
+    let lo = 0, hi = times.length - 1;
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (times[m] <= t) lo = m; else hi = m - 1; }
+    const part = [...c.parts].reverse().find((p) => lo >= p.off) || c.parts[0];
+    const local = Math.max(0, Math.min(part.len, lo - part.off));
+    return { k: part.k, i: part.i, c: part.map[Math.min(local, part.map.length - 1)] };
+  };
+  const playChunk = async (n, fromK) => {
+    if (n >= chunks.length) { setState("idle"); setPos(-1); posRef.current = -1; onPos?.(null); return; }
+    const c = chunks[n];
+    let got;
+    try { got = await getChunk(n); } catch (e) { setHqErr(e.message); setHqBusy(""); setState("idle"); return; }
+    if (stateRef.current !== "playing") return;
+    const a = audioRef.current || new Audio(); audioRef.current = a;
+    try { a.pause(); } catch {}
+    if (a.src) URL.revokeObjectURL(a.src);
+    a.src = URL.createObjectURL(got.blob); a.playbackRate = rateRef.current;
+    chunkRef.current = { n, c, times: got.times };
+    const startPart = fromK != null ? c.parts.find((p) => p.k === fromK) : null;
+    a.ontimeupdate = () => { const ch = chunkRef.current; if (!ch) return; const p = posFromTime(ch.c, ch.times, a.currentTime); posRef.current = p.k; setPos(p.k); onPos?.({ i: p.i, c: p.c }); };
+    a.onended = () => { if (chunkRef.current?.n === n) playChunk(n + 1); };
+    a.onerror = () => { setHqErr("הקובץ לא ניתן לנגינה"); setState("idle"); };
+    const seekTo = startPart ? (got.times[startPart.off] || 0) : 0;
+    const go = () => { a.currentTime = seekTo; a.play().catch((e) => setHqErr("הדפדפן חסם נגינה: " + e.message)); };
+    if (a.readyState >= 1) go(); else a.onloadedmetadata = go;
+    /* מפיקים את החתיכה הבאה ברקע, כדי שהמעבר יהיה חלק */
+    if (n + 1 < chunks.length) getChunk(n + 1).catch(() => {});
+  };
+  const hqPlayFrom = (k) => {
+    const n = chunks.findIndex((c) => c.parts.some((p) => p.k === k));
+    if (n < 0) { setState("idle"); return; }
+    setHqErr(""); setState("playing");
+    playChunk(n, k);
+  };
   const speakAt = (k) => {
     if (!synth) return;
     if (k >= queue.length) { setState("idle"); setPos(-1); posRef.current = -1; onPos?.(null); return; }
@@ -2067,6 +2210,14 @@ function Reader({ items, question, startAt, onPos, onClose }) {
     synth.speak(u);
   };
   const play = (from) => {
+    if (hqRef.current) {
+      if (state === "paused" && from == null) { audioRef.current?.play?.(); setState("playing"); return; }
+      stopAll();
+      const k = from != null ? from : Math.max(0, posRef.current);
+      posRef.current = k; setPos(k);
+      hqPlayFrom(k);
+      return;
+    }
     if (!synth) return;
     if (state === "paused" && from == null) { synth.resume(); setState("playing"); return; }
     stopAll();
@@ -2079,7 +2230,7 @@ function Reader({ items, question, startAt, onPos, onClose }) {
       uq.onend = () => speakAt(k); uq.onerror = () => speakAt(k); uRef.current = uq; synth.speak(uq);
     } else speakAt(k);
   };
-  const pause = () => { synth?.pause(); setState("paused"); };
+  const pause = () => { if (hqRef.current) { try { audioRef.current?.pause(); } catch {} } else synth?.pause(); setState("paused"); };
   const stop = () => { stopAll(); setState("idle"); setPos(-1); posRef.current = -1; onPos?.(null); };
   /* לחיצה על משפט בדף: להתחיל ממנו */
   useEffect(() => {
@@ -2088,6 +2239,7 @@ function Reader({ items, question, startAt, onPos, onClose }) {
     if (k >= 0) play(k);
   }, [startAt]);
   useEffect(() => { if (state !== "idle") stop(); }, [mode]);
+  useEffect(() => { if (stateRef.current === "playing" && posRef.current >= 0) play(posRef.current); }, [hq]);
   const step = (d) => { const k = Math.max(0, Math.min(queue.length - 1, (posRef.current < 0 ? 0 : posRef.current) + d)); play(k); };
   const KARA = [["amber", "ענבר"], ["green", "ירוק"], ["blue", "תכלת"], ["rose", "ורוד"], ["soft", "עדין"]];
   /* הנגן יושב בשורת המסך העליונה (ליד הכותרת, מימין לענן): שורה קטנה תמיד; ▾ פותח לוח מתחתיה עם קצב, צבע ומה להקריא */
@@ -2099,7 +2251,7 @@ function Reader({ items, question, startAt, onPos, onClose }) {
         : <button className="rb-btn main" onClick={() => play()} title={state === "paused" ? "המשך" : "הקרא"}>▶</button>}
       <button className="rb-btn" onClick={() => step(-1)} title="משפט קודם">⏮</button>
       <button className="rb-btn" onClick={() => step(1)} title="משפט הבא">⏭</button>
-      <span className="rb-pos">{pos >= 0 ? `${pos + 1}/${queue.length}` : queue.length}</span>
+      <span className="rb-pos">{hqBusy ? "🎙…" : (hq ? "🎙 " : "") + (pos >= 0 ? `${pos + 1}/${queue.length}` : queue.length)}</span>
       <button className={"rb-btn " + (!mini ? "on" : "")} onClick={() => setMini((m) => !m)} title={mini ? "הגדרות ההקראה" : "סגור הגדרות"}>{mini ? "▾" : "▴"}</button>
       <button className="rb-btn" onClick={() => { stop(); onClose?.(); }} title="סגור את ההקראה">✕</button>
       {!mini && (
@@ -2108,6 +2260,12 @@ function Reader({ items, question, startAt, onPos, onClose }) {
             <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
             <button className="tts-btn ghost sm" onClick={stop} title="עצור וחזור להתחלה">⏹ מההתחלה</button>
           </div>
+          <div className="reader-row">
+            <button className={"pill " + (hq ? "on" : "")} onClick={() => { setHqErr(""); setHq((v) => !v); }} title="קול אנושי מ-ElevenLabs — מופק פעם אחת ונשמר">🎙 קול איכותי {hq ? "· דולק" : ""}</button>
+            <span className="reader-note">{hq ? (uid ? `${chunks.length} חלקים · מופק פעם אחת ונשמר במכשיר ובענן` : "להיכנס לחשבון (☁) כדי להפיק") : "קול הדפדפן (חינם)"}</span>
+          </div>
+          {hqBusy && <div className="reader-note busy-line">{hqBusy}</div>}
+          {hqErr && <div className="err">{hqErr}</div>}
           <div className="reader-row pill-row">
             <span className="reader-note">צבע ההארה:</span>
             {KARA.map(([k, l]) => <button key={k} className={"pill kara-pick " + (theme === k ? "on" : "")} data-kara={k} onClick={() => setTheme(k)}><i className="kara-sw" /> {l}</button>)}
@@ -2500,6 +2658,7 @@ export default function LearningTV() {
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
   /* 🔊 הקראה כקריוקי: הנגן פתוח מעל טקסט הפרק; readPos = {i, c} המשפט והתו שנקראים עכשיו */
+  const [helpOn, setHelpOn] = useState(false); // ❔ המדריך מעל המסך
   const [readerOn, setReaderOn] = useState(false);
   const [readPos, setReadPos] = useState(null);
   const [readerStart, setReaderStart] = useState(null);
@@ -4132,6 +4291,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
+                <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? "חזרה ללימוד" : "המדריך: איך משתמשים"} aria-label="המדריך">❔</button>
                 <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? "הניקוד מוצג — לחץ להסתיר" : "הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)"} aria-label="ניקוד" aria-pressed={nikudOn}>בְּ</button>
                 <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? "שכבת הלומד מוצגת — לחץ להסתיר" : "שכבת הלומד מוסתרת — לחץ להציג"} aria-label="שכבת הלומד">✍️</button>
                 <button
@@ -4271,7 +4431,8 @@ export default function LearningTV() {
               </div>
             )}
  
-            <div className="screen-body" style={{ zoom: fontScale }}>
+            {helpOn && <HelpView onClose={() => setHelpOn(false)} />}
+            <div className={"screen-body" + (helpOn ? " behind-help" : "")} style={{ zoom: fontScale }}>
               {view === "boot" && (
                 <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את הספרייה…</p></div>
               )}
@@ -4828,7 +4989,8 @@ export default function LearningTV() {
                     const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
                     const items = [];
                     chParas.forEach(([start, count], pi) => { const kind = paraKind(sentences, chParas, pi).trim(); for (let i = start; i < start + count; i++) items.push({ i, kind, text: sentences[i] }); });
-                    return <Reader key={key(chIdx, "reader")} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }} />;
+                    return <Reader key={key(chIdx, "reader")} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }}
+                      store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
                   {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
                   {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} onClose={() => setShareVideo(false)} />}
@@ -5812,6 +5974,24 @@ const css = `
 .reader-pop{position:absolute;top:calc(100% + 6px);right:10px;left:auto;z-index:40;min-width:300px;max-width:min(92vw,560px);background:#fff8e6;color:#3a2c14;border:1.5px solid #e0c98f;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:'Heebo',sans-serif;white-space:normal;text-align:start}
 .reader-pop .reader-row{flex-wrap:wrap}
 @media (max-width:640px){.screen-bar{flex-wrap:wrap;row-gap:6px}.reader-slot{order:3;margin-inline-start:0}.reader-pop{left:8px;right:8px;min-width:0;max-width:none}}
+.help{flex:1 1 auto;min-height:0;background:var(--paper);color:var(--ink);display:flex;flex-direction:column;overflow:hidden;font-family:'Heebo',sans-serif}
+.screen-body.behind-help{display:none}
+.help .tts-btn{padding:6px 12px;font-size:.9rem;box-shadow:none}
+.help-nav .tts-btn{white-space:nowrap}
+.help-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 16px;background:#fff8e6;border-bottom:1.5px solid #e0c98f}
+.help-title{font-weight:800;color:#7a5410}
+.help-body{flex:1;overflow-y:auto;padding:16px 22px 30px;display:flex;flex-direction:column;gap:12px}
+.help-nav{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.help-h{font-family:'Frank Ruhl Libre',serif;font-weight:800;font-size:1.35rem;margin:4px 0;display:flex;align-items:center;gap:10px}
+.help-h .n{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--amber);color:#241a08;font-family:'IBM Plex Mono',monospace;font-size:.9rem}
+.help-text{line-height:1.9;font-size:1.05rem;white-space:pre-wrap}
+.help-tip{background:#fff3c4;border-inline-start:3px solid var(--amber);border-radius:8px;padding:8px 12px;font-size:.95rem;line-height:1.7}
+.help-shot{width:100%;max-width:420px;align-self:center;border:1px solid #d9d2bd;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.help-dots{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:6px}
+.help-dot{width:10px;height:10px;border-radius:50%;border:1px solid #b9ad8c;background:transparent;cursor:pointer;padding:0}
+.help-dot.on{background:var(--amber);border-color:var(--amber)}
+.help-foot{text-align:center;color:#8a8467;font-size:.85rem}
+.help-btn.on{border-color:var(--amber);color:var(--amber)}
 .reader.mini{padding:3px 8px}
 .reader .tts-btn.sm{padding:4px 9px;font-size:.85rem;min-width:34px}
 .kara-pick .kara-sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:var(--sw,#f8d98a);margin-inline-end:4px}
