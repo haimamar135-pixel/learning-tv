@@ -1305,20 +1305,21 @@ function applyWordPatch(w, s, e, patch) {
     .sort((a, b) => a.s - b.s);
 }
 /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין (txt = הנוסח המוצג) */
-function renderMarked(txt, mk, pend) {
+function renderMarked(txt, mk, pend, kara) {
   const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
-  if (!mk && !pend) return txt;
+  if (!mk && !pend && kara == null) return txt;
   const base = {};
   if (mk) {
     if (mk.b) base.fontWeight = 800;
     if (mk.u) base.textDecoration = "underline";
     if (mk.hl) base.background = HL_COLORS[mk.hl];
   }
-  if (!w.length && !pend) return <span style={base}>{txt}</span>;
+  if (!w.length && !pend && kara == null) return <span style={base}>{txt}</span>;
   const pts = new Set([0, txt.length]);
   const clamp = (n) => Math.max(0, Math.min(n, txt.length));
   w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
   if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
+  if (kara != null) pts.add(clamp(kara));
   const arr = [...pts].sort((a, b) => a - b);
   const nodes = [];
   for (let k = 0; k < arr.length - 1; k++) {
@@ -1334,7 +1335,9 @@ function renderMarked(txt, mk, pend) {
       if (r.hl) st.background = HL_COLORS[r.hl];
     }
     if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
-    nodes.push(<span key={k} className={isPend ? "ws-pend" : undefined} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
+    const done = kara != null && e <= clamp(kara);
+    const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : ""].filter(Boolean).join(" ") || undefined;
+    nodes.push(<span key={k} className={cls} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
   }
   return nodes;
 }
@@ -1961,6 +1964,149 @@ function CardsView({ data, layer }) {
   );
 }
  
+/* ─── 🔊 הקראה כקריוקי (צ'אט 20) ───
+   ההקראה לא מחליפה את הדף: נגן קטן יושב מעל טקסט הפרק, הדף נשאר עם הסימונים וההערות,
+   המשפט הנקרא מואר, המילים שכבר נקראו מתמלאות בצבע, והדף גולל בעקבות הקריאה.
+   לפני ההקראה הטקסט מנוקה: ניקוד, גרשיים, מספור האותיות ו"הסולם:" יורדים, וראשי תיבות
+   נפוצים מתפרשים. בדף סולם אפשר לבחור: הכול · ארמית בלבד · הסולם בלבד.
+   מקור הקול: הדפדפן (חינם, מיידי). "קול איכותי" (ElevenLabs) — בגל הבא, על אותו נגן. */
+const ABBR_MAP = {
+  'הקב"ה': "הקדוש ברוך הוא", 'קב"ה': "הקדוש ברוך הוא", 'ה\'': "השם", 'ד\'': "השם", 'ר\'': "רבי", 'וכו\'': "וכולי", 'וגו\'': "וגומר",
+  'ז"ל': "זכרונו לברכה", 'זצ"ל': "זכר צדיק לברכה", 'זי"ע': "זכותו יגן עלינו", 'ע"י': "על ידי", 'ע"ש': "על שם", 'ע"כ': "על כן",
+  'פי\'': "פירוש", 'א"ר': "אמר רבי", 'ר"ש': "רבי שמעון", 'ר"א': "רבי אלעזר", 'ר"י': "רבי יהודה", 'רשב"י': "רבי שמעון בר יוחאי",
+  'חג"ת': "חסד גבורה תפארת", 'נה"י': "נצח הוד יסוד", 'חב"ד': "חכמה בינה דעת", 'כח"ב': "כתר חכמה בינה", 'ז"א': "זעיר אנפין", 'או"א': "אבא ואמא",
+  'א"א': "אריך אנפין", 'אע"פ': "אף על פי", 'אעפ"כ': "אף על פי כן", 'וז"ש': "וזה שכתוב", 'מ"ש': "מה שכתוב", 'שה"ס': "שהוא סוד", 'ע"ס': "עשר ספירות",
+  'ד"ה': "דיבור המתחיל", 'כנ"ל': "כנזכר לעיל", 'וכנ"ל': "וכנזכר לעיל", 'צ"ל': "צריך לומר", 'ר"ל': "רוצה לומר", 'עכ"ל': "עד כאן לשונו", 'וז"ל': "וזה לשונו",
+  'ב"ה': "ברוך הוא", 'ע"ז': "על זה", 'עי"ז': "על ידי זה", 'בזה"ל': "בזה הלשון", 'ס"א': "סטרא אחרא", 'ס"מ': "סמאל", 'ח"ו': "חס ושלום", 'ב"נ': "בר נש", 'ה"ה': "הרי הוא", 'ז"ס': "זה סוד", 'הנ"ל': "הנזכר לעיל", 'יעו"ש': "יעוין שם", 'ע"ב': "עמוד ב", 'ע"א': "עמוד א", 'ית"ש': "יתברך שמו", 'ית\'': "יתברך", 'ע"ה': "עליו השלום", 'בנ"י': "בני ישראל", 'א"כ': "אם כן", 'אח"כ': "אחר כך", 'עי"ז': "על ידי זה",
+};
+/* מחזיר {text, map}: הטקסט כפי שיוקרא, ו-map[k] = מיקום התו המקורי שאליו שייך התו ה-k בטקסט המוקרא */
+function speakable(src) {
+  let out = "", map = [];
+  const push = (str, at) => { for (const ch of str) { out += ch; map.push(at); } };
+  let i = 0;
+  let t = src;
+  /* מספור אות בראש משפט "נג) " או "תיד) " — לא מקריאים */
+  const m0 = t.match(/^\s*[א-ת]{1,4}\)\s*/); if (m0) i = m0[0].length;
+  const m1 = t.slice(i).match(/^(הסולם|פירוש):\s*/); if (m1) i += m1[0].length;
+  while (i < t.length) {
+    const ch = t[i];
+    if (NIKUD_MARK.test(ch)) { i++; continue; }
+    if (/[א-ת]/.test(ch)) {
+      /* מילה שלמה (כולל גרש/גרשיים בתוכה) */
+      let j = i; while (j < t.length && /[א-ת"'״׳֑-ׇ]/.test(t[j])) j++;
+      const raw = t.slice(i, j).replace(NIKUD_MARKS, "").replace(/[״]/g, '"').replace(/[׳]/g, "'");
+      const exp = ABBR_MAP[raw] || ABBR_MAP[raw.replace(/"$/, "")] || ABBR_MAP[raw.replace(/^"/, "")];
+      if (exp) push(exp, i);
+      else {
+        /* ראשי תיבות לא מוכרים: הגרשיים יורדות והאותיות נקראות כמילה; גרש בסוף יורד */
+        const clean = raw.replace(/["']/g, "");
+        push(clean, i);
+      }
+      i = j; continue;
+    }
+    if (/[()\[\]{}"'״׳]/.test(ch)) { i++; continue; }
+    if (ch === "—" || ch === "–") { push(",", i); i++; continue; }
+    if (ch === "." && t[i + 1] === "." ) { while (t[i] === ".") i++; push(".", i - 1); continue; }
+    push(ch, i); i++;
+  }
+  map.push(src.length);
+  return { text: out.replace(/\s+/g, " ").trim() ? out : "", map };
+}
+function pickHebrewVoice(synth) {
+  const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith("he"));
+  const score = (v) => (/premium/i.test(v.voiceURI + v.name) ? 3 : /enhanced/i.test(v.voiceURI + v.name) ? 2 : /compact/i.test(v.voiceURI) ? 0 : 1);
+  return vs.sort((a, b) => score(b) - score(a))[0] || null;
+}
+function Reader({ items, question, startAt, onPos, onClose }) {
+  /* items: [{i, kind, text}] — המשפטים של הפרק בסדר הדף; kind = "zohar" | "sulam" | "" */
+  const hasSulam = items.some((x) => x.kind === "sulam");
+  const [mode, setMode] = useState("all");
+  const [rate, setRate] = useState(() => { try { return +localStorage.getItem("lomedtv-tts-rate") || 1; } catch { return 1; } });
+  const [state, setState] = useState("idle"); // idle | playing | paused
+  const [pos, setPos] = useState(-1);          // אינדקס בתור
+  const queue = useMemo(() => items.filter((x) => mode === "all" || (mode === "zohar" ? x.kind === "zohar" : x.kind === "sulam")), [items, mode]);
+  const posRef = useRef(-1), stateRef = useRef("idle"), timerRef = useRef(null), uRef = useRef(null), askedQ = useRef(false);
+  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { try { localStorage.setItem("lomedtv-tts-rate", String(rate)); } catch {} }, [rate]);
+  const stopAll = () => { window.speechSynthesis?.cancel(); clearInterval(timerRef.current); uRef.current = null; };
+  useEffect(() => () => { stopAll(); onPos?.(null); }, []);
+  const synth = typeof window !== "undefined" ? window.speechSynthesis : null;
+
+  const speakAt = (k) => {
+    if (!synth) return;
+    if (k >= queue.length) { setState("idle"); setPos(-1); posRef.current = -1; onPos?.(null); return; }
+    const item = queue[k];
+    const { text, map } = speakable(item.text);
+    posRef.current = k; setPos(k);
+    if (!text.trim()) { speakAt(k + 1); return; }
+    onPos?.({ i: item.i, c: 0 });
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "he-IL"; u.rate = rate;
+    const v = pickHebrewVoice(synth); if (v) u.voice = v;
+    const t0 = Date.now(); let lastB = 0;
+    const cps = 13 * rate; // הערכה כשהדפדפן לא מדווח על גבולות מילים
+    u.onboundary = (ev) => { if (typeof ev.charIndex === "number") { lastB = ev.charIndex; onPos?.({ i: item.i, c: map[Math.min(ev.charIndex, map.length - 1)] }); } };
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      if (stateRef.current !== "playing") return;
+      const est = Math.min(text.length, Math.floor((Date.now() - t0) / 1000 * cps));
+      if (est > lastB + 12) onPos?.({ i: item.i, c: map[Math.min(est, map.length - 1)] });
+    }, 250);
+    u.onend = () => { if (uRef.current !== u) return; clearInterval(timerRef.current); onPos?.({ i: item.i, c: item.text.length }); speakAt(k + 1); };
+    u.onerror = (e) => { if (uRef.current !== u) return; clearInterval(timerRef.current); if (e.error !== "interrupted" && e.error !== "canceled") speakAt(k + 1); };
+    uRef.current = u;
+    synth.speak(u);
+  };
+  const play = (from) => {
+    if (!synth) return;
+    if (state === "paused" && from == null) { synth.resume(); setState("playing"); return; }
+    stopAll();
+    setState("playing");
+    const k = from != null ? from : Math.max(0, posRef.current);
+    if (question && !askedQ.current && k === 0) {
+      askedQ.current = true;
+      const uq = new SpeechSynthesisUtterance(`השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת.`);
+      uq.lang = "he-IL"; uq.rate = rate; const v = pickHebrewVoice(synth); if (v) uq.voice = v;
+      uq.onend = () => speakAt(k); uq.onerror = () => speakAt(k); uRef.current = uq; synth.speak(uq);
+    } else speakAt(k);
+  };
+  const pause = () => { synth?.pause(); setState("paused"); };
+  const stop = () => { stopAll(); setState("idle"); setPos(-1); posRef.current = -1; onPos?.(null); };
+  /* לחיצה על משפט בדף: להתחיל ממנו */
+  useEffect(() => {
+    if (startAt == null) return;
+    const k = queue.findIndex((x) => x.i === startAt.i);
+    if (k >= 0) play(k);
+  }, [startAt]);
+  useEffect(() => { if (state !== "idle") stop(); }, [mode]);
+  const step = (d) => { const k = Math.max(0, Math.min(queue.length - 1, (posRef.current < 0 ? 0 : posRef.current) + d)); play(k); };
+  if (!synth) return <div className="reader"><span className="reader-note">הדפדפן הזה לא תומך בהקראה.</span></div>;
+  return (
+    <div className="reader" dir="rtl">
+      <div className="reader-row">
+        {state === "playing"
+          ? <button className="tts-btn" onClick={pause}>⏸ השהה</button>
+          : <button className="tts-btn" onClick={() => play()}>▶ {state === "paused" ? "המשך" : "הקרא"}</button>}
+        <button className="tts-btn ghost" onClick={() => step(-1)} title="משפט קודם">⏮</button>
+        <button className="tts-btn ghost" onClick={() => step(1)} title="משפט הבא">⏭</button>
+        <button className="tts-btn ghost" onClick={stop}>⏹</button>
+        <span className="reader-pos">{pos >= 0 ? `${pos + 1} / ${queue.length}` : `${queue.length} משפטים`}</span>
+        <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
+        <button className="tts-btn ghost reader-x" onClick={() => { stop(); onClose?.(); }} title="סגור את הנגן">✕</button>
+      </div>
+      {hasSulam && (
+        <div className="reader-row pill-row">
+          <span className="reader-note">מה להקריא:</span>
+          <button className={"pill " + (mode === "all" ? "on" : "")} onClick={() => setMode("all")}>הכול, כסדר הדף</button>
+          <button className={"pill " + (mode === "zohar" ? "on" : "")} onClick={() => setMode("zohar")}>הארמית בלבד</button>
+          <button className={"pill " + (mode === "sulam" ? "on" : "")} onClick={() => setMode("sulam")}>הסולם בלבד</button>
+        </div>
+      )}
+      <div className="reader-note reader-hint">לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות</div>
+    </div>
+  );
+}
+
 function TTSView({ text, question }) {
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -2300,6 +2446,22 @@ export default function LearningTV() {
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
+  /* 🔊 הקראה כקריוקי: הנגן פתוח מעל טקסט הפרק; readPos = {i, c} המשפט והתו שנקראים עכשיו */
+  const [readerOn, setReaderOn] = useState(false);
+  const [readPos, setReadPos] = useState(null);
+  const [readerStart, setReaderStart] = useState(null);
+  const readSentRef = useRef(null);
+  useEffect(() => {
+    const i = readPos?.i;
+    if (i == null || readSentRef.current === i) return;
+    readSentRef.current = i;
+    const el = document.querySelector(`.read-sents [data-si="${i}"]`);
+    const sb = el?.closest(".screen-body");
+    if (!el || !sb) return;
+    const rd = sb.querySelector(".reader");
+    const top = el.getBoundingClientRect().top - sb.getBoundingClientRect().top + sb.scrollTop - (rd ? rd.offsetHeight : 0) - 40;
+    sb.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }, [readPos?.i]);
   const [nikudOn, setNikudOn] = useState(() => { try { return localStorage.getItem("lomedtv-nikud") === "on"; } catch { return false; } }); // נִ הניקוד מוצג?
   const [nikudMsg, setNikudMsg] = useState("");
   const nikudRun = useRef(0); // מספר הריצה הנוכחית; כיבוי או ריצה חדשה עוצרים את הקודמת
@@ -3411,11 +3573,12 @@ export default function LearningTV() {
     dragJustRef.current = true;
     return true;
   };
-  const renderSentText = (plain, mk, pend, voc) => {
+  const renderSentText = (plain, mk, pend, voc, kara) => {
     const txt = voc || plain;
     const cv = voc ? (r) => ({ ...r, s: nikudOff(plain, voc, r.s), e: nikudOff(plain, voc, r.e) }) : (r) => r;
     const w = ((mk && Array.isArray(mk.w)) ? mk.w : []).map(cv);
-    return renderMarked(txt, mk ? { ...mk, w } : mk, pend ? cv(pend) : pend);
+    const kc = kara == null ? null : voc ? nikudOff(plain, voc, kara) : kara;
+    return renderMarked(txt, mk ? { ...mk, w } : mk, pend ? cv(pend) : pend, kc);
   };
 
   /* בקשה ג': סימון קטע בתצוגת הפרק (ערוץ 00) —
@@ -3754,6 +3917,8 @@ export default function LearningTV() {
     if (loading) return;
     flick();
     setQuizPick(null);
+    if (id === "tts") { setChannel("read"); setReaderOn(true); setError(null); return; } // 07: הנגן מעל הדף, הדף נשאר
+    if (id !== "read") { setReaderOn(false); setReadPos(null); }
     setChannel(id);
     setError(null);
     window.speechSynthesis?.cancel();
@@ -4604,6 +4769,13 @@ export default function LearningTV() {
                     </FloatingMarkBar>
                   )}
                   {noteEditor}
+                  {readerOn && (() => {
+                    const [rs, re] = chapterRanges[chIdx] || [0, 0];
+                    const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
+                    const items = [];
+                    chParas.forEach(([start, count], pi) => { const kind = paraKind(sentences, chParas, pi).trim(); for (let i = start; i < start + count; i++) items.push({ i, kind, text: sentences[i] }); });
+                    return <Reader key={key(chIdx, "reader")} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }} />;
+                  })()}
                   {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
                   {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} onClose={() => setShareVideo(false)} />}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
@@ -4627,14 +4799,15 @@ export default function LearningTV() {
                                   "scroll-sent clickable " +
                                   (inRange || isStart ? "in-range " : "") +
                                   (book.notes?.[i] ? "has-note " : "") +
+                                  (readPos && readPos.i === i ? "kara-now " : "") +
                                   (pl ? pl.cls : "")
                                 }
                                 style={pl ? { "--peer": pl.color } : undefined}
                                 title={pl?.title || undefined}
-                                onClick={() => onReadSentClick(i)}
+                                onClick={() => (readerOn ? setReaderStart({ i, t: Date.now() }) : onReadSentClick(i))}
                               >
                                 {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
-                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i))}
+                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i), readPos && readPos.i === i ? readPos.c : null)}
                                 {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
                                 {book.notes?.[i] && (
                                   <sup
@@ -4813,11 +4986,12 @@ export default function LearningTV() {
         <>
           <div className="deck">
             {CHANNELS.map((c) => {
-              const cached = (c.id === "tts" || c.id === "read") ? channel === c.id : !!book.results[key(chIdx, c.id)];
+              const isOn = c.id === "tts" ? (readerOn && channel === "read") : channel === c.id;
+              const cached = (c.id === "tts" || c.id === "read") ? isOn : !!book.results[key(chIdx, c.id)];
               return (
                 <button
                   key={c.id}
-                  className={"ch-key " + (channel === c.id ? "active " : "") + (cached ? "cached " : "")}
+                  className={"ch-key " + (isOn ? "active " : "") + (cached ? "cached " : "")}
                   disabled={loading}
                   onClick={() => tune(c.id)}
                 >
@@ -5556,6 +5730,16 @@ const css = `
 .read-hint{margin-top:8px;color:#8a8467;font-size:.9rem;line-height:1.6;border-top:1px dashed #d9d2bd;padding-top:14px}
  
 /* הקראה */
+.reader{position:sticky;top:0;z-index:5;background:#fff8e6;border:1.5px solid #e0c98f;border-radius:12px;padding:6px 10px;display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 14px rgba(60,40,0,.12)}
+@media (max-width:640px){.reader .reader-hint{display:none}.reader .tts-rate input{width:70px}.reader .pill{padding:4px 10px;font-size:.82rem}}
+.reader-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.reader .tts-btn{padding:6px 12px;font-size:.92rem}
+.reader-pos{font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:#7a5410}
+.reader-note{color:#8a6a2a;font-size:.8rem}
+.reader-x{margin-inline-start:auto}
+.reader .pill-row{gap:6px}
+.scroll-sent.kara-now{background:#fff3c9;box-shadow:0 2px 0 var(--amber);border-radius:4px}
+.kara-done{background:#f8d98a;color:#1a1408}
 .tts{display:flex;flex-direction:column;gap:18px;align-items:flex-start}
 .tts-controls{display:flex;gap:10px}
 .tts-btn{
