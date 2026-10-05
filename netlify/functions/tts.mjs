@@ -5,7 +5,7 @@
    ומעלה עותק ל-Supabase Storage (bucket "voice") — פרק שהופק פעם אחת מתנגן שוב בחינם.
 
    השער: fn="voice" (אותה מכסה יומית של השיקוף), יחידה אחת לחתיכה.
-   ElevenLabs: /v1/text-to-speech/<voice>/with-timestamps. עברית: eleven_turbo_v2_5 או eleven_flash_v2_5
+   ElevenLabs: /v1/text-to-speech/<voice>/with-timestamps. עברית: eleven_v3 (turbo/flash 2.5 לא תומכים בעברית)
    (ניתן לשנות ב-ELEVEN_TTS_MODEL). הקול: ELEVEN_TTS_VOICE (ברירת מחדל: Daniel, כמו המורה בשיקוף).
    תשובה זורמת (רווח כל 4 שניות) כמו ב-voice.mjs, כדי לא ליפול על 60 השניות של נטליפיי. */
 
@@ -14,7 +14,7 @@ import { gate, json } from "./lib/gate.cjs";
 const HEARTBEAT_MS = 4000;
 const MAX_CHARS = 1500;
 const VOICE = process.env.ELEVEN_TTS_VOICE || process.env.ELEVEN_VOICE_T || "onwK4e9ZLuTAKqWW03F9";
-const MODEL = process.env.ELEVEN_TTS_MODEL || "eleven_turbo_v2_5";
+const MODEL = process.env.ELEVEN_TTS_MODEL || "eleven_v3";
 const FORMAT = process.env.ELEVEN_FORMAT || "mp3_44100_64";
 
 const CORS = {
@@ -61,7 +61,8 @@ async function speak({ apiKey, text }) {
   const res = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${VOICE}/with-timestamps?output_format=${encodeURIComponent(FORMAT)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "xi-api-key": apiKey },
-    body: JSON.stringify({ text, model_id: MODEL, language_code: "he" }),
+    /* language_code נשלח רק אם הוגדר ELEVEN_TTS_LANG — turbo/flash דוחים "he"; eleven_v3 מזהה עברית לבד */
+    body: JSON.stringify({ text, model_id: MODEL, ...(process.env.ELEVEN_TTS_LANG ? { language_code: process.env.ELEVEN_TTS_LANG } : {}) }),
   });
   if (!res.ok) {
     const errText = await res.text();
