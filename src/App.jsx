@@ -1244,6 +1244,218 @@ if (typeof window !== "undefined") {
   window.addEventListener("pointerup", rec, true);
   window.addEventListener("touchend", (e) => { const p = e.changedTouches && e.changedTouches[0]; if (p) LAST_POINT = { x: p.clientX, y: p.clientY }; }, true);
 }
+/* ─── ✍️ שכבת הלומד על כל טקסט (צ'אט 20) ───
+   ההכרעה: שכבת הלומד (מרקר, הדגשה, הערה) היא של הלומד, לא של הטקסט — ולכן היא מגיעה
+   לכל מקום שיש בו טקסט, גם למה שהמכונה כתבה (סיכום, מושגים, כרטיסיות). הסימון על
+   טקסט של ערוץ נשמר ב-book.flex.layer[מפתח], והמפתח כולל תמצית של הנוסח: סיכום
+   שהופק מחדש מקבל מפתח חדש, והסימונים על הנוסח הישן נשארים (עם הנוסח) ונכנסים לשיקוף.
+   הכלים משותפים לטקסט הספר ולטקסט הערוצים. */
+const HL_COLORS = { y: "#fff3a0", g: "#d3f7c6", p: "#ffd6e8" };
+const SENT_RE = /[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g;
+const splitSents = (p) => ((p || "").match(SENT_RE) || [p]).map((t) => t.trim()).filter(Boolean);
+function textHash(t) { let h = 5381; for (let i = 0; i < t.length; i++) h = ((h << 5) + h + t.charCodeAt(i)) | 0; return (h >>> 0).toString(36); }
+/* מיקום תו בתוך span של משפט (מספרי הערות לא נספרים) */
+function offsetInSpan(span, node, off) {
+  if (!span || !node) return null;
+  let total = 0, found = false;
+  const walk = (el) => {
+    if (found || !el) return;
+    if (el.nodeType === 3) {
+      if (el === node) { total += off; found = true; }
+      else total += el.nodeValue.length;
+    } else if (el.classList && el.classList.contains("note-pin")) {
+      /* מספרי הערות לא נספרים */
+    } else {
+      for (const c of el.childNodes) { walk(c); if (found) return; }
+    }
+  };
+  walk(span);
+  return found ? total : null;
+}
+function snapWord(txt, s, e) {
+  s = Math.max(0, Math.min(s, txt.length));
+  e = Math.max(s, Math.min(e, txt.length));
+  while (s > 0 && !/\s/.test(txt[s - 1])) s--;
+  while (e < txt.length && !/\s/.test(txt[e])) e++;
+  while (s < e && /\s/.test(txt[s])) s++;
+  while (e > s && /\s/.test(txt[e - 1])) e--;
+  return [s, e];
+}
+function applyWordPatch(w, s, e, patch) {
+  const out = [];
+  let gaps = [[s, e]];
+  for (const r of w) {
+    if (r.e <= s || r.s >= e) { out.push(r); continue; }
+    if (r.s < s) out.push({ ...r, e: s });
+    if (r.e > e) out.push({ ...r, s: e });
+    const os = Math.max(r.s, s), oe = Math.min(r.e, e);
+    if (patch) out.push({ s: os, e: oe, b: r.b, u: r.u, hl: r.hl, ...patch });
+    gaps = gaps.flatMap(([gs, ge]) => {
+      if (oe <= gs || os >= ge) return [[gs, ge]];
+      const parts = [];
+      if (gs < os) parts.push([gs, os]);
+      if (ge > oe) parts.push([oe, ge]);
+      return parts;
+    });
+  }
+  if (patch) for (const [gs, ge] of gaps) if (ge > gs) out.push({ s: gs, e: ge, ...patch });
+  return out
+    .map((r) => { const o = { s: r.s, e: r.e }; if (r.b) o.b = 1; if (r.u) o.u = 1; if (r.hl) o.hl = r.hl; return o; })
+    .filter((r) => (r.b || r.u || r.hl) && r.e > r.s)
+    .sort((a, b) => a.s - b.s);
+}
+/* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין (txt = הנוסח המוצג) */
+function renderMarked(txt, mk, pend) {
+  const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
+  if (!mk && !pend) return txt;
+  const base = {};
+  if (mk) {
+    if (mk.b) base.fontWeight = 800;
+    if (mk.u) base.textDecoration = "underline";
+    if (mk.hl) base.background = HL_COLORS[mk.hl];
+  }
+  if (!w.length && !pend) return <span style={base}>{txt}</span>;
+  const pts = new Set([0, txt.length]);
+  const clamp = (n) => Math.max(0, Math.min(n, txt.length));
+  w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
+  if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
+  const arr = [...pts].sort((a, b) => a - b);
+  const nodes = [];
+  for (let k = 0; k < arr.length - 1; k++) {
+    const s = arr[k], e = arr[k + 1];
+    if (e <= s) continue;
+    const piece = txt.slice(s, e);
+    const r = w.find((r2) => clamp(r2.s) <= s && clamp(r2.e) >= e);
+    const isPend = pend && clamp(pend.s) <= s && clamp(pend.e) >= e;
+    const st = { ...base };
+    if (r) {
+      if (r.b) st.fontWeight = 800;
+      if (r.u) st.textDecoration = "underline";
+      if (r.hl) st.background = HL_COLORS[r.hl];
+    }
+    if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
+    nodes.push(<span key={k} className={isPend ? "ws-pend" : undefined} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
+  }
+  return nodes;
+}
+/* סרגל הכלים של השכבה — אותם כפתורים בכל מקום */
+function MarkTools({ onMark, onNote, onClear }) {
+  return (
+    <>
+      <span className="mark-title">✍️ שכבת הלומד:</span>
+      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => onMark({ b: 1 })}>B מודגש</button>
+      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => onMark({ u: 1 })}>U קו תחתון</button>
+      <button className="mark-btn hl-y" onClick={() => onMark({ hl: "y" })}>מרקר</button>
+      <button className="mark-btn hl-g" onClick={() => onMark({ hl: "g" })}>מרקר</button>
+      <button className="mark-btn hl-p" onClick={() => onMark({ hl: "p" })}>מרקר</button>
+      <button className="mark-btn" onClick={onNote}>📝 הערה</button>
+      <button className="mark-btn" onClick={() => onMark(null)}>✕ נקה עיצוב</button>
+      <button className="mark-btn" onClick={onClear}>✕ בטל סימון</button>
+    </>
+  );
+}
+/* טקסט של ערוץ עם שכבת הלומד. layer = book.flex.layer; onChange(key, entry) שומר.
+   base = "<פרק>:<ערוץ>:<חלק>"; המפתח הסופי מוסיף את תמצית הנוסח. */
+function AiLayer({ text, base, layer, onChange, on, transcribe, as: Tag = "p", className = "" }) {
+  const sents = useMemo(() => splitSents(text), [text]);
+  const key = base + ":" + textHash(text || "");
+  const entry = (layer && layer[key]) || {};
+  const marks = entry.marks || {}, notes = entry.notes || {};
+  const [sel, setSel] = useState(null);      // {a,b} טווח משפטים | {i,s,e} מילים
+  const [noteEd, setNoteEd] = useState(null); // {i, initial}
+  const rootRef = useRef(null);
+  const justRef = useRef(false);
+  useEffect(() => { setSel(null); setNoteEd(null); }, [key]);
+  useEffect(() => {
+    if (!sel) return;
+    const onDown = (e) => { if (rootRef.current?.contains(e.target) || e.target.closest?.(".mark-bar, .note-ed")) return; setSel(null); };
+    const onKey = (e) => { if (e.key === "Escape") setSel(null); };
+    document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [sel]);
+  if (!text) return null;
+  const sid = (i) => `L:${key}:${i}`;
+  const save = (patch) => onChange(key, { ...entry, sents, ...patch, at: Date.now() });
+  const armJust = () => { justRef.current = true; setTimeout(() => { justRef.current = false; }, 0); }; // הקליק שאחרי הגרירה לא מבטל אותה
+  const onMouseUp = () => {
+    if (!on) return;
+    const s = window.getSelection?.();
+    if (!s || s.isCollapsed) return;
+    const idxOf = (node) => { let el = node && (node.nodeType === 3 ? node.parentElement : node); while (el && !(el.dataset && el.dataset.li !== undefined)) el = el.parentElement; return el ? +el.dataset.li : null; };
+    const a = idxOf(s.anchorNode), b = idxOf(s.focusNode);
+    if (a === null || b === null) return;
+    if (a === b) {
+      const span = rootRef.current.querySelector(`[data-li="${a}"]`);
+      const so = offsetInSpan(span, s.anchorNode, s.anchorOffset), eo = offsetInSpan(span, s.focusNode, s.focusOffset);
+      if (so !== null && eo !== null && so !== eo) {
+        const [ws, we] = snapWord(sents[a], Math.min(so, eo), Math.max(so, eo));
+        if (we > ws) { setSel(we - ws >= sents[a].trim().length ? { a, b: a } : { i: a, s: ws, e: we }); s.removeAllRanges(); armJust(); return; }
+      }
+    }
+    setSel({ a: Math.min(a, b), b: Math.max(a, b) }); s.removeAllRanges(); armJust();
+  };
+  const onClick = (i) => {
+    if (!on) return;
+    if (justRef.current) { justRef.current = false; return; }
+    if (sel && sel.a !== undefined && sel.b === undefined) setSel({ a: Math.min(sel.a, i), b: Math.max(sel.a, i) });
+    else if (sel && sel.a === i && sel.b === i) setSel(null);
+    else setSel({ a: i, b: i });
+  };
+  const applyMark = (patch) => {
+    if (!sel) return;
+    const m = { ...marks };
+    if (sel.i !== undefined) {
+      const cur = { ...(m[sel.i] || {}) };
+      const w = applyWordPatch(Array.isArray(cur.w) ? cur.w : [], sel.s, sel.e, patch);
+      if (w.length) cur.w = w; else delete cur.w;
+      if (patch === null && !w.length) { delete cur.b; delete cur.u; delete cur.hl; }
+      if (Object.keys(cur).length) m[sel.i] = cur; else delete m[sel.i];
+    } else {
+      for (let i = sel.a; i <= sel.b; i++) {
+        if (patch === null) delete m[i];
+        else { const kept = m[i] && m[i].w ? { w: m[i].w } : {}; m[i] = { ...(m[i] || {}), ...kept, ...patch }; }
+      }
+    }
+    save({ marks: m }); setSel(null);
+  };
+  const saveNote = (i, txt) => {
+    const n = { ...notes };
+    if (txt.trim()) n[i] = { t: txt.trim(), src: (sents[i] || "").slice(0, 160) }; else delete n[i];
+    save({ notes: n }); setNoteEd(null); setSel(null);
+  };
+  const noteIdx = Object.keys(notes).map(Number).sort((x, y) => x - y);
+  const anchor = sel ? (sel.i !== undefined ? sel.i : sel.b) : null;
+  return (
+    <>
+      <Tag ref={rootRef} className={"ai-layer " + className} onMouseUp={onMouseUp}>
+        {sents.map((t, i) => {
+          const inRange = sel && sel.a !== undefined && i >= sel.a && i <= sel.b;
+          return (
+            <span key={i} data-li={i} data-si={sid(i)} className={"scroll-sent " + (on ? "clickable " : "") + (inRange ? "in-range " : "") + (notes[i] ? "has-note " : "")} onClick={() => onClick(i)}>
+              {renderMarked(t, marks[i], sel && sel.i === i ? sel : null)}
+              {notes[i] && <sup className="note-pin" title={notes[i].t} onClick={(e) => { e.stopPropagation(); setNoteEd({ i, initial: notes[i].t }); }}>[{noteIdx.indexOf(i) + 1}]</sup>}{" "}
+            </span>
+          );
+        })}
+      </Tag>
+      {noteIdx.length > 0 && (
+        <ol className="ai-notes">
+          {noteIdx.map((i, k) => <li key={i} onClick={() => setNoteEd({ i, initial: notes[i].t })}><b>[{k + 1}]</b> {notes[i].t}</li>)}
+        </ol>
+      )}
+      {on && sel && (
+        <FloatingMarkBar anchorIdx={sid(anchor)} word={sel.i !== undefined}>
+          <MarkTools onMark={applyMark} onNote={() => setNoteEd({ i: sel.i !== undefined ? sel.i : sel.a, initial: notes[sel.i !== undefined ? sel.i : sel.a]?.t || "" })} onClear={() => setSel(null)} />
+        </FloatingMarkBar>
+      )}
+      {noteEd && (
+        <NoteEditor key={noteEd.i} initial={noteEd.initial} src={(sents[noteEd.i] || "").slice(0, 90)} transcribe={transcribe}
+          onSave={(t) => saveNote(noteEd.i, t)} onCancel={() => setNoteEd(null)} />
+      )}
+    </>
+  );
+}
+
 function FloatingMarkBar({ anchorIdx, word, children }) {
   const [pos, setPos] = useState(null);
   const ref = useRef(null);
@@ -1251,7 +1463,7 @@ function FloatingMarkBar({ anchorIdx, word, children }) {
   useEffect(() => { offRef.current = null; }, [anchorIdx, word]);
   useEffect(() => {
     const place = () => {
-      const el = word ? document.querySelector(".ws-pend") : anchorIdx == null ? null : document.querySelector(`[data-si="${anchorIdx}"], #para-${anchorIdx}`);
+      const el = word ? document.querySelector(".ws-pend") : anchorIdx == null ? null : (document.querySelector(`[data-si="${String(anchorIdx).replace(/"/g, '\\"')}"]`) || document.getElementById("para-" + anchorIdx));
       if (!el) { setPos(null); return; }
       const r = el.getBoundingClientRect();
       const box = el.closest(".screen-body")?.getBoundingClientRect();
@@ -1295,6 +1507,24 @@ function FloatingMarkBar({ anchorIdx, word, children }) {
    פסקת "הסולם:" (או "פירוש:" מצלם דף חכם) = פירוש; הפסקה שלפניה (האות) = הארמית, מובלטת.
    השער "משוך מאמר" מביא את הארמית ואת הסולם ישירות מספריא, לפי פרשה ואותיות — בלי עיבוד בדרך. */
 const SULAM_RE = /^(הסולם|פירוש):/;
+/* ─── נִקּוּד (צ'אט 20) ───
+   הניקוד הוא שכבת תצוגה: המשפט השמור נשאר בלי ניקוד, והנוסח המנוקד (מהנקדן של דיקטה,
+   דרך netlify/functions/nikud) נשמר לידו ב-book.flex.nikud[i]. המרקרים נשמרים לפי מיקום
+   התו במשפט השמור, ולכן כל מעבר בין שני הנוסחים עובר דרך nikudOff. */
+const NIKUD_MARK = /[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/;
+const NIKUD_MARKS = /[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/g;
+const stripNikud = (t) => (t || "").replace(NIKUD_MARKS, "");
+const NIKUD_BATCH = 3000; // תווים לבקשה אחת
+const NIKUD_SCROLL_MAX = 80000; // במגילה מנקדים ספר שלם רק עד הגודל הזה; ספר גדול יותר מנוקד פרק-פרק
+/* ממיר מיקום תו בין שני נוסחים של אותו משפט (עם ניקוד ובלי): סופר אותיות, מדלג על סימני ניקוד */
+function nikudOff(from, to, off) {
+  let n = 0;
+  for (let k = 0; k < off && k < from.length; k++) if (!NIKUD_MARK.test(from[k])) n++;
+  let k = 0;
+  while (k < to.length && n > 0) { if (!NIKUD_MARK.test(to[k])) n--; k++; }
+  while (k < to.length && NIKUD_MARK.test(to[k])) k++;
+  return k;
+}
 const isSulamPara = (sentences, g) => !!g && SULAM_RE.test(sentences[g[0]] || "");
 const SEFARIA = "https://www.sefaria.org/api";
 /* שמות הפרשות כפי שספריא קוראת להן ב-"Sulam on Zohar" — המספור של האותיות שם זהה לספר המודפס */
@@ -1441,6 +1671,17 @@ function mirrorMaterial(book) {
       return { text: text.slice(0, 240), color: mk.hl || (ranges.find((r) => r.hl) || {}).hl || "" };
     })
     .filter((m) => m.text);
+  /* ✍️ השכבה על טקסט של ערוצים (סיכום, מושגים, כרטיסיות) — גם היא מהלומד, ונכנסת לשיחה */
+  for (const e of Object.values(book.flex?.layer || {})) {
+    const ss = Array.isArray(e.sents) ? e.sents : [];
+    for (const [i, n] of Object.entries(e.notes || {})) if ((n?.t || "").trim()) notes.push({ src: (n.src || ss[i] || "").slice(0, 200), text: n.t.trim(), ai: true });
+    for (const [i, mk] of Object.entries(e.marks || {})) {
+      const t = ss[i]; if (!t) continue;
+      const ranges = Array.isArray(mk.w) ? mk.w.filter((r) => r.e > r.s) : [];
+      const text = ranges.length && !mk.hl && !mk.b && !mk.u ? ranges.map((r) => t.slice(r.s, r.e).trim()).filter(Boolean).join(" … ") : t;
+      if (text) marks.push({ text: text.slice(0, 240), color: mk.hl || (ranges.find((r) => r.hl) || {}).hl || "", ai: true });
+    }
+  }
   return { notes, marks };
 }
 /* חלוקת התסריט לחתיכות של עד 700 תווים — בלי לשבור רפליקה.
@@ -1474,21 +1715,22 @@ const voiceKey = (id) => "ltv-voice-" + id;
  
 /* ─── תצוגות הערוצים ─── */
  
-function SummaryView({ data, question }) {
+function SummaryView({ data, question, layer }) {
   const [mode, setMode] = useState("long");
+  const L = (part, text, extra) => layer ? <AiLayer {...layer} base={layer.base + ":" + part} text={text} {...(extra || {})} /> : null;
   return (
     <div>
       <div className="pill-row">
         <button className={"pill " + (mode === "long" ? "on" : "")} onClick={() => setMode("long")}>מפורט</button>
         <button className={"pill " + (mode === "short" ? "on" : "")} onClick={() => setMode("short")}>קצר</button>
       </div>
-      <p className="prose">{mode === "long" ? data.long : data.short}</p>
+      {layer ? L(mode, mode === "long" ? data.long : data.short, { className: "prose" }) : <p className="prose">{mode === "long" ? data.long : data.short}</p>}
       {data.forQuestion && question && (
         <div className="my-q my-q-answer">
           <span className="my-q-ic">❓</span>
           <span className="my-q-body">
             <small>לשאלה שאתה נושא — «{question}»</small>
-            {data.forQuestion}
+            {layer ? L("q", data.forQuestion, { as: "span" }) : data.forQuestion}
           </span>
         </div>
       )}
@@ -1496,7 +1738,8 @@ function SummaryView({ data, question }) {
   );
 }
  
-function ConceptsView({ data, onTrace }) {
+function ConceptsView({ data, onTrace, layer }) {
+  const L = (part, text, extra) => layer ? <AiLayer {...layer} base={layer.base + ":" + part} text={text} {...(extra || {})} /> : text;
   return (
     <div className="concepts">
       {onTrace && <p className="fm-hint">💡 לחיצה על מושג או כלל קופצת למקור בטקסט ומסמנת אותו בירוק.</p>}
@@ -1510,7 +1753,7 @@ function ConceptsView({ data, onTrace }) {
                 onClick={onTrace ? () => onTrace(c.term) : undefined}
                 title={onTrace ? "הצג את המקור בטקסט" : undefined}
               >{c.term}</span>
-              <span className="def">{c.definition}</span>
+              {layer ? L("c" + i, c.definition, { as: "span", className: "def" }) : <span className="def">{c.definition}</span>}
             </div>
           ))}
         </section>
@@ -1522,10 +1765,10 @@ function ConceptsView({ data, onTrace }) {
             {data.rules.map((r, i) => (
               <li
                 key={i}
-                className={onTrace ? "traceable" : undefined}
-                onClick={onTrace ? () => onTrace(r) : undefined}
-                title={onTrace ? "הצג את המקור בטקסט" : undefined}
-              >{r}</li>
+                className={onTrace && !layer ? "traceable" : undefined}
+                onClick={onTrace && !layer ? () => onTrace(r) : undefined}
+                title={onTrace && !layer ? "הצג את המקור בטקסט" : undefined}
+              >{layer ? <>{L("r" + i, r, { as: "span" })}{onTrace && <button className="trace-btn" title="הצג את המקור בטקסט" onClick={() => onTrace(r)}>↪ למקור</button>}</> : r}</li>
             ))}
           </ul>
         </section>
@@ -1681,8 +1924,10 @@ function QuizView({ data, saved, onComplete }) {
   );
 }
  
-function CardsView({ data }) {
+function CardsView({ data, layer }) {
   const [flipped, setFlipped] = useState({});
+  const [open, setOpen] = useState(null); // כרטיסייה פתוחה לסימון (עם שכבת הלומד)
+  const L = (part, text) => <AiLayer {...layer} base={layer.base + ":" + part} text={text} as="div" className="card-text" />;
   return (
     <div className="cards">
       {(data.cards || []).map((c, i) => (
@@ -1697,7 +1942,21 @@ function CardsView({ data }) {
           </span>
         </button>
       ))}
-      <p className="cards-hint">לחיצה על כרטיסייה הופכת אותה</p>
+      <p className="cards-hint">לחיצה על כרטיסייה הופכת אותה{layer?.on ? " · ✍️ לסימון והערה: פתח כרטיסייה כטקסט" : ""}</p>
+      {layer?.on && (
+        <div className="card-open">
+          <select className="scan-mode-select" value={open ?? ""} onChange={(e) => setOpen(e.target.value === "" ? null : +e.target.value)} aria-label="כרטיסייה לסימון">
+            <option value="">✍️ פתח כרטיסייה כטקסט…</option>
+            {(data.cards || []).map((c, i) => <option key={i} value={i}>{i + 1}. {c.front.slice(0, 60)}</option>)}
+          </select>
+          {open !== null && data.cards?.[open] && (
+            <div className="card-open-body">
+              <div className="card-open-face"><b>שאלה:</b> {L("f" + open, data.cards[open].front)}</div>
+              <div className="card-open-face"><b>תשובה:</b> {L("b" + open, data.cards[open].back)}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2041,6 +2300,15 @@ export default function LearningTV() {
   const [transLoading, setTransLoading] = useState(false);
   const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
+  const [nikudOn, setNikudOn] = useState(() => { try { return localStorage.getItem("lomedtv-nikud") === "on"; } catch { return false; } }); // נִ הניקוד מוצג?
+  const [nikudMsg, setNikudMsg] = useState("");
+  const nikudRun = useRef(0); // מספר הריצה הנוכחית; כיבוי או ריצה חדשה עוצרים את הקודמת
+  /* ✍️ שכבת הלומד על טקסט של ערוצים (סיכום, מושגים, כרטיסיות) — נשמרת ב-book.flex.layer */
+  const setLayerEntry = (k, entry) => {
+    const b = bookRef.current; if (!b) return;
+    persist({ ...b, flex: { ...(b.flex || {}), layer: { ...(b.flex?.layer || {}), [k]: entry } } });
+  };
+  const layerFor = (base) => ({ base, layer: book?.flex?.layer || {}, onChange: setLayerEntry, on: layerOn, transcribe: (blob) => transcribeMedia(blob, null, "הערה קצרה של לומד") });
   const toggleLayer = () => {
     const next = !layerOn;
     try { localStorage.setItem("lomedtv-layer", next ? "on" : "off"); } catch {}
@@ -2479,6 +2747,76 @@ export default function LearningTV() {
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
      גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
   const { sentences, paraGroups, chapterRanges } = useMemo(() => bookSentences(book), [book?.id, book?.chapters?.length]);
+
+  /* נִ ניקוד: הנוסח המנוקד של משפט, אם הניקוד מוצג ויש נוסח תקף (אותן אותיות בדיוק) */
+  const vocOf = (i) => {
+    if (!nikudOn) return null;
+    const v = book?.flex?.nikud?.[i];
+    return v && stripNikud(v) === sentences[i] ? v : null;
+  };
+  /* מנקד את מה שמוצג (הפרק הפתוח, או כל הספר במגילה): רק משפטים שאין בהם ניקוד ועוד לא נוקדו */
+  const runNikud = async () => {
+    const b0 = bookRef.current;
+    if (!b0) return;
+    const run = ++nikudRun.current;
+    const [rs, re] = view === "tv" ? (chapterRanges[chIdx] || [0, 0]) : [0, sentences.length];
+    const have = b0.flex?.nikud || {};
+    const todo = [];
+    for (let i = rs; i < re; i++) {
+      const t = sentences[i];
+      if (!t || NIKUD_MARK.test(t) || !/[א-ת]/.test(t)) continue;
+      if (have[i] && stripNikud(have[i]) === t) continue;
+      todo.push(i);
+    }
+    if (!todo.length) return;
+    const batches = [];
+    let cur = [], size = 0;
+    for (const i of todo) {
+      const len = sentences[i].length;
+      if (cur.length && size + len > NIKUD_BATCH) { batches.push(cur); cur = []; size = 0; }
+      cur.push(i); size += len;
+    }
+    if (cur.length) batches.push(cur);
+    let done = 0;
+    try {
+      for (const batch of batches) {
+        if (nikudRun.current !== run) return;
+        setNikudMsg(`מנקד… ${done} מתוך ${todo.length} משפטים`);
+        const data = await postJson("/.netlify/functions/nikud", { texts: batch.map((i) => sentences[i]), genre: "rabbinic" });
+        if (nikudRun.current !== run) return;
+        const b = bookRef.current;
+        if (!b || b.id !== b0.id) return;
+        const nikud = { ...(b.flex?.nikud || {}) };
+        batch.forEach((i, k) => {
+          const v = data.texts?.[k];
+          if (v && v !== sentences[i] && stripNikud(v) === sentences[i]) nikud[i] = v;
+        });
+        await persist({ ...b, flex: { ...(b.flex || {}), nikud } });
+        done += batch.length;
+      }
+      setNikudMsg("");
+    } catch (e) {
+      if (nikudRun.current === run) { setNikudMsg("הניקוד לא הושלם: " + e.message); setTimeout(() => setNikudMsg(""), 7000); }
+    }
+  };
+  const toggleNikud = () => {
+    const next = !nikudOn;
+    try { localStorage.setItem("lomedtv-nikud", next ? "on" : "off"); } catch {}
+    setNikudOn(next);
+    if (!next) { nikudRun.current++; setNikudMsg(""); }
+  };
+  /* כשהניקוד דלוק: כל פרק או ספר שנפתח מנוקד פעם אחת, ונשמר עם הספר */
+  useEffect(() => {
+    if (!nikudOn || !book || !sentences.length) return;
+    if (!(view === "tv" && channel === "read") && view !== "scroll") return;
+    if (view === "scroll" && sentences.reduce((n, t) => n + t.length, 0) > NIKUD_SCROLL_MAX) {
+      setNikudMsg("ספר גדול: הניקוד נוסף פרק-פרק, בערוץ 00 של כל פרק");
+      const t0 = setTimeout(() => setNikudMsg(""), 6000);
+      return () => clearTimeout(t0);
+    }
+    const t = setTimeout(runNikud, 400);
+    return () => clearTimeout(t);
+  }, [nikudOn, book?.id, sentences.length, chIdx, view, channel]);
  
   useEffect(() => {
     (async () => {
@@ -3049,65 +3387,18 @@ export default function LearningTV() {
     setCheckedHits([]);
   };
 
-  const HL_COLORS = { y: "#fff3a0", g: "#d3f7c6", p: "#ffd6e8" };
-
   /* ── סימון ברמת מילה ──
      המרקרים נשמרים כרגיל פר-משפט (book.marks[i]), ובנוסף אפשר טווחי-מילים:
-     marks[i].w = [{s,e,b?,u?,hl?}] — אינדקסי תווים בתוך המשפט, מיושרים לגבולות מילים. */
-  const offsetInSpan = (span, node, off) => {
-    if (!span || !node) return null;
-    let total = 0, found = false;
-    const walk = (el) => {
-      if (found || !el) return;
-      if (el.nodeType === 3) {
-        if (el === node) { total += off; found = true; }
-        else total += el.nodeValue.length;
-      } else if (el.classList && el.classList.contains("note-pin")) {
-        /* מספרי הערות לא נספרים */
-      } else {
-        for (const c of el.childNodes) { walk(c); if (found) return; }
-      }
-    };
-    walk(span);
-    return found ? total : null;
-  };
-  const snapWord = (txt, s, e) => {
-    s = Math.max(0, Math.min(s, txt.length));
-    e = Math.max(s, Math.min(e, txt.length));
-    while (s > 0 && !/\s/.test(txt[s - 1])) s--;
-    while (e < txt.length && !/\s/.test(txt[e])) e++;
-    while (s < e && /\s/.test(txt[s])) s++;
-    while (e > s && /\s/.test(txt[e - 1])) e--;
-    return [s, e];
-  };
-  const applyWordPatch = (w, s, e, patch) => {
-    const out = [];
-    let gaps = [[s, e]];
-    for (const r of w) {
-      if (r.e <= s || r.s >= e) { out.push(r); continue; }
-      if (r.s < s) out.push({ ...r, e: s });
-      if (r.e > e) out.push({ ...r, s: e });
-      const os = Math.max(r.s, s), oe = Math.min(r.e, e);
-      if (patch) out.push({ s: os, e: oe, b: r.b, u: r.u, hl: r.hl, ...patch });
-      gaps = gaps.flatMap(([gs, ge]) => {
-        if (oe <= gs || os >= ge) return [[gs, ge]];
-        const parts = [];
-        if (gs < os) parts.push([gs, os]);
-        if (ge > oe) parts.push([oe, ge]);
-        return parts;
-      });
-    }
-    if (patch) for (const [gs, ge] of gaps) if (ge > gs) out.push({ s: gs, e: ge, ...patch });
-    return out
-      .map((r) => { const o = { s: r.s, e: r.e }; if (r.b) o.b = 1; if (r.u) o.u = 1; if (r.hl) o.hl = r.hl; return o; })
-      .filter((r) => (r.b || r.u || r.hl) && r.e > r.s)
-      .sort((a, b) => a.s - b.s);
-  };
+     marks[i].w = [{s,e,b?,u?,hl?}] — אינדקסי תווים בתוך המשפט, מיושרים לגבולות מילים.
+     offsetInSpan / snapWord / applyWordPatch / renderMarked — ברמת המודול (משותפים ל-AiLayer). */
+  /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין */
   const captureWordSel = (sel, span, i) => {
     const txt = sentences[i] || "";
-    const so = offsetInSpan(span, sel.anchorNode, sel.anchorOffset);
-    const eo = offsetInSpan(span, sel.focusNode, sel.focusOffset);
+    let so = offsetInSpan(span, sel.anchorNode, sel.anchorOffset);
+    let eo = offsetInSpan(span, sel.focusNode, sel.focusOffset);
     if (so === null || eo === null || so === eo) return false;
+    const voc = vocOf(i); // המסך מציג את הנוסח המנוקד: ממירים למיקום במשפט השמור
+    if (voc) { so = nikudOff(voc, txt, so); eo = nikudOff(voc, txt, eo); if (so === eo) return false; }
     const [ws, we] = snapWord(txt, Math.min(so, eo), Math.max(so, eo));
     if (we <= ws) return false;
     if (we - ws >= txt.trim().length) {
@@ -3120,39 +3411,11 @@ export default function LearningTV() {
     dragJustRef.current = true;
     return true;
   };
-  /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין */
-  const renderSentText = (txt, mk, pend) => {
-    const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
-    if (!mk && !pend) return txt;
-    const base = {};
-    if (mk) {
-      if (mk.b) base.fontWeight = 800;
-      if (mk.u) base.textDecoration = "underline";
-      if (mk.hl) base.background = HL_COLORS[mk.hl];
-    }
-    if (!w.length && !pend) return <span style={base}>{txt}</span>;
-    const pts = new Set([0, txt.length]);
-    const clamp = (n) => Math.max(0, Math.min(n, txt.length));
-    w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
-    if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
-    const arr = [...pts].sort((a, b) => a - b);
-    const nodes = [];
-    for (let k = 0; k < arr.length - 1; k++) {
-      const s = arr[k], e = arr[k + 1];
-      if (e <= s) continue;
-      const piece = txt.slice(s, e);
-      const r = w.find((r2) => clamp(r2.s) <= s && clamp(r2.e) >= e);
-      const isPend = pend && clamp(pend.s) <= s && clamp(pend.e) >= e;
-      const st = { ...base };
-      if (r) {
-        if (r.b) st.fontWeight = 800;
-        if (r.u) st.textDecoration = "underline";
-        if (r.hl) st.background = HL_COLORS[r.hl];
-      }
-      if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
-      nodes.push(<span key={k} className={isPend ? "ws-pend" : undefined} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
-    }
-    return nodes;
+  const renderSentText = (plain, mk, pend, voc) => {
+    const txt = voc || plain;
+    const cv = voc ? (r) => ({ ...r, s: nikudOff(plain, voc, r.s), e: nikudOff(plain, voc, r.e) }) : (r) => r;
+    const w = ((mk && Array.isArray(mk.w)) ? mk.w : []).map(cv);
+    return renderMarked(txt, mk ? { ...mk, w } : mk, pend ? cv(pend) : pend);
   };
 
   /* בקשה ג': סימון קטע בתצוגת הפרק (ערוץ 00) —
@@ -3650,6 +3913,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
+                <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? "הניקוד מוצג — לחץ להסתיר" : "הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)"} aria-label="ניקוד" aria-pressed={nikudOn}>בְּ</button>
                 <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? "שכבת הלומד מוצגת — לחץ להסתיר" : "שכבת הלומד מוסתרת — לחץ להציג"} aria-label="שכבת הלומד">✍️</button>
                 <button
                   className={"font-btn" + (cloudUser ? (syncState === "err" ? " cloud-err" : " cloud-on") : "")}
@@ -4209,12 +4473,12 @@ export default function LearningTV() {
                         <strong>{FLEX_ACTIONS.find((a) => a.id === flexResult.channel)?.label} · על הקטע שסימנת</strong>
                         <button className="mini-btn" onClick={() => setFlexResult(null)}>✕ חזרה לטקסט</button>
                       </div>
-                      {flexResult.channel === "summary" && <SummaryView data={flexResult.data} question={openQ} />}
-                      {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} />}
+                      {flexResult.channel === "summary" && <SummaryView data={flexResult.data} question={openQ} layer={layerFor("flex:summary")} />}
+                      {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} layer={layerFor("flex:concepts")} />}
                       {flexResult.channel === "mindmap" && <MindmapView data={flexResult.data} />}
                       {flexResult.channel === "flow" && <FlowView data={flexResult.data} />}
                       {flexResult.channel === "quiz" && <QuizView data={flexResult.data} saved={null} onComplete={() => {}} />}
-                      {flexResult.channel === "cards" && <CardsView data={flexResult.data} />}
+                      {flexResult.channel === "cards" && <CardsView data={flexResult.data} layer={layerFor("flex:cards")} />}
                     </div>
                   )}
  
@@ -4245,7 +4509,7 @@ export default function LearningTV() {
                                   }
                                   onClick={() => onSentenceClick(i)}
                                 >
-                                  {renderSentText(s, book.marks?.[i], wordSel && wordSel.i === i ? wordSel : null)}
+                                  {renderSentText(s, book.marks?.[i], wordSel && wordSel.i === i ? wordSel : null, vocOf(i))}
                                   {book.notes?.[i] && (
                                     <sup
                                       className="note-pin"
@@ -4370,7 +4634,7 @@ export default function LearningTV() {
                                 onClick={() => onReadSentClick(i)}
                               >
                                 {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
-                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null)}
+                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i))}
                                 {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
                                 {book.notes?.[i] && (
                                   <sup
@@ -4396,8 +4660,8 @@ export default function LearningTV() {
  
               {view === "tv" && channel && channel !== "tts" && channel !== "read" && !loading && !error && data && (
                 <>
-                  {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} question={openQ} />}
-                  {channel === "concepts" && <ConceptsView data={data} onTrace={traceToSource} />}
+                  {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} question={openQ} layer={layerFor(chIdx + ":summary")} />}
+                  {channel === "concepts" && <ConceptsView data={data} onTrace={traceToSource} layer={layerFor(chIdx + ":concepts")} />}
                   {channel === "mindmap" && <MindmapView data={data} />}
                   {channel === "flow" && <FlowView data={data} />}
                   {channel === "quiz" && (
@@ -4408,7 +4672,7 @@ export default function LearningTV() {
                       onComplete={(s, t) => markDone(chIdx, s, t)}
                     />
                   )}
-                  {channel === "cards" && <CardsView key={key(chIdx, channel)} data={data} />}
+                  {channel === "cards" && <CardsView key={key(chIdx, channel)} data={data} layer={layerFor(chIdx + ":cards")} />}
                 </>
               )}
             </div>
@@ -4451,6 +4715,7 @@ export default function LearningTV() {
         onChange={onMediaPicked}
       />
 
+      {nikudMsg && <div className="nikud-msg" role="status">נִ · {nikudMsg}</div>}
       {view === "library" && (
         <div className="deck">
           <button className="ch-key gold" onClick={() => { setError(null); setView("intake"); }} disabled={!!fileBusy}>
@@ -4880,6 +5145,16 @@ const css = `
   background-image:radial-gradient(rgba(0,0,0,.03) 1px,transparent 1px);background-size:5px 5px;
 }
 .prose{line-height:1.9;font-size:1.05rem;white-space:pre-wrap}
+.ai-layer{white-space:pre-wrap}
+.ai-layer .scroll-sent.clickable{cursor:text}
+.ai-notes{margin:8px 0 0;padding-inline-start:18px;font-size:.92rem;color:#5a4a2a;line-height:1.7}
+.ai-notes li{cursor:pointer}
+.ai-notes li:hover{color:var(--amber)}
+.trace-btn{font-family:inherit;font-size:.78rem;margin-inline-start:8px;border:1px solid #d8b06a;background:#fffdf6;border-radius:999px;padding:1px 8px;cursor:pointer;color:#7a5410}
+.card-open{margin-top:12px;display:flex;flex-direction:column;gap:10px;width:100%}
+.card-open-body{background:#fffdf6;border:1.5px solid #d8b06a;border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;text-align:start}
+.card-open-face b{color:#7a5410;margin-inline-end:6px}
+.card-text{display:inline}
  
 .intake,.library{display:flex;flex-direction:column;gap:14px}
 .intake-lead{color:var(--ink-soft);line-height:1.7}
@@ -5283,6 +5558,9 @@ const css = `
 .tv-neck{width:90px;height:16px;background:linear-gradient(180deg,#1d2444,#141a33);border:1px solid #2c3560;border-top:none;border-radius:0 0 8px 8px}
 .tv-base{width:260px;height:12px;margin-top:2px;background:linear-gradient(180deg,#232a4c,#171d3a);border:1px solid #323b68;border-radius:10px;box-shadow:0 8px 18px rgba(0,0,0,.45)}
 .busy-line{color:#7a5410;font-weight:700;font-size:.9rem}
+.nikud-btn{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.05rem;padding-bottom:3px}
+@media (max-width:480px){.font-btns{gap:4px;margin-inline-end:6px}.font-btn{min-width:30px}}
+.nikud-msg{position:fixed;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);z-index:60;background:#1b2a4a;color:#f8c778;border:1px solid var(--amber);border-radius:999px;padding:7px 16px;font-size:.88rem;box-shadow:0 4px 18px rgba(0,0,0,.35);max-width:90vw;text-align:center}
 .ch-key.gold{background:linear-gradient(180deg,#f5b95c,var(--amber));border-color:var(--amber-deep);color:#241a08}
 .ch-key.gold .key-num,.ch-key.gold .key-label{color:#241a08}
 .ch-key.gold:hover:not(:disabled){border-color:#8a5510}
