@@ -2294,7 +2294,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
           {hqErr && <div className="err">{hqErr}</div>}
           <div className="reader-row">
             <button className={"pill " + (glossOn ? "on" : "")} onClick={() => onGloss?.(!glossOn)} title="פירוש עברי קצר מתחת לכל מילה ארמית בזמן ההקראה">📖 מילון ארמי {glossOn ? "· דולק" : ""}</button>
-            <span className="reader-note">{glossBusy || (glossOn ? "מתחת לכל מילה ארמית — הפירוש בעברית · מוכן פעם אחת ונשמר עם הספר" : "כבוי")}</span>
+            <span className="reader-note">{glossBusy || (glossOn ? "מתחת לכל מילה ארמית — הפירוש בעברית · מוכן פעם אחת ונשמר עם הספר · גם הכפתור 📖 בשורה העליונה" : "כבוי")}</span>
           </div>
           <div className="reader-row pill-row">
             <span className="reader-note">צבע ההארה:</span>
@@ -2724,7 +2724,7 @@ export default function LearningTV() {
   useEffect(() => { try { localStorage.setItem("lomedtv-gloss", glossOn ? "on" : "off"); } catch {} }, [glossOn]);
   const splitWords = (t) => (t || "").match(/\S+/g) || [];
   const glossOf = (i) => {
-    if (!glossOn || !readerOn) return null;
+    if (!glossOn || view !== "tv" || channel !== "read") return null;
     const g = book?.flex?.gloss?.[i];
     return Array.isArray(g) && g.length === splitWords(sentences[i]).length ? g : null;
   };
@@ -2741,15 +2741,16 @@ export default function LearningTV() {
     return hits / ws.length >= 0.3;
   };
   useEffect(() => {
-    if (!glossOn || !readerOn || readPos?.i == null || glossRun.current) return;
+    if (!glossOn || view !== "tv" || channel !== "read" || glossRun.current) return;
     const [rs, re] = chapterRanges[chIdx] || [0, 0];
     const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
     const todo = [];
     const have = bookRef.current?.flex?.gloss || {};
-    for (let i = readPos.i; i < re && todo.length < 3; i++) {
+    /* בזמן הקראה — מהמשפט הנקרא והלאה; אחרת — כל הפרק הפתוח מתחילתו (בחבילות, אחת אחרי השנייה) */
+    const from = readerOn && readPos?.i != null ? readPos.i : rs;
+    for (let i = from; i < re && todo.length < 3; i++) {
       if (have[i] || !isAramaicSent(i, chParas)) continue;
       todo.push(i);
-      if (i - readPos.i > 6) break; // לא רצים קדימה יותר מדי — רק מה שבדרך
     }
     if (!todo.length) return;
     glossRun.current = true;
@@ -2781,7 +2782,7 @@ export default function LearningTV() {
       setGlossBusy("");
       glossRun.current = false;
     })();
-  }, [glossOn, readerOn, readPos?.i, book?.flex?.gloss]);
+  }, [glossOn, readerOn, readPos?.i, book?.flex?.gloss, view, channel, chIdx]);
   const [nikudOn, setNikudOn] = useState(() => { try { return localStorage.getItem("lomedtv-nikud") === "on"; } catch { return false; } }); // נִ הניקוד מוצג?
   const [nikudMsg, setNikudMsg] = useState("");
   const nikudRun = useRef(0); // מספר הריצה הנוכחית; כיבוי או ריצה חדשה עוצרים את הקודמת
@@ -4400,6 +4401,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
                 <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? "חזרה ללימוד" : "המדריך: איך משתמשים"} aria-label="המדריך">❔</button>
+                <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? "המילון הארמי מוצג — לחץ להסתיר" : "מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית")} aria-label="מילון ארמי" aria-pressed={glossOn}>📖</button>
                 <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? "הניקוד מוצג — לחץ להסתיר" : "הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)"} aria-label="ניקוד" aria-pressed={nikudOn}>בְּ</button>
                 <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? "שכבת הלומד מוצגת — לחץ להסתיר" : "שכבת הלומד מוסתרת — לחץ להציג"} aria-label="שכבת הלומד">✍️</button>
                 <button
@@ -6027,6 +6029,8 @@ const css = `
 .gl-t{font-family:'Heebo',sans-serif;font-weight:400;font-size:.44em;line-height:1.1;color:#8a6a2a;white-space:nowrap;margin-top:2px;max-width:9em;overflow:hidden;text-overflow:ellipsis;direction:rtl}
 .scroll-para:has(.gl-w){line-height:1.75}
 .kara-now .gl-t{color:#5c4410}
+.gloss-btn.busy{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .scroll-para.zohar{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.2em;color:#1a1408;margin-bottom:6px}
 .scroll-para.sulam,.read-sents .scroll-para.sulam{color:#4d4636;border-inline-start:3px solid var(--amber);padding-inline-start:12px;margin-bottom:22px}
 .read-mark-hint{margin:0}
