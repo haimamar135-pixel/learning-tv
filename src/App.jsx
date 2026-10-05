@@ -181,6 +181,15 @@ const CHANNELS = [
 ];
  
 /* פעולות במצב הגמיש (מגילה) — מופקות על הקטע שסומן */
+/* 🎨 רקעים מסביב לטלוויזיה: [מזהה, שם, דוגמית] — הצבעים עצמם ב-CSS לפי data-bg */
+const BG_THEMES = [
+  ["night", "לילה (כחול כהה)", "linear-gradient(135deg,#141a33,#0d1226)"],
+  ["silver", "כסף בהיר", "linear-gradient(135deg,#f4f5f8,#cfd3dc)"],
+  ["cream", "קרם", "linear-gradient(135deg,#f8f3e6,#e6dcc6)"],
+  ["sky", "תכלת", "linear-gradient(135deg,#eaf2fb,#c9d9ee)"],
+  ["sage", "ירוק מרווה", "linear-gradient(135deg,#eef3ec,#cbd8cc)"],
+  ["graphite", "גרפיט", "linear-gradient(135deg,#4a4f5c,#2b2f3a)"],
+];
 const FLEX_ACTIONS = [
   { id: "summary", label: "סיכום" },
   { id: "concepts", label: "מושגים" },
@@ -1994,44 +2003,80 @@ function CardsView({ data, layer }) {
    אותו מקור כמו דף המדריך לבודקים (public/guide/steps.json): צעדים עם צילום, טקסט ועצה.
    נפתח כשכבה מעל המסך בלחיצה על ❔, ו"חזרה ללימוד" מחזיר בדיוק למקום שהיה. 🔊 מקריא את הצעד. */
 function HelpView({ onClose }) {
+  /* ❔ המדריך: צעדים עם צילומים. 🔊 מקריא צעד; ▶ "כסרטון" עובר על כל הצעדים ברצף עם קריינות.
+     הקריינות: קבצי MP3 שהופקו פעם אחת ב-ElevenLabs (public/guide/voice/<id>.mp3 + index.json, מופקים ב-tools/guide-voice.mjs);
+     כשאין קובץ — קול הדפדפן. */
   const [data, setData] = useState(null);
+  const [voices, setVoices] = useState(null); // index.json של הקריינות: {id: {dur}} או {} כשאין
   const [err, setErr] = useState("");
   const [k, setK] = useState(() => { try { return +sessionStorage.getItem("lomedtv-help-k") || 0; } catch { return 0; } });
   const [speaking, setSpeaking] = useState(false);
+  const [movie, setMovie] = useState(false);
+  const movieRef = useRef(false), audioRef = useRef(null), kRef = useRef(k);
   useEffect(() => { fetch("/guide/steps.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(r.status))).then(setData).catch((e) => setErr("המדריך לא נטען: " + e.message)); }, []);
-  useEffect(() => { try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} window.speechSynthesis?.cancel(); setSpeaking(false); }, [k]);
-  useEffect(() => () => window.speechSynthesis?.cancel(), []);
+  useEffect(() => { fetch("/guide/voice/index.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : {}).then(setVoices).catch(() => setVoices({})); }, []);
+  const stopAll = () => { window.speechSynthesis?.cancel(); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setSpeaking(false); };
+  useEffect(() => { kRef.current = k; try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} }, [k]);
+  useEffect(() => () => { movieRef.current = false; stopAll(); }, []);
   const steps = data?.steps || [];
   const st = steps[k];
-  const speak = () => {
-    const synth = window.speechSynthesis; if (!synth || !st) return;
-    if (speaking) { synth.cancel(); setSpeaking(false); return; }
-    synth.cancel();
-    const u = new SpeechSynthesisUtterance(speakable(`${st.title}. ${st.text} ${st.tip || ""}`).text);
-    u.lang = "he-IL"; const v = pickHebrewVoice(synth); if (v) u.voice = v;
-    u.onend = () => setSpeaking(false); u.onerror = () => setSpeaking(false);
-    synth.speak(u); setSpeaking(true);
+  /* מקריא צעד אחד; מחזיר הבטחה שמסתיימת כשהקריינות נגמרה (או נכשלה) */
+  const narrate = (step) => new Promise((done) => {
+    const text = speakable(`${step.title}. ${step.text} ${step.tip || ""}`).text;
+    const finish = () => { setSpeaking(false); done(); };
+    const browserVoice = () => {
+      const synth = window.speechSynthesis; if (!synth) return finish();
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "he-IL"; const v = pickHebrewVoice(synth); if (v) u.voice = v;
+      u.onend = finish; u.onerror = finish;
+      synth.speak(u); setSpeaking(true);
+    };
+    if (voices && voices[step.id]) {
+      const a = new Audio(`/guide/voice/${step.id}.mp3`);
+      audioRef.current = a;
+      a.onended = finish; a.onerror = () => { audioRef.current = null; browserVoice(); };
+      a.play().then(() => setSpeaking(true)).catch(() => { audioRef.current = null; browserVoice(); });
+    } else browserVoice();
+  });
+  const speak = () => { if (speaking) { movieRef.current = false; setMovie(false); stopAll(); return; } if (st) narrate(st); };
+  /* ▶ כסרטון: מהצעד הנוכחי עד הסוף — קריינות, הפסקה קצרה, הצעד הבא */
+  const playMovie = async () => {
+    if (movieRef.current) { movieRef.current = false; setMovie(false); stopAll(); return; }
+    movieRef.current = true; setMovie(true);
+    let i = kRef.current;
+    while (movieRef.current && i < steps.length) {
+      setK(i);
+      await narrate(steps[i]);
+      if (!movieRef.current) break;
+      await new Promise((r) => setTimeout(r, 900));
+      i++;
+    }
+    movieRef.current = false; setMovie(false); setSpeaking(false);
   };
+  const go = (i) => { movieRef.current = false; setMovie(false); stopAll(); setK(i); };
+  const hq = !!(voices && st && voices[st.id]);
   return (
     <div className="help" dir="rtl" role="dialog" aria-label="המדריך">
       <div className="help-head">
         <span className="help-title">❔ המדריך · {steps.length ? `${k + 1} / ${steps.length}` : ""}</span>
-        <button className="tts-btn sm" onClick={onClose}>↩ חזרה ללימוד</button>
+        <button className={"tts-btn sm " + (movie ? "" : "ghost")} onClick={playMovie} disabled={!steps.length} title="עובר על כל הצעדים ברצף, עם קריינות">{movie ? "⏹ עצור את הסרטון" : "▶ כסרטון"}</button>
+        <button className="tts-btn sm" onClick={() => { movieRef.current = false; stopAll(); onClose(); }}>↩ חזרה ללימוד</button>
       </div>
       {err && <div className="err">{err}</div>}
       {!data && !err && <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את המדריך…</p></div>}
       {st && (
-        <div className="help-body">
+        <div className={"help-body" + (movie ? " movie" : "")}>
           <div className="help-nav">
-            <button className="tts-btn ghost sm" onClick={() => setK((x) => Math.max(0, x - 1))} disabled={k === 0}>→ הקודם</button>
-            <button className={"tts-btn sm " + (speaking ? "" : "ghost")} onClick={speak}>{speaking ? "⏹ עצור" : "🔊 הקרא"}</button>
-            <button className="tts-btn ghost sm" onClick={() => setK((x) => Math.min(steps.length - 1, x + 1))} disabled={k >= steps.length - 1}>הבא ←</button>
+            <button className="tts-btn ghost sm" onClick={() => go(Math.max(0, k - 1))} disabled={k === 0}>→ הקודם</button>
+            <button className={"tts-btn sm " + (speaking ? "" : "ghost")} onClick={speak} title={hq ? "קריינות: קול איכותי" : "קריינות: קול הדפדפן"}>{speaking ? "⏹ עצור" : hq ? "🎙 הקרא" : "🔊 הקרא"}</button>
+            <button className="tts-btn ghost sm" onClick={() => go(Math.min(steps.length - 1, k + 1))} disabled={k >= steps.length - 1}>הבא ←</button>
           </div>
           <h2 className="help-h"><span className="n">{k + 1}</span>{st.title}</h2>
           <p className="help-text">{st.text}</p>
           {st.tip && <div className="help-tip">💡 {st.tip}</div>}
           {st.shot && <img className="help-shot" src={"/guide/shots/" + st.shot} alt={st.title} loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
-          <div className="help-dots">{steps.map((x, i) => <button key={x.id} className={"help-dot " + (i === k ? "on" : "")} onClick={() => setK(i)} title={x.title} />)}</div>
+          <div className="help-dots">{steps.map((x, i) => <button key={x.id} className={"help-dot " + (i === k ? "on" : "")} onClick={() => go(i)} title={x.title} />)}</div>
           <div className="help-foot">המדריך המלא, עם טופס משוב: <a href={SITE_URL + "/guide/"} target="_blank" rel="noopener noreferrer">famous-rolypoly…/guide</a></div>
         </div>
       )}
@@ -2661,6 +2706,10 @@ export default function LearningTV() {
   /* הטלוויזיה "נדלקת": הכותרת מופיעה שנייה וחצי בכניסה ונעלמת — בתוך העבודה המסך תופס את כל השטח */
   const [powerOn, setPowerOn] = useState(true);
   useEffect(() => { const t = setTimeout(() => setPowerOn(false), 1900); return () => clearTimeout(t); }, []);
+  /* 🎨 הרקע מסביב לטלוויזיה — נבחר פעם אחת ונשמר במכשיר */
+  const [bgTheme, setBgTheme] = useState(() => { try { return localStorage.getItem("lomedtv-bg") || "night"; } catch { return "night"; } });
+  const [bgOpen, setBgOpen] = useState(false);
+  useEffect(() => { document.documentElement.setAttribute("data-bg", bgTheme); try { localStorage.setItem("lomedtv-bg", bgTheme); } catch {} }, [bgTheme]);
   const [isFull, setIsFull] = useState(false);
   useEffect(() => { const f = () => setIsFull(!!document.fullscreenElement); document.addEventListener("fullscreenchange", f); return () => document.removeEventListener("fullscreenchange", f); }, []);
   const toggleFull = () => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch {} };
@@ -4420,6 +4469,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
                 {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? "יציאה ממסך מלא" : "מסך מלא — הטלוויזיה על כל המסך"} aria-label="מסך מלא">⛶</button>}
+                <button className={"font-btn" + (bgOpen ? " on" : "")} onClick={() => setBgOpen((v) => !v)} title="הרקע מסביב לטלוויזיה" aria-label="רקע">🎨</button>
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
@@ -4445,6 +4495,16 @@ export default function LearningTV() {
                 </button>
               </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
+              {bgOpen && (
+                <div className="bg-pop" dir="rtl">
+                  <span className="reader-note">הרקע מסביב לטלוויזיה:</span>
+                  <div className="bg-swatches">
+                    {BG_THEMES.map(([id, label, sw]) => (
+                      <button key={id} className={"bg-sw " + (bgTheme === id ? "on" : "")} style={{ background: sw }} title={label} onClick={() => { setBgTheme(id); setBgOpen(false); }}><span>{label}</span></button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {showCloud && (
@@ -5499,6 +5559,23 @@ const css = `
 .studio>.tv .screen{flex:1 1 auto;min-height:0}
 .studio>.tv .screen-body{max-height:none;-webkit-overflow-scrolling:touch}
 .studio>.tv .tv-chin,.studio>.tv .tv-stand{flex:none}
+/* ── 🎨 רקעים (צ'אט 21): data-bg על html. ברירת המחדל = לילה. ברקעים בהירים הטלוויזיה מטילה צל רך במקום הילה ── */
+:root[data-bg="silver"] .studio{background:radial-gradient(90% 70% at 50% 30%,#fbfcfe,#dfe3ea 70%,#c9ced8);color:#1c2233}
+:root[data-bg="cream"] .studio{background:radial-gradient(90% 70% at 50% 30%,#fcf8ef,#ece3cf 70%,#dccfb4);color:#2a2418}
+:root[data-bg="sky"] .studio{background:radial-gradient(90% 70% at 50% 30%,#f3f8fe,#d6e3f3 70%,#bcd0ea);color:#182236}
+:root[data-bg="sage"] .studio{background:radial-gradient(90% 70% at 50% 30%,#f4f8f3,#d7e2d8 70%,#bfd0c2);color:#1c261f}
+:root[data-bg="graphite"] .studio{background:radial-gradient(90% 70% at 50% 30%,#5a6070,#3a3f4b 70%,#262a33);color:#e8eaf4}
+:root[data-bg="silver"] .bezel,:root[data-bg="cream"] .bezel,:root[data-bg="sky"] .bezel,:root[data-bg="sage"] .bezel{box-shadow:0 30px 70px rgba(20,25,45,.35),0 0 0 1px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.10),inset 0 -2px 0 rgba(0,0,0,.45)}
+:root[data-bg="silver"] .bezel::after,:root[data-bg="cream"] .bezel::after,:root[data-bg="sky"] .bezel::after,:root[data-bg="sage"] .bezel::after{background:radial-gradient(60% 55% at 50% 60%,rgba(20,25,45,.18),transparent 75%)}
+:root[data-bg="silver"] .power-on,:root[data-bg="cream"] .power-on,:root[data-bg="sky"] .power-on,:root[data-bg="sage"] .power-on{background:#eef0f4;color:#1c2233}
+:root[data-bg="silver"] .studio::before,:root[data-bg="cream"] .studio::before,:root[data-bg="sky"] .studio::before,:root[data-bg="sage"] .studio::before{background:#e4e7ee}
+.bg-pop{position:absolute;top:calc(100% + 6px);left:10px;z-index:40;background:#fff8e6;color:#3a2c14;border:1.5px solid #e0c98f;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:'Heebo',sans-serif;white-space:normal}
+.bg-swatches{display:flex;flex-wrap:wrap;gap:8px;max-width:300px}
+.bg-sw{width:88px;height:48px;border-radius:10px;border:2px solid #d8c7a0;cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding:3px;font-family:'Heebo',sans-serif;font-size:.68rem;color:#241a08}
+.bg-sw span{background:rgba(255,255,255,.85);border-radius:6px;padding:1px 6px;line-height:1.3}
+.bg-sw.on{border-color:var(--amber);box-shadow:0 0 0 2px var(--amber)}
+.bg-sw:hover{transform:scale(1.05)}
+@media (max-width:640px){.bg-pop{left:8px;right:8px}.bg-swatches{max-width:none}}
 /* ── השלט (צ'אט 21): כל המקשים יושבים בסנטר הטלוויזיה, בתוך המסגרת — קטנים ונקיים, גדלים בנגיעה ── */
 .chin-slot{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
 .chin-slot .deck{margin:0;gap:6px;max-width:none}
@@ -6151,6 +6228,7 @@ const css = `
 .help-text{line-height:1.9;font-size:1.05rem;white-space:pre-wrap}
 .help-tip{background:#fff3c4;border-inline-start:3px solid var(--amber);border-radius:8px;padding:8px 12px;font-size:.95rem;line-height:1.7}
 .help-shot{width:100%;max-width:420px;align-self:center;border:1px solid #d9d2bd;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.help-body.movie .help-shot{box-shadow:0 0 0 2px var(--amber),0 10px 30px rgba(0,0,0,.25)}
 .help-dots{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin-top:6px}
 .help-dot{width:10px;height:10px;border-radius:50%;border:1px solid #b9ad8c;background:transparent;cursor:pointer;padding:0}
 .help-dot.on{background:var(--amber);border-color:var(--amber)}
