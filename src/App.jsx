@@ -3060,6 +3060,7 @@ export default function LearningTV() {
     try { localStorage.setItem("lomedtv-opened", new Date().toISOString()); } catch {}
     setShowOpening(false);
     setError(null);
+    if (shareRef.current || pendingJoinRef.current) return; /* הגענו מקישור הזמנה — הדף המשותף כבר נפתח (או ייפתח אחרי הכניסה) */
     const inputId = gate === "photo" ? "camera-scan-input" : gate === "video" ? "video-capture-input" : gate === "file" ? "media-transcribe-input" : null;
     if (inputId) {
       document.getElementById(inputId)?.click();
@@ -3592,7 +3593,8 @@ export default function LearningTV() {
     if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להצטרף ללימוד המשותף."); return; }
     setShareMsg("");
     const { data, error } = await supa.rpc("join_session", { p_code: code, p_name: shareNameOf(cloudUser), p_color: myShareColor(cloudUser.id) });
-    if (error || !data) { setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + (error ? " (" + error.message + ")" : "")); return; }
+    console.log("join_session", code, error || data);
+    if (error || !data || !data.id) { setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + (error ? " (" + error.message + ")" : "")); return; }
     await openSharedBook(data, data.host === cloudUser.id);
   };
   const leaveShare = async () => {
@@ -3620,10 +3622,18 @@ export default function LearningTV() {
   };
   /* הצטרפות מקישור ?join=CODE — אחרי שיש כניסה לחשבון */
   const pendingJoinRef = useRef(null);
-  useEffect(() => { try { const c = new URLSearchParams(location.search).get("join"); if (c) { pendingJoinRef.current = c.toUpperCase(); history.replaceState(null, "", location.pathname); } } catch {} }, []);
+  useEffect(() => { try { const c = new URLSearchParams(location.search).get("join"); if (c) { pendingJoinRef.current = c.toUpperCase(); setShowOpening(false); history.replaceState(null, "", location.pathname); } } catch {} }, []);
   useEffect(() => {
     if (pendingJoinRef.current && cloudUser && view !== "boot") { const c = pendingJoinRef.current; pendingJoinRef.current = null; setShowOpening(false); joinShare(c); }
+    /* בלי חשבון: הקישור נשמר, ומזמינים להיכנס — ההצטרפות תקרה אחרי הכניסה */
+    else if (pendingJoinRef.current && !cloudUser && view !== "boot" && !shareMsg) { setShareMsg("כדי להצטרף ללימוד המשותף — להיכנס לחשבון (☁ למעלה) עם המייל שלך."); setShowCloud(true); }
   }, [cloudUser, view]);
+  /* 🕯 הצטרפות עם קוד מתוך האפליקציה (צ'אט 22) — בלי קישור: חבר אומר את הקוד, מקלידים */
+  const joinByCode = () => {
+    if (!cloudUser) { setShareMsg("כדי להצטרף ללימוד המשותף — להיכנס לחשבון (☁ למעלה)."); setShowCloud(true); return; }
+    const c = window.prompt("קוד השיעור (6 תווים, מהחבר שפתח את הלימוד):", "");
+    if (c && c.trim()) joinShare(c.trim().toUpperCase());
+  };
   /* הערוץ: presence (מי כאן) + broadcast (סימונים, הערות, מיקום, מחזיק הדף) */
   useEffect(() => {
     if (!share || !myUid) return;
@@ -5472,6 +5482,10 @@ export default function LearningTV() {
             <span className="key-num">＋</span>
             <span className="key-label">ספר חדש</span>
           </button>
+          <button className="ch-key share" onClick={joinByCode} title="הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו">
+            <span className="key-num">🕯</span>
+            <span className="key-label">הצטרף עם קוד</span>
+          </button>
           <label htmlFor="camera-scan-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
             <span className="key-label">צלם דף</span>
@@ -5548,6 +5562,10 @@ export default function LearningTV() {
             <span className="key-num">🎬</span>
             <span className="key-label">שיעור מוקלט</span>
           </label>
+          <button className="ch-key share" onClick={joinByCode} title="הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו">
+            <span className="key-num">🕯</span>
+            <span className="key-label">הצטרף עם קוד</span>
+          </button>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
               <span className="key-num">↩</span>
@@ -5619,7 +5637,7 @@ export default function LearningTV() {
           </button>
         </div>
       )}
-      {shareMsg && <p className="share-msg" dir="rtl">{shareMsg} <button className="mark-btn" onClick={() => setShareMsg("")}>✕</button></p>}
+      {shareMsg && <p className="share-msg share-toast" dir="rtl" role="status">{shareMsg} <button className="mark-btn" onClick={() => setShareMsg("")}>✕</button></p>}
 
       {view === "mirror" && book && (
         <div className="deck">
@@ -5747,6 +5765,8 @@ const css = `
 .chin-slot .ch-key.rec-on .key-label{color:#ff9b9b}
 .chin-slot .ch-key:disabled{opacity:.5}
 .chin-slot .share-msg{font-size:.78rem;margin:0}
+/* הודעת הלימוד המשותף כטוסט למעלה — בטלפון השלט לא מראה אותה (צ'אט 22) */
+.share-toast{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);z-index:70;max-width:min(92vw,520px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
 @media (max-width:640px){.chin-slot .ch-key{padding:7px 10px;min-height:36px}.chin-slot .ch-key .key-label{font-size:.8rem}.chin-slot .deck{gap:5px}.chin-slot .ch-key:hover:not(:disabled){transform:none}}
 @media (max-height:760px){
   .studio>.masthead{display:none}
