@@ -4686,7 +4686,9 @@ export default function LearningTV() {
         </div>
         <div className="tv-stand"><span className="tv-neck" /><span className="tv-base" /></div>
       </div>
- 
+
+      {/* ── מתחת לטלוויזיה: לוחות המקשים. המסגרת קבועה; רק התוכן בתוך המסך נגלל (צ'אט 20) ── */}
+      <div className="under">
       {/* לוח מקשים — משתנה לפי ההקשר */}
       {/* ── שערי המציאות: קלטים גלובליים — המצלמה והמיקרופון זמינים מכל מסך ── */}
       <input
@@ -4962,6 +4964,7 @@ export default function LearningTV() {
           </div>
         </>
       )}
+      </div>
     </div>
   );
 }
@@ -4984,6 +4987,25 @@ const css = `
   display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;
   /* מובייל: לא להיכנס מתחת ל-notch ולפס הבית */
   padding-top:calc(28px + env(safe-area-inset-top,0px));padding-bottom:calc(60px + env(safe-area-inset-bottom,0px));
+}
+/* ── הבמה הקבועה (צ'אט 20): המסגרת, הכותרת והמקשים ממלאים את המסך ולא זזים; רק התוכן שבתוך מסך הטלוויזיה נגלל ── */
+.studio{height:100vh;height:100dvh;min-height:0;overflow:hidden;padding:14px 16px 10px;
+  padding-top:calc(12px + env(safe-area-inset-top,0px));padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+.studio>.masthead{flex:none;margin-bottom:10px}
+.studio>.tv{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.studio>.tv .bezel{flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
+.studio>.tv .screen{flex:1 1 auto;min-height:0}
+.studio>.tv .screen-body{max-height:none;-webkit-overflow-scrolling:touch}
+.studio>.tv .tv-chin,.studio>.tv .tv-stand{flex:none}
+.under{flex:none;width:100%;max-height:44vh;max-height:44dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;padding-bottom:4px}
+.under .deck{margin-top:12px}
+@media (max-height:760px){
+  .studio>.masthead{display:none}
+  .studio>.tv .tv-stand{display:none}
+  .studio>.tv .tv-chin{padding:4px 0 2px}
+  .under .ch-key{padding:7px 10px;min-width:84px;gap:2px}
+  .under .key-label{font-size:.84rem}
+  .under .deck{gap:7px;margin-top:8px}
 }
 /* iOS: פס קבוע ואטום מאחורי שורת המצב — כדי שהפסים הדביקים (פרקים, מגילה) לא ייכנסו מתחת לשעון בגלילה */
 .studio::before{
