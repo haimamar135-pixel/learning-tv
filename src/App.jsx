@@ -2658,6 +2658,12 @@ async function buildQuiz(text, n, q = "") {
 
 export default function LearningTV() {
   const [view, setView] = useState("boot"); // boot | library | intake | guide | tv
+  /* הטלוויזיה "נדלקת": הכותרת מופיעה שנייה וחצי בכניסה ונעלמת — בתוך העבודה המסך תופס את כל השטח */
+  const [powerOn, setPowerOn] = useState(true);
+  useEffect(() => { const t = setTimeout(() => setPowerOn(false), 1900); return () => clearTimeout(t); }, []);
+  const [isFull, setIsFull] = useState(false);
+  useEffect(() => { const f = () => setIsFull(!!document.fullscreenElement); document.addEventListener("fullscreenchange", f); return () => document.removeEventListener("fullscreenchange", f); }, []);
+  const toggleFull = () => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch {} };
   const [index, setIndex] = useState([]);
   const [book, setBook] = useState(null);
   const [chIdx, setChIdx] = useState(0);
@@ -4178,6 +4184,18 @@ export default function LearningTV() {
   );
  
   // הטקסט הנבחר בפועל: גרירה קודמת לנקודות
+  /* סימון קטע — התחלה/סוף/תצוגה מקדימה: אחרי לחיצת ההתחלה, ריחוף מעל משפט מאוחר מראה את הקטע שייבחר */
+  const [hoverIdx, setHoverIdx] = useState(null);
+  const selCls = (i, inRange) => {
+    const waiting = selStart !== null && selEnd === null;
+    let c = "";
+    if (inRange) { c += "in-range "; if (i === rangeIdx[0]) c += "sel-a "; if (i === rangeIdx[1]) c += "sel-z "; }
+    if (waiting) {
+      if (i === selStart) c += "in-range sel-a sel-wait ";
+      else if (hoverIdx !== null && i > Math.min(selStart, hoverIdx) - 1 && i <= Math.max(selStart, hoverIdx) && i !== selStart) c += "sel-pre " + (i === hoverIdx ? "sel-z " : "");
+    }
+    return c;
+  };
   const rangeIdx =
     selStart !== null && selEnd !== null
       ? [Math.min(selStart, selEnd), Math.max(selStart, selEnd)]
@@ -4380,11 +4398,13 @@ export default function LearningTV() {
         </div>
       )}
 
-      <header className="masthead">
-        <span className="mast-dot" />
-        <h1>מסך הלמידה</h1>
-        <span className="mast-sub">כל טקסט הופך לשבעה ערוצי לימוד</span>
-      </header>
+      {powerOn && (
+        <div className="power-on" aria-hidden="true">
+          <span className="mast-dot" />
+          <h1>מסך הלמידה</h1>
+          <span className="mast-sub">כל טקסט הופך לשבעה ערוצי לימוד</span>
+        </div>
+      )}
  
       <div className="tv">
         <div className="bezel">
@@ -4399,6 +4419,7 @@ export default function LearningTV() {
               <span className="font-btns">
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
+                {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? "יציאה ממסך מלא" : "מסך מלא — הטלוויזיה על כל המסך"} aria-label="מסך מלא">⛶</button>}
                 <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
@@ -4991,7 +5012,7 @@ export default function LearningTV() {
                                   id={"para-" + i}
                                   className={
                                     "scroll-sent " +
-                                    (inRange || isStart ? "in-range " : "") +
+                                    selCls(i, inRange) +
                                     (searchHits && searchHits.includes(i) ? "hit " : "") +
                                     (trace && trace.hits.includes(i) ? "trace-hit " : "") +
                                     (book.notes?.[i] ? "has-note " : "") +
@@ -5000,6 +5021,7 @@ export default function LearningTV() {
                                     (markMode ? "clickable" : "")
                                   }
                                   onClick={() => onSentenceClick(i)}
+                                  onMouseEnter={selStart !== null && selEnd === null ? () => setHoverIdx(i) : undefined}
                                 >
                                   {renderSentText(s, book.marks?.[i], wordSel && wordSel.i === i ? wordSel : null, vocOf(i))}
                                   {book.notes?.[i] && (
@@ -5126,7 +5148,7 @@ export default function LearningTV() {
                                 data-si={i}
                                 className={
                                   "scroll-sent clickable " +
-                                  (inRange || isStart ? "in-range " : "") +
+                                  selCls(i, inRange) +
                                   (book.notes?.[i] ? "has-note " : "") +
                                   (readPos && readPos.i === i ? "kara-now " : "") +
                                   (pl ? pl.cls : "")
@@ -5134,6 +5156,7 @@ export default function LearningTV() {
                                 style={pl ? { "--peer": pl.color } : undefined}
                                 title={pl?.title || undefined}
                                 onClick={() => (readerOn ? setReaderStart({ i, t: Date.now() }) : onReadSentClick(i))}
+                                onMouseEnter={selStart !== null && selEnd === null ? () => setHoverIdx(i) : undefined}
                               >
                                 {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
                                 {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i), readPos && readPos.i === i ? readPos.c : null, glossOf(i))}
@@ -5180,17 +5203,29 @@ export default function LearningTV() {
             </div>
  
           </div>
-          <div className="tv-chin">
+          <div className="tv-chin with-keys">
             <span className={"power-led " + (loading || flexLoading ? "live" : "")} />
-            <span className="brand">LOMED·TV</span>
-            <span className="grille"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></span>
-          </div>
-        </div>
-        <div className="tv-stand"><span className="tv-neck" /><span className="tv-base" /></div>
-      </div>
-
-      {/* ── מתחת לטלוויזיה: לוחות המקשים. המסגרת קבועה; רק התוכן בתוך המסך נגלל (צ'אט 20) ── */}
-      <div className="under">
+            {view === "scroll" && book && (
+              /* המגילה: המקשים בתוך המסגרת, בסנטר הטלוויזיה — קטנים, גדלים בנגיעה */
+              <span className="chin-keys">
+                {flexResult ? (
+                  <button className="chin-key gold" onClick={() => setFlexResult(null)} title="חזרה לטקסט"><span className="ck-ic">↩</span><span className="ck-l">חזרה לטקסט</span></button>
+                ) : !flexLoading && (
+                  <>
+                    <button className={"chin-key" + (markMode === "bookmark" ? " active" : "")} onClick={() => setMarkMode(markMode === "bookmark" ? null : "bookmark")} title="סימנייה"><span className="ck-ic">📍</span><span className="ck-l">סימנייה</span></button>
+                    <button className={"chin-key" + (markMode === "start" ? " active" : "")} onClick={() => setMarkMode(markMode === "start" ? null : "start")} title="התחלה"><span className="ck-ic">⟢</span><span className="ck-l">התחלה</span></button>
+                    <button className={"chin-key" + (markMode === "end" ? " active" : "")} onClick={() => setMarkMode(markMode === "end" ? null : "end")} title="סוף"><span className="ck-ic">⟣</span><span className="ck-l">סוף</span></button>
+                    {(selectedText || rangeIdx) && <button className="chin-key" onClick={clearSelection} title="נקה סימון"><span className="ck-ic">✕</span><span className="ck-l">נקה סימון</span></button>}
+                    {selectedText && <span className="chin-sep" />}
+                    {selectedText && FLEX_ACTIONS.map((a) => (
+                      <button key={a.id} className="chin-key gold" onClick={() => generateFlex(a.id)} title={a.label}><span className="ck-ic">✦</span><span className="ck-l">{a.label}</span></button>
+                    ))}
+                  </>
+                )}
+                <button className="chin-key" onClick={backToGuide} title="חזרה ללוח השידורים"><span className="ck-ic">↩</span><span className="ck-l">ללוח</span></button>
+              </span>
+            )}
+            <div className="chin-slot">
       {/* לוח מקשים — משתנה לפי ההקשר */}
       {/* ── שערי המציאות: קלטים גלובליים — המצלמה והמיקרופון זמינים מכל מסך ── */}
       <input
@@ -5394,38 +5429,6 @@ export default function LearningTV() {
  
       {view === "scroll" && book && (
         <>
-          {!flexResult && !flexLoading && (
-            <div className="deck">
-              <button
-                className={"ch-key " + (markMode === "bookmark" ? "active" : "")}
-                onClick={() => setMarkMode(markMode === "bookmark" ? null : "bookmark")}
-              >
-                <span className="key-num">📍</span>
-                <span className="key-label">סימנייה</span>
-              </button>
-              <button
-                className={"ch-key " + (markMode === "start" ? "active" : "")}
-                onClick={() => setMarkMode(markMode === "start" ? null : "start")}
-              >
-                <span className="key-num">⟢</span>
-                <span className="key-label">התחלה</span>
-              </button>
-              <button
-                className={"ch-key " + (markMode === "end" ? "active" : "")}
-                onClick={() => setMarkMode(markMode === "end" ? null : "end")}
-              >
-                <span className="key-num">⟣</span>
-                <span className="key-label">סוף</span>
-              </button>
-              {(selectedText || rangeIdx) && (
-                <button className="ch-key newtext" onClick={clearSelection}>
-                  <span className="key-num">✕</span>
-                  <span className="key-label">נקה סימון</span>
-                </button>
-              )}
-            </div>
-          )}
- 
           {layerOn && selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
             <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)} word={!!wordSel}>
               <span className="mark-title">✍️ שכבת הלומד:</span>
@@ -5442,32 +5445,17 @@ export default function LearningTV() {
           {transBubble}
           {noteEditor}
 
-          {selectedText && !flexResult && !flexLoading && (
-            <div className="deck">
-              {FLEX_ACTIONS.map((a) => (
-                <button key={a.id} className="ch-key gold" onClick={() => generateFlex(a.id)}>
-                  <span className="key-num">✦</span>
-                  <span className="key-label">{a.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
- 
-          <div className="deck">
-            {flexResult && (
-              <button className="ch-key gold" onClick={() => setFlexResult(null)}>
-                <span className="key-num">↩</span>
-                <span className="key-label">חזרה לטקסט</span>
-              </button>
-            )}
-            <button className="ch-key newtext" onClick={backToGuide}>
-              <span className="key-num">↩</span>
-              <span className="key-label">חזרה ללוח השידורים</span>
-            </button>
-          </div>
         </>
       )}
+            </div>
+            <span className="brand">LOMED·TV</span>
+            <span className="grille"><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/><i/></span>
+          </div>
+        </div>
+        <div className="tv-stand"><span className="tv-neck" /><span className="tv-base" /></div>
       </div>
+
+      {/* ── מתחת לטלוויזיה: לוחות המקשים. המסגרת קבועה; רק התוכן בתוך המסך נגלל (צ'אט 20) ── */}
     </div>
   );
 }
@@ -5494,7 +5482,10 @@ const css = `
 /* ── הבמה הקבועה (צ'אט 20): המסגרת, הכותרת והמקשים ממלאים את המסך ולא זזים; רק התוכן שבתוך מסך הטלוויזיה נגלל ── */
 .studio{height:100vh;height:100dvh;min-height:0;overflow:hidden;padding:14px 16px 10px;
   padding-top:calc(12px + env(safe-area-inset-top,0px));padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
-.studio>.masthead{flex:none;margin-bottom:10px}
+.power-on{position:fixed;inset:0;z-index:900;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--studio);animation:poweron 1.9s ease forwards;pointer-events:none}
+.power-on h1{font-size:2.2rem;font-weight:800;letter-spacing:.5px}
+.power-on .mast-dot{width:12px;height:12px}
+@keyframes poweron{0%{opacity:0}12%{opacity:1}70%{opacity:1}100%{opacity:0;visibility:hidden}}
 .studio>.tv{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;width:auto;max-width:100%;aspect-ratio:16/10}
 @media (max-width:900px){.studio>.tv{width:100%;aspect-ratio:auto}}
 .bezel{padding:clamp(12px,1.4vw,26px);border-radius:clamp(18px,2vw,34px)}
@@ -5504,15 +5495,31 @@ const css = `
 .studio>.tv .screen{flex:1 1 auto;min-height:0}
 .studio>.tv .screen-body{max-height:none;-webkit-overflow-scrolling:touch}
 .studio>.tv .tv-chin,.studio>.tv .tv-stand{flex:none}
-.under{flex:none;width:100%;max-height:44vh;max-height:44dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;align-items:center;padding-bottom:4px}
-.under .deck{margin-top:12px}
+/* ── השלט (צ'אט 21): כל המקשים יושבים בסנטר הטלוויזיה, בתוך המסגרת — קטנים ונקיים, גדלים בנגיעה ── */
+.chin-slot{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.chin-slot .deck{margin:0;gap:6px;max-width:none}
+.chin-slot .ch-key{flex-direction:row;gap:5px;min-width:0;border-radius:999px;padding:4px 10px;font-size:.74rem;line-height:1;white-space:nowrap;transition:transform .12s,font-size .12s,border-color .15s;background:linear-gradient(180deg,#212844,var(--key));border-color:var(--key-edge);color:#cfd3e6}
+.chin-slot .ch-key .key-num{font-size:.7rem;color:var(--teal);letter-spacing:0}
+.chin-slot .ch-key .key-label{font-size:.76rem;font-weight:600;color:#dfe3f3}
+.chin-slot .ch-key:hover:not(:disabled),.chin-slot .ch-key:focus-visible{transform:scale(1.18);border-color:var(--amber);z-index:2}
+.chin-slot .ch-key:active:not(:disabled){transform:scale(1.1)}
+.chin-slot .ch-key.active{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}
+.chin-slot .ch-key.active .key-label{color:#fff}
+.chin-slot .ch-key.cached:not(.active) .key-num{color:var(--amber-soft,#f8c778)}
+.chin-slot .ch-key.gold,.chin-slot .ch-key.gold .key-num,.chin-slot .ch-key.gold .key-label{color:#241a08}
+.chin-slot .ch-key.gold{background:linear-gradient(180deg,#f5b95c,var(--amber));border-color:var(--amber-deep)}
+.chin-slot .ch-key.green,.chin-slot .ch-key.media,.chin-slot .ch-key.shelf,.chin-slot .ch-key.share,.chin-slot .ch-key.mirror,.chin-slot .ch-key.smart,.chin-slot .ch-key.newtext{background:linear-gradient(180deg,#212844,var(--key));border-color:var(--key-edge);color:#cfd3e6;border-style:solid}
+.chin-slot .ch-key.green .key-num,.chin-slot .ch-key.media .key-num,.chin-slot .ch-key.shelf .key-num,.chin-slot .ch-key.share .key-num,.chin-slot .ch-key.mirror .key-num,.chin-slot .ch-key.smart .key-num,.chin-slot .ch-key.newtext .key-num{color:var(--teal)}
+.chin-slot .ch-key.green .key-label,.chin-slot .ch-key.media .key-label,.chin-slot .ch-key.shelf .key-label,.chin-slot .ch-key.share .key-label,.chin-slot .ch-key.mirror .key-label,.chin-slot .ch-key.smart .key-label,.chin-slot .ch-key.newtext .key-label{color:#dfe3f3}
+.chin-slot .ch-key.rec-on{border-color:#ff5b5b}
+.chin-slot .ch-key.rec-on .key-label{color:#ff9b9b}
+.chin-slot .ch-key:disabled{opacity:.5}
+.chin-slot .share-msg{font-size:.78rem;margin:0}
+@media (max-width:640px){.chin-slot .ch-key{padding:7px 10px;min-height:36px}.chin-slot .ch-key .key-label{font-size:.8rem}.chin-slot .deck{gap:5px}.chin-slot .ch-key:hover:not(:disabled){transform:none}}
 @media (max-height:760px){
   .studio>.masthead{display:none}
   .studio>.tv .tv-stand{display:none}
   .studio>.tv .tv-chin{padding:4px 0 2px}
-  .under .ch-key{padding:7px 10px;min-width:84px;gap:2px}
-  .under .key-label{font-size:.84rem}
-  .under .deck{gap:7px;margin-top:8px}
 }
 /* iOS: פס קבוע ואטום מאחורי שורת המצב — כדי שהפסים הדביקים (פרקים, מגילה) לא ייכנסו מתחת לשעון בגלילה */
 .studio::before{
@@ -6004,8 +6011,16 @@ const css = `
 .scroll-para{line-height:2.05;font-size:1.06rem;color:#232323;padding:6px 8px;border-radius:8px;white-space:pre-wrap}
 .scroll-sent{border-radius:6px;padding:1px 2px;transition:background .12s}
 .scroll-sent.clickable{cursor:pointer}
-.scroll-sent.clickable:hover{background:#f6dfae;box-shadow:0 0 0 1px #d8b06a inset}
-.scroll-sent.in-range{background:#fdeed3;box-shadow:-3px 0 0 var(--amber)}
+/* סימון קטע: ריחוף = מסגרת עדינה בלבד · הקטע = שטיפה בהירה + קו דק מימין · התחלה ⌈ וסוף ⌋ עם תוויות · תצוגה מקדימה חיוורת */
+.scroll-sent.clickable:hover{box-shadow:0 0 0 1px #e6d3a6 inset}
+.scroll-sent.in-range{background:#fbf5e4;box-shadow:-3px 0 0 #e8c882}
+.scroll-sent.sel-pre{background:#fcf9f0;box-shadow:-3px 0 0 #f1e2bd}
+.scroll-sent.sel-wait{background:#fbf0d6}
+.scroll-sent.sel-a::before,.scroll-sent.sel-z::after{font-family:'Heebo',sans-serif;font-size:.6rem;font-weight:700;letter-spacing:.02em;color:#fff;background:var(--amber);border-radius:4px;padding:1px 5px;vertical-align:middle;margin:0 3px;white-space:nowrap;line-height:1.2}
+.scroll-sent.sel-a::before{content:"⌈ התחלה"}
+.scroll-sent.sel-z::after{content:"סוף ⌋"}
+.scroll-sent.sel-pre.sel-z::after{content:"סוף?";background:#e3cfa0}
+.scroll-sent.sel-wait.sel-a::before{content:"⌈ התחלה · לחץ על משפט הסוף"}
 .scroll-sent.was-read{color:#6c6449}
 .bookmark-line{
   display:flex;align-items:center;gap:8px;color:#1e7c6d;font-weight:700;font-size:.85rem;
@@ -6155,6 +6170,19 @@ const css = `
 .ch-key.green{background:linear-gradient(180deg,#25695e,#1e5c52);border-color:#2a7a6e;color:#eafff9}
 .ch-key.green .key-num{color:#9fe8d9}
 .brand{font-family:'IBM Plex Mono',monospace;font-size:.72rem;letter-spacing:5px;color:#6e769c}
+/* מקשי הסנטר (מגילה): בתוך המסגרת, קטנים ונקיים; נגיעה/ריחוף מגדילים */
+.tv-chin.with-keys{padding:8px 14px 6px;gap:10px}
+.tv-chin.with-keys .brand{font-size:.6rem;letter-spacing:3px}
+.chin-keys{flex:1;display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:6px;min-width:0}
+.chin-key{display:inline-flex;align-items:center;gap:5px;background:linear-gradient(180deg,#212844,var(--key));border:1px solid var(--key-edge);border-radius:999px;padding:4px 10px;color:#cfd3e6;font-family:'Heebo',sans-serif;font-size:.74rem;line-height:1;cursor:pointer;transition:transform .12s,font-size .12s,border-color .15s;white-space:nowrap}
+.chin-key .ck-ic{font-size:.85rem;color:var(--teal)}
+.chin-key:hover,.chin-key:focus-visible{transform:scale(1.18);font-size:.86rem;border-color:var(--amber);z-index:2}
+.chin-key:active{transform:scale(1.1)}
+.chin-key.active{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset;color:#fff}
+.chin-key.gold{background:linear-gradient(180deg,#f5b95c,var(--amber));border-color:var(--amber-deep);color:#241a08}
+.chin-key.gold .ck-ic{color:#241a08}
+.chin-sep{width:1px;height:18px;background:#2c3560;margin:0 3px}
+@media (max-width:640px){.tv-chin.with-keys .grille{display:none}.tv-chin.with-keys .brand{display:none}.tv-chin.with-keys .power-led{display:none}.chin-key{padding:7px 10px;font-size:.78rem;min-height:36px}.chin-key:hover{transform:none}.tv-stand{display:none}}
 .deck{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:24px;max-width:1500px}
 .ch-key{
   display:flex;flex-direction:column;align-items:center;gap:4px;min-width:104px;
