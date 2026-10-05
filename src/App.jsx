@@ -1837,16 +1837,27 @@ function MindmapView({ data }) {
   const drag = useRef(null);
   const moved = useRef(false);
 
+  /* בטלפון המפה (860 רוחב) מוקטנת לרוחב המסך — מתאימים גם את הגרירה לקנה המידה */
+  const wrapRef = useRef(null);
+  const [scale, setScale] = useState(1);
+  useEffect(() => {
+    const el = wrapRef.current; if (!el) return;
+    const fit = () => setScale(Math.max(0.55, Math.min(1, (el.clientWidth || W) / W))); /* לא פחות מ-55% — מתחת לזה לא קריא; השאר בגלילה */
+    fit(); const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : null; ro?.observe(el);
+    /* במפה מוקטנת: להתחיל מהמרכז (בגלילה RTL הערכים שליליים) */
+    setTimeout(() => { const c = el.querySelector(".fm-canvas"); if (c && c.scrollWidth > c.clientWidth) c.scrollLeft = -(c.scrollWidth - c.clientWidth) / 2; }, 50);
+    return () => ro?.disconnect();
+  }, []);
   const down = (id) => (e) => {
     e.preventDefault();
     moved.current = false;
-    drag.current = { id, dx: pos[id].x - e.clientX, dy: pos[id].y - e.clientY };
+    drag.current = { id, dx: pos[id].x - e.clientX / scale, dy: pos[id].y - e.clientY / scale };
   };
   const move = (e) => {
     const d = drag.current;
     if (!d) return;
     moved.current = true;
-    setPos((p) => ({ ...p, [d.id]: { x: e.clientX + d.dx, y: e.clientY + d.dy } }));
+    setPos((p) => ({ ...p, [d.id]: { x: e.clientX / scale + d.dx, y: e.clientY / scale + d.dy } }));
   };
   const up = () => { drag.current = null; };
   const toggle = (i) => {
@@ -1867,9 +1878,9 @@ function MindmapView({ data }) {
   );
 
   return (
-    <div className="fm-wrap">
+    <div className="fm-wrap" ref={wrapRef}>
       <p className="fm-hint">✋ גרור צמתים · לחיצה על ענף ראשי פותחת/סוגרת · <button className="mini-btn" onClick={() => { setPos(layout); setClosed({}); }}>🔄 סידור מחדש</button></p>
-      <div className="fm-canvas" style={{ height: H }} onPointerMove={move} onPointerUp={up} onPointerLeave={up}>
+      <div className="fm-canvas" style={{ height: H * scale + 2 }}><div className="fm-sizer" style={{ width: W * scale, height: H * scale }}><div className="fm-scale" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "100% 0" }} onPointerMove={move} onPointerUp={up} onPointerLeave={up}>
         <svg className="fm-lines" width="100%" height="100%">
           {mains.map((m, i) => (
             <g key={i}>
@@ -1883,7 +1894,7 @@ function MindmapView({ data }) {
         {node("root", data.topic, "fm-root")}
         {mains.map((m, i) => node("m" + i, ((m.children || []).length ? (closed[i] ? "▸ " : "▾ ") : "") + m.label, "fm-main", () => toggle(i)))}
         {mains.flatMap((m, i) => (closed[i] ? [] : (m.children || []).map((c, j) => node("m" + i + "c" + j, c.label, "fm-sub"))))}
-      </div>
+      </div></div></div>
     </div>
   );
 }
@@ -2002,66 +2013,189 @@ function CardsView({ data, layer }) {
 /* ─── ❔ המדריך בתוך האפליקציה (צ'אט 20) ───
    אותו מקור כמו דף המדריך לבודקים (public/guide/steps.json): צעדים עם צילום, טקסט ועצה.
    נפתח כשכבה מעל המסך בלחיצה על ❔, ו"חזרה ללימוד" מחזיר בדיוק למקום שהיה. 🔊 מקריא את הצעד. */
+/* ─── ❔ המדריך (צ'אט 22): פעימות, הינשוף והלייזר ───
+   steps.json: כל צעד = רצף "פעימות" (beats): משפט קריינות + הצילום שמוצג + יעד ללייזר (at).
+   היעדים נמדדים אוטומטית בצילום (tools/shots-guide.mjs → shots/boxes.json: {צילום: {יעד: [x,y,w,h] כשברים}}):
+   key:<כיתוב מקש בשלט> · bar:<כפתור בשורה העליונה> · sel:<בורר>.
+   הקריינות: קובץ MP3 לכל פעימה (public/guide/voice/<id>-<n>.mp3, מופק ב-tools/guide-voice.mjs במק); כשאין — קול הדפדפן.
+   🔊 מקריא את הצעד פעימה-פעימה; ▶ "כסרטון" עובר על כל הצעדים. הינשוף יושב משמאל לצילום, הלייזר שלו קופץ ליעד של כל פעימה. */
+function GuideOwl({ aim, talking }) {
+  /* aim: {ax, ay} וקטור יחידה מהמצביע אל היעד (או null) — הראש והאישונים פונים לשם */
+  const tilt = aim ? Math.max(-10, Math.min(10, aim.ax * 10)) : 0;
+  const px = aim ? aim.ax * 3.2 : 0, py = aim ? aim.ay * 2.4 : 0;
+  return (
+    <svg className={"owl" + (talking ? " talk" : "")} viewBox="0 0 120 140" aria-hidden="true">
+      <defs>
+        <radialGradient id="owlBody" cx="50%" cy="40%" r="65%"><stop offset="0" stopColor="#9a6b3a" /><stop offset="1" stopColor="#5c3d1e" /></radialGradient>
+        <radialGradient id="owlBelly" cx="50%" cy="35%" r="60%"><stop offset="0" stopColor="#f3dfb8" /><stop offset="1" stopColor="#d9b98a" /></radialGradient>
+      </defs>
+      {/* ענף */}
+      <path d="M4 128 Q60 118 116 130" stroke="#3b2a16" strokeWidth="5" fill="none" strokeLinecap="round" />
+      {/* גוף */}
+      <g className="owl-body">
+        <ellipse cx="60" cy="88" rx="34" ry="38" fill="url(#owlBody)" />
+        <ellipse cx="60" cy="96" rx="22" ry="26" fill="url(#owlBelly)" />
+        <path d="M46 84 q7 5 14 0 M53 96 q7 5 14 0 M46 108 q7 5 14 0" stroke="#b08c5a" strokeWidth="1.6" fill="none" />
+        {/* כנף שמאל (נחה) */}
+        <path d="M30 78 q-12 20 -2 42 q10 -8 12 -40z" fill="#6b4824" />
+        {/* רגליים */}
+        <path d="M50 124 l-5 6 M50 124 l0 7 M50 124 l5 6 M70 124 l-5 6 M70 124 l0 7 M70 124 l5 6" stroke="#e0a04a" strokeWidth="2.4" strokeLinecap="round" />
+      </g>
+      {/* ראש */}
+      <g className="owl-head" style={{ transform: `rotate(${tilt}deg)`, transformOrigin: "60px 62px" }}>
+        <path d="M30 40 L22 14 L44 30 Z M90 40 L98 14 L76 30 Z" fill="#5c3d1e" />
+        <circle cx="60" cy="48" r="32" fill="url(#owlBody)" />
+        <circle cx="45" cy="48" r="14.5" fill="#f6ebd2" />
+        <circle cx="75" cy="48" r="14.5" fill="#f6ebd2" />
+        <g className="owl-eyes">
+          <circle cx="45" cy="48" r="9.5" fill="#fff" />
+          <circle cx="75" cy="48" r="9.5" fill="#fff" />
+          <circle cx={45 + px} cy={48 + py} r="5.2" fill="#1b1410" />
+          <circle cx={75 + px} cy={48 + py} r="5.2" fill="#1b1410" />
+          <circle cx={47 + px} cy={46 + py} r="1.6" fill="#fff" />
+          <circle cx={77 + px} cy={46 + py} r="1.6" fill="#fff" />
+        </g>
+        <g className="owl-lids"><rect x="30" y="33" width="30" height="30" rx="14" fill="#8a5f31" /><rect x="60" y="33" width="30" height="30" rx="14" fill="#8a5f31" /></g>
+        <path className="owl-beak" d="M60 56 l-5 0 l5 9 l5 -9 z" fill="#f2a33c" />
+      </g>
+      {/* כנף ימין מחזיקה מצביע לייזר — הקצה ב-(112,58) */}
+      <g className="owl-arm">
+        <path d="M84 84 q14 -14 24 -24" stroke="#6b4824" strokeWidth="9" strokeLinecap="round" fill="none" />
+        <rect x="96" y="54" width="20" height="7" rx="3" fill="#2b2f3a" transform="rotate(-40 106 58)" />
+        <circle className="owl-laser-src" cx="112" cy="58" r="2.4" fill="#ff3b30" />
+      </g>
+    </svg>
+  );
+}
 function HelpView({ onClose }) {
-  /* ❔ המדריך: צעדים עם צילומים. 🔊 מקריא צעד; ▶ "כסרטון" עובר על כל הצעדים ברצף עם קריינות.
-     הקריינות: קבצי MP3 שהופקו פעם אחת ב-ElevenLabs (public/guide/voice/<id>.mp3 + index.json, מופקים ב-tools/guide-voice.mjs);
-     כשאין קובץ — קול הדפדפן. */
   const [data, setData] = useState(null);
-  const [voices, setVoices] = useState(null); // index.json של הקריינות: {id: {dur}} או {} כשאין
+  const [voices, setVoices] = useState(null); // index.json של הקריינות: {"id-n": {hash}} או {} כשאין
+  const [boxes, setBoxes] = useState({});    // shots/boxes.json
   const [err, setErr] = useState("");
   const [k, setK] = useState(() => { try { return +sessionStorage.getItem("lomedtv-help-k") || 0; } catch { return 0; } });
+  const [beat, setBeat] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [movie, setMovie] = useState(false);
-  const movieRef = useRef(false), audioRef = useRef(null), kRef = useRef(k);
+  const [laser, setLaser] = useState(null); // {x1,y1,x2,y2,box:[x,y,w,h] בפיקסלים של הבמה} או null
+  const runRef = useRef(0), audioRef = useRef(null), kRef = useRef(k), stageRef = useRef(null), imgRef = useRef(null), tipRef = useRef(null), tweenRef = useRef(null);
+  const v = encodeURIComponent(data?.version || "");
   useEffect(() => { fetch("/guide/steps.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : Promise.reject(new Error(r.status))).then(setData).catch((e) => setErr("המדריך לא נטען: " + e.message)); }, []);
   useEffect(() => { fetch("/guide/voice/index.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : {}).then(setVoices).catch(() => setVoices({})); }, []);
-  const stopAll = () => { window.speechSynthesis?.cancel(); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setSpeaking(false); };
+  useEffect(() => { fetch("/guide/shots/boxes.json", { cache: "no-cache" }).then((r) => r.ok ? r.json() : {}).then(setBoxes).catch(() => setBoxes({})); }, []);
+  const stopAll = () => { runRef.current++; window.speechSynthesis?.cancel(); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setSpeaking(false); };
   useEffect(() => { kRef.current = k; try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} }, [k]);
-  useEffect(() => () => { movieRef.current = false; stopAll(); }, []);
+  useEffect(() => () => { stopAll(); }, []);
   const steps = data?.steps || [];
   const st = steps[k];
-  /* מקריא צעד אחד; מחזיר הבטחה שמסתיימת כשהקריינות נגמרה (או נכשלה) */
-  const narrate = (step) => new Promise((done) => {
-    const text = speakable(`${step.title}. ${step.text} ${step.tip || ""}`).text;
+  const beats = st ? (st.beats?.length ? st.beats : [{ say: st.text || "" }]) : [];
+  const bt = beats[Math.min(beat, beats.length - 1)] || {};
+  const shot = bt.shot || st?.shot || "";
+  /* מקריא פעימה אחת; מסתיים כשהקריינות נגמרה (או נכשלה). run = מזהה הריצה — אם השתנה, הריצה בוטלה */
+  const narrateBeat = (step, n, run) => new Promise((done) => {
+    const b = step.beats?.[n] || { say: step.text || "" };
+    const text = speakable(`${n === 0 ? step.title + ". " : ""}${b.say}${n === (step.beats?.length || 1) - 1 && step.tip ? " שימו לב: " + step.tip : ""}`).text;
     const finish = () => { setSpeaking(false); done(); };
     const browserVoice = () => {
       const synth = window.speechSynthesis; if (!synth) return finish();
       synth.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "he-IL"; const v = pickHebrewVoice(synth); if (v) u.voice = v;
+      u.lang = "he-IL"; const vv = pickHebrewVoice(synth); if (vv) u.voice = vv;
       u.onend = finish; u.onerror = finish;
       synth.speak(u); setSpeaking(true);
     };
-    if (voices && voices[step.id]) {
-      const a = new Audio(`/guide/voice/${step.id}.mp3`);
+    const id = `${step.id}-${n + 1}`;
+    if (voices && voices[id]) {
+      const a = new Audio(`/guide/voice/${id}.mp3?v=${voices[id].hash || ""}`);
       audioRef.current = a;
-      a.onended = finish; a.onerror = () => { audioRef.current = null; browserVoice(); };
-      a.play().then(() => setSpeaking(true)).catch(() => { audioRef.current = null; browserVoice(); });
+      a.onended = finish; a.onerror = () => { if (runRef.current !== run) return finish(); audioRef.current = null; browserVoice(); };
+      a.play().then(() => setSpeaking(true)).catch(() => { if (runRef.current !== run) return finish(); audioRef.current = null; browserVoice(); });
     } else browserVoice();
   });
-  const speak = () => { if (speaking) { movieRef.current = false; setMovie(false); stopAll(); return; } if (st) narrate(st); };
-  /* ▶ כסרטון: מהצעד הנוכחי עד הסוף — קריינות, הפסקה קצרה, הצעד הבא */
+  /* צעד שלם, פעימה אחרי פעימה; מחזיר false אם נעצר באמצע */
+  const playStep = async (i, run, from = 0) => {
+    const step = steps[i]; const n = step.beats?.length || 1;
+    for (let b = from; b < n; b++) {
+      if (runRef.current !== run) return false;
+      setBeat(b);
+      await narrateBeat(step, b, run);
+      if (runRef.current !== run) return false;
+      if (b < n - 1) await new Promise((r) => setTimeout(r, 350));
+    }
+    return runRef.current === run;
+  };
+  const speak = async () => {
+    if (speaking) { stopAll(); setMovie(false); return; }
+    if (!st) return;
+    const run = ++runRef.current;
+    await playStep(k, run, 0);
+    if (runRef.current === run) setSpeaking(false);
+  };
+  /* ▶ כסרטון: מהצעד הנוכחי עד הסוף */
   const playMovie = async () => {
-    if (movieRef.current) { movieRef.current = false; setMovie(false); stopAll(); return; }
-    movieRef.current = true; setMovie(true);
+    if (movie) { stopAll(); setMovie(false); return; }
+    const run = ++runRef.current; setMovie(true);
     let i = kRef.current;
-    while (movieRef.current && i < steps.length) {
-      setK(i);
-      await narrate(steps[i]);
-      if (!movieRef.current) break;
+    while (runRef.current === run && i < steps.length) {
+      setK(i); setBeat(0);
+      const ok = await playStep(i, run, 0);
+      if (!ok) break;
       await new Promise((r) => setTimeout(r, 900));
       i++;
     }
-    movieRef.current = false; setMovie(false); setSpeaking(false);
+    if (runRef.current === run) { setMovie(false); setSpeaking(false); }
   };
-  const go = (i) => { movieRef.current = false; setMovie(false); stopAll(); setK(i); };
-  const hq = !!(voices && st && voices[st.id]);
+  const go = (i) => { stopAll(); setMovie(false); setK(i); setBeat(0); };
+  const goBeat = (b) => { stopAll(); setMovie(false); setBeat(b); };
+  /* ── הלייזר: מקצה המצביע אל היעד של הפעימה, בפיקסלים של הבמה ── */
+  const aimAt = () => {
+    const stage = stageRef.current, img = imgRef.current, tip = tipRef.current;
+    if (!stage || !img || !tip || !bt.at) return null;
+    const box = boxes[shot]?.[bt.at]; if (!box) return null;
+    const S = stage.getBoundingClientRect(), I = img.getBoundingClientRect(), T = tip.getBoundingClientRect();
+    if (!I.width) return null;
+    const bx = I.left - S.left + box[0] * I.width, by = I.top - S.top + box[1] * I.height, bw = box[2] * I.width, bh = box[3] * I.height;
+    return { x1: T.left - S.left + T.width / 2, y1: T.top - S.top + T.height / 2, x2: bx + bw / 2, y2: by + bh / 2, box: [bx, by, bw, bh], W: S.width, H: S.height };
+  };
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      const t = aimAt();
+      if (!t) { setLaser(null); tweenRef.current = null; return; }
+      const from = tweenRef.current || { x2: t.x1, y2: t.y1 };
+      const t0 = performance.now(), D = 420;
+      cancelAnimationFrame(raf);
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / D), e = 1 - Math.pow(1 - p, 3);
+        const cur = { ...t, x2: from.x2 + (t.x2 - from.x2) * e, y2: from.y2 + (t.y2 - from.y2) * e, p };
+        tweenRef.current = cur; setLaser(cur);
+        if (p < 1) raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    };
+    update();
+    const img = imgRef.current; img?.addEventListener("load", update);
+    const ro = typeof ResizeObserver !== "undefined" && stageRef.current ? new ResizeObserver(() => { const t = aimAt(); if (t) { tweenRef.current = { ...t, p: 1 }; setLaser({ ...t, p: 1 }); } else setLaser(null); }) : null;
+    ro?.observe(stageRef.current);
+    return () => { cancelAnimationFrame(raf); img?.removeEventListener("load", update); ro?.disconnect(); };
+  }, [k, beat, shot, boxes, data]);
+  /* בזמן הקריינות: המשפט הנוכחי נשאר גלוי מתחת לבמה (הבמה דביקה למעלה) */
+  useEffect(() => {
+    if (!speaking) return;
+    const el = document.querySelector(".help-beat.on"), stage = stageRef.current; if (!el) return;
+    const scroller = [el.parentElement, el.closest(".help-body"), el.closest(".screen-body")].find((x) => x && x.scrollHeight > x.clientHeight + 4) || el.closest(".help-body");
+    if (!scroller) return;
+    const r = el.getBoundingClientRect(), sr = scroller.getBoundingClientRect(), top = (stage ? stage.getBoundingClientRect().bottom : sr.top) + 8;
+    if (r.top < top) scroller.scrollBy({ top: r.top - top, behavior: "smooth" });
+    else if (r.bottom > sr.bottom - 8) scroller.scrollBy({ top: r.bottom - sr.bottom + 8, behavior: "smooth" });
+  }, [beat, speaking]);
+  const aim = laser ? (() => { const dx = laser.x2 - laser.x1, dy = laser.y2 - laser.y1, L = Math.hypot(dx, dy) || 1; return { ax: dx / L, ay: dy / L }; })() : null;
+  const hq = !!(voices && st && voices[`${st.id}-1`]);
   return (
     <div className="help" dir="rtl" role="dialog" aria-label="המדריך">
       <div className="help-head">
         <span className="help-title">❔ המדריך · {steps.length ? `${k + 1} / ${steps.length}` : ""}</span>
         <button className={"tts-btn sm " + (movie ? "" : "ghost")} onClick={playMovie} disabled={!steps.length} title="עובר על כל הצעדים ברצף, עם קריינות">{movie ? "⏹ עצור את הסרטון" : "▶ כסרטון"}</button>
-        <button className="tts-btn sm" onClick={() => { movieRef.current = false; stopAll(); onClose(); }}>↩ חזרה ללימוד</button>
+        <button className="tts-btn sm" onClick={() => { stopAll(); onClose(); }}>↩ חזרה ללימוד</button>
       </div>
       {err && <div className="err">{err}</div>}
       {!data && !err && <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את המדריך…</p></div>}
@@ -2072,10 +2206,27 @@ function HelpView({ onClose }) {
             <button className={"tts-btn sm " + (speaking ? "" : "ghost")} onClick={speak} title={hq ? "קריינות: קול איכותי" : "קריינות: קול הדפדפן"}>{speaking ? "⏹ עצור" : hq ? "🎙 הקרא" : "🔊 הקרא"}</button>
             <button className="tts-btn ghost sm" onClick={() => go(Math.min(steps.length - 1, k + 1))} disabled={k >= steps.length - 1}>הבא ←</button>
           </div>
+          {shot && (
+            <div className="help-stage" ref={stageRef} dir="ltr">
+              <div className="help-owl"><GuideOwl aim={aim} talking={speaking} /><span className="owl-tip" ref={tipRef} /></div>
+              <img ref={imgRef} className="help-shot" src={"/guide/shots/" + shot + "?v=" + v} alt={st.title} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+              {laser && (
+                <svg className="help-laser" viewBox={`0 0 ${laser.W} ${laser.H}`} width={laser.W} height={laser.H} aria-hidden="true">
+                  <defs><filter id="lz-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter></defs>
+                  <line className="lz-beam-glow" x1={laser.x1} y1={laser.y1} x2={laser.x2} y2={laser.y2} />
+                  <line className="lz-beam" x1={laser.x1} y1={laser.y1} x2={laser.x2} y2={laser.y2} />
+                  {laser.p >= 1 && <rect className="lz-box" x={laser.box[0] - 3} y={laser.box[1] - 3} width={laser.box[2] + 6} height={laser.box[3] + 6} rx="6" />}
+                  <circle className="lz-dot-glow" cx={laser.x2} cy={laser.y2} r="7" />
+                  <circle className="lz-dot" cx={laser.x2} cy={laser.y2} r="3.2" />
+                </svg>
+              )}
+            </div>
+          )}
           <h2 className="help-h"><span className="n">{k + 1}</span>{st.title}</h2>
-          <p className="help-text">{st.text}</p>
+          <p className="help-text">
+            {beats.map((b, i) => <span key={i} className={"help-beat" + (i === beat ? " on" : "") + (b.at ? " aimed" : "")} onClick={() => goBeat(i)} title={b.at ? "הלייזר מצביע" : undefined}>{b.say} </span>)}
+          </p>
           {st.tip && <div className="help-tip">💡 {st.tip}</div>}
-          {st.shot && <img className="help-shot" src={"/guide/shots/" + st.shot} alt={st.title} loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
           <div className="help-dots">{steps.map((x, i) => <button key={x.id} className={"help-dot " + (i === k ? "on" : "")} onClick={() => go(i)} title={x.title} />)}</div>
           <div className="help-foot">המדריך המלא, עם טופס משוב: <a href={SITE_URL + "/guide/"} target="_blank" rel="noopener noreferrer">famous-rolypoly…/guide</a></div>
         </div>
@@ -4470,7 +4621,7 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
                 {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? "יציאה ממסך מלא" : "מסך מלא — הטלוויזיה על כל המסך"} aria-label="מסך מלא">⛶</button>}
                 <button className={"font-btn" + (bgOpen ? " on" : "")} onClick={() => setBgOpen((v) => !v)} title="הרקע מסביב לטלוויזיה" aria-label="רקע">🎨</button>
-                <button className="font-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
+                <button className="font-btn print-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
                 <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? "חזרה ללימוד" : "המדריך: איך משתמשים"} aria-label="המדריך">❔</button>
@@ -5965,7 +6116,9 @@ const css = `
 /* מבחן */
 .fm-wrap{width:100%}
 .fm-hint{font-size:.85rem;color:#6c6449;margin:0 0 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.fm-canvas{position:relative;width:100%;background:#faf7ee;border:1.5px solid #d8d0ba;border-radius:14px;overflow:hidden;touch-action:none}
+.fm-sizer{position:relative;margin-inline-start:auto}
+.fm-scale{position:absolute;top:0;right:0;touch-action:none}
+.fm-canvas{position:relative;width:100%;background:#faf7ee;border:1.5px solid #d8d0ba;border-radius:14px;overflow:auto;touch-action:pan-x pan-y}
 .fm-lines{position:absolute;inset:0}
 .fm-lines line{stroke:#c9b98a;stroke-width:2}
 .fm-node{position:absolute;transform:translate(-50%,-50%);cursor:grab;user-select:none;border-radius:12px;padding:8px 14px;font-size:.9rem;line-height:1.4;max-width:190px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.12)}
@@ -6215,7 +6368,7 @@ const css = `
 .reader-pop{position:absolute;top:calc(100% + 6px);right:10px;left:auto;z-index:40;min-width:300px;max-width:min(92vw,560px);background:#fff8e6;color:#3a2c14;border:1.5px solid #e0c98f;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:'Heebo',sans-serif;white-space:normal;text-align:start}
 .reader-pop .reader-row{flex-wrap:wrap}
 @media (max-width:640px){.screen-bar{flex-wrap:wrap;row-gap:6px}.reader-slot{order:3;margin-inline-start:0}.reader-pop{left:8px;right:8px;min-width:0;max-width:none}}
-.help{flex:1 1 auto;min-height:0;background:var(--paper);color:var(--ink);display:flex;flex-direction:column;overflow:hidden;font-family:'Heebo',sans-serif}
+.help{flex:1 1 auto;min-height:0;background:var(--paper);color:var(--ink);display:flex;flex-direction:column;overflow:clip;font-family:'Heebo',sans-serif}
 .screen-body.behind-help{display:none}
 .help .tts-btn{padding:6px 12px;font-size:.9rem;box-shadow:none}
 .help-nav .tts-btn{white-space:nowrap}
@@ -6234,6 +6387,37 @@ const css = `
 .help-dot.on{background:var(--amber);border-color:var(--amber)}
 .help-foot{text-align:center;color:#8a8467;font-size:.85rem}
 .help-btn.on{border-color:var(--amber);color:var(--amber)}
+/* ── הבמה של המדריך: הינשוף, הצילום והלייזר (צ'אט 22) ── */
+.help-stage{position:sticky;top:-16px;z-index:3;display:flex;align-items:flex-end;justify-content:center;gap:4px;align-self:stretch;margin:-6px -22px 0;padding:10px 22px 8px;background:var(--paper);box-shadow:0 10px 14px -12px rgba(0,0,0,.35)}
+.help-stage .help-shot{align-self:auto;width:auto;max-width:min(420px,calc(100% - 118px));max-height:min(56vh,600px)}
+.help-owl{position:relative;flex:0 0 auto;width:clamp(76px,24%,120px);margin-bottom:4px;filter:drop-shadow(0 6px 10px rgba(0,0,0,.25))}
+.owl{width:100%;height:auto;display:block;overflow:visible}
+.owl-tip{position:absolute;left:93.3%;top:41.4%;width:2px;height:2px;pointer-events:none}
+.owl-head{transition:transform .45s ease}
+.owl-eyes circle{transition:cx .4s ease,cy .4s ease}
+.owl-lids rect{transform-box:fill-box;transform-origin:center;transform:scaleY(0);animation:owlBlink 4.6s infinite}
+.owl-lids rect:last-child{animation-delay:.05s}
+@keyframes owlBlink{0%,92%,100%{transform:scaleY(0)}95%{transform:scaleY(1)}}
+.owl-body{transform-origin:60px 100px;animation:owlBreath 3.4s ease-in-out infinite}
+@keyframes owlBreath{0%,100%{transform:scale(1)}50%{transform:scale(1.02,1.035)}}
+.owl-beak{transform-box:fill-box;transform-origin:50% 0}
+.owl.talk .owl-beak{animation:owlTalk .3s ease-in-out infinite alternate}
+@keyframes owlTalk{from{transform:scaleY(.55)}to{transform:scaleY(1.3)}}
+.owl-laser-src{animation:lzSrc 1.1s ease-in-out infinite}
+@keyframes lzSrc{0%,100%{opacity:1}50%{opacity:.45}}
+.help-laser{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.lz-beam{stroke:#ff3b30;stroke-width:1.6;stroke-linecap:round;fill:none}
+.lz-beam-glow{stroke:#ff3b30;stroke-width:5;opacity:.3;filter:url(#lz-glow);fill:none}
+.lz-dot{fill:#ff3b30}
+.lz-dot-glow{fill:#ff3b30;opacity:.35;filter:url(#lz-glow);transform-box:fill-box;transform-origin:center;animation:lzPulse 1.1s ease-in-out infinite}
+@keyframes lzPulse{0%,100%{transform:scale(1);opacity:.35}50%{transform:scale(1.7);opacity:.12}}
+.lz-box{fill:rgba(255,59,48,.07);stroke:#ff3b30;stroke-width:1.5;stroke-dasharray:4 3;animation:lzBox .45s ease-out}
+@keyframes lzBox{from{opacity:0;stroke-width:4}to{opacity:1;stroke-width:1.5}}
+.help-beat{cursor:pointer;border-radius:4px;padding:0 2px;transition:background .25s,box-shadow .25s}
+.help-beat:hover{background:#fff3d6}
+.help-beat.on{background:#ffe9b3;box-shadow:0 0 0 1px #e0c98f}
+@media (prefers-reduced-motion:reduce){.owl-lids rect,.owl-body,.owl.talk .owl-beak,.lz-dot-glow,.owl-laser-src{animation:none}}
+@media (max-width:640px){.help-stage{gap:2px;margin:-6px -16px 0;padding:6px 10px 4px}.help-stage .help-shot{max-width:calc(100% - 70px);max-height:40vh}.help-owl{width:66px}}
 .reader.mini{padding:3px 8px}
 .reader .tts-btn.sm{padding:4px 9px;font-size:.85rem;min-width:34px}
 .kara-pick .kara-sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:var(--sw,#f8d98a);margin-inline-end:4px}
@@ -6267,7 +6451,8 @@ const css = `
 .tv-base{width:260px;height:12px;margin-top:2px;background:linear-gradient(180deg,#232a4c,#171d3a);border:1px solid #323b68;border-radius:10px;box-shadow:0 8px 18px rgba(0,0,0,.45)}
 .busy-line{color:#7a5410;font-weight:700;font-size:.9rem}
 .nikud-btn{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.05rem;padding-bottom:3px}
-@media (max-width:480px){.font-btns{gap:4px;margin-inline-end:6px}.font-btn{min-width:30px}}
+/* בטלפון: 12 כפתורים לא נכנסים בשורה אחת (322px) — נגללים לשורה שנייה, וההדפסה מוסתרת (צ'אט 22: ☁ ✍️ בְּ נחתכו משמאל) */
+@media (max-width:480px){.font-btns{gap:4px;margin-inline-end:6px;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}.font-btn{min-width:30px}.font-btn.print-btn{display:none}}
 .nikud-msg{position:fixed;bottom:calc(18px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);z-index:60;background:#1b2a4a;color:#f8c778;border:1px solid var(--amber);border-radius:999px;padding:7px 16px;font-size:.88rem;box-shadow:0 4px 18px rgba(0,0,0,.35);max-width:90vw;text-align:center}
 .ch-key.gold{background:linear-gradient(180deg,#f5b95c,var(--amber));border-color:var(--amber-deep);color:#241a08}
 .ch-key.gold .key-num,.ch-key.gold .key-label{color:#241a08}
