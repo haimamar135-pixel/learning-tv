@@ -1305,15 +1305,16 @@ function applyWordPatch(w, s, e, patch) {
     .sort((a, b) => a.s - b.s);
 }
 /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין (txt = הנוסח המוצג) */
-function renderMarked(txt, mk, pend, kara) {
+function renderMarked(txt, mk, pend, kara, gloss) {
   const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
-  if (!mk && !pend && kara == null) return txt;
+  if (!mk && !pend && kara == null && !gloss) return txt;
   const base = {};
   if (mk) {
     if (mk.b) base.fontWeight = 800;
     if (mk.u) base.textDecoration = "underline";
     if (mk.hl) base.background = HL_COLORS[mk.hl];
   }
+  if (gloss) return renderGlossed(txt, w, base, kara, gloss);
   if (!w.length && !pend && kara == null) return <span style={base}>{txt}</span>;
   const pts = new Set([0, txt.length]);
   const clamp = (n) => Math.max(0, Math.min(n, txt.length));
@@ -1338,6 +1339,31 @@ function renderMarked(txt, mk, pend, kara) {
     const done = kara != null && e <= clamp(kara);
     const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : ""].filter(Boolean).join(" ") || undefined;
     nodes.push(<span key={k} className={cls} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
+  }
+  return nodes;
+}
+/* 📖 המילון הארמי בזמן ההקראה: כל מילה בשורה העליונה, ומתחתיה בקטן הפירוש העברי (gloss[k] למילה ה-k).
+   המילים שכבר נקראו מתמלאות כרגיל (kara-done), גם בתוך מילה. */
+function renderGlossed(txt, w, base, kara, gloss) {
+  const clamp = (n) => Math.max(0, Math.min(n, txt.length));
+  const kc = kara == null ? null : clamp(kara);
+  const toks = txt.match(/\s+|\S+/g) || [];
+  const nodes = [];
+  let pos = 0, k = 0;
+  for (const t of toks) {
+    const s = pos, e = pos + t.length;
+    pos = e;
+    if (/^\s+$/.test(t)) { nodes.push(t); continue; }
+    const r = w.find((r2) => clamp(r2.s) < e && clamp(r2.e) > s);
+    const st = { ...base };
+    if (r) { if (r.b) st.fontWeight = 800; if (r.u) st.textDecoration = "underline"; if (r.hl) st.background = HL_COLORS[r.hl]; }
+    const style = Object.keys(st).length ? st : undefined;
+    let top;
+    if (kc == null || kc <= s) top = <span className="gl-top" style={style}>{t}</span>;
+    else if (kc >= e) top = <span className="gl-top kara-done" style={style}>{t}</span>;
+    else top = <span className="gl-top" style={style}><span className="kara-done">{t.slice(0, kc - s)}</span>{t.slice(kc - s)}</span>;
+    const g = gloss[k++];
+    nodes.push(<span key={s} className="gl-w">{top}<span className="gl-t">{g || "\u00a0"}</span></span>);
   }
   return nodes;
 }
@@ -2068,7 +2094,7 @@ function pickHebrewVoice(synth) {
 }
 /* 🎙 קול איכותי: חתיכות של עד ~1,200 תווים (טקסט מנוקה), כל חתיכה = קובץ MP3 + זמני תווים.
    מפתח החתיכה כולל תמצית של הטקסט: אותו פרק באותו מצב = אותם קבצים, גם במכשיר אחר (דרך הענן). */
-const TTS_CHUNK = 1200;
+const TTS_CHUNK = 350; // eleven_v3 איטי: חתיכה קטנה כדי לסיים הרבה לפני 60 השניות של נטליפיי
 const ttsKey = (store, mode, n, text) => `tts:${store}:${mode}:${n}:${textHash(text)}`;
 function buildChunks(queue) {
   const chunks = []; let cur = null;
@@ -2082,7 +2108,7 @@ function buildChunks(queue) {
   }
   return chunks;
 }
-function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta }) {
+function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta, glossOn, onGloss, glossBusy }) {
   /* items: [{i, kind, text}] — המשפטים של הפרק בסדר הדף; kind = "zohar" | "sulam" | "" */
   const hasSulam = items.some((x) => x.kind === "sulam");
   const [mode, setMode] = useState("all");
@@ -2266,6 +2292,10 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
           </div>
           {hqBusy && <div className="reader-note busy-line">{hqBusy}</div>}
           {hqErr && <div className="err">{hqErr}</div>}
+          <div className="reader-row">
+            <button className={"pill " + (glossOn ? "on" : "")} onClick={() => onGloss?.(!glossOn)} title="פירוש עברי קצר מתחת לכל מילה ארמית בזמן ההקראה">📖 מילון ארמי {glossOn ? "· דולק" : ""}</button>
+            <span className="reader-note">{glossBusy || (glossOn ? "מתחת לכל מילה ארמית — הפירוש בעברית · מוכן פעם אחת ונשמר עם הספר" : "כבוי")}</span>
+          </div>
           <div className="reader-row pill-row">
             <span className="reader-note">צבע ההארה:</span>
             {KARA.map(([k, l]) => <button key={k} className={"pill kara-pick " + (theme === k ? "on" : "")} data-kara={k} onClick={() => setTheme(k)}><i className="kara-sw" /> {l}</button>)}
@@ -2662,18 +2692,96 @@ export default function LearningTV() {
   const [readerOn, setReaderOn] = useState(false);
   const [readPos, setReadPos] = useState(null);
   const [readerStart, setReaderStart] = useState(null);
-  const readSentRef = useRef(null);
+  /* הגלילה בזמן ההקראה: השורה הנקראת יושבת בקביעות מעט מעל מרכז המסך, והדף גולש אליה ברצף (בלי קפיצות).
+     נגיעה/גלגלת של הלומד משהה את המעקב ל-4 שניות. */
+  const reading = readPos != null;
   useEffect(() => {
-    const i = readPos?.i;
-    if (i == null || readSentRef.current === i) return;
-    readSentRef.current = i;
-    const el = document.querySelector(`.read-sents [data-si="${i}"]`);
-    const sb = el?.closest(".screen-body");
-    if (!el || !sb) return;
-    const rd = sb.querySelector(".reader");
-    const top = el.getBoundingClientRect().top - sb.getBoundingClientRect().top + sb.scrollTop - (rd ? rd.offsetHeight : 0) - 40;
-    sb.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  }, [readPos?.i]);
+    if (!reading) return;
+    let raf = 0, hold = 0, sb = null;
+    const onUser = () => { hold = Date.now() + 4000; };
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const sent = document.querySelector(".read-sents .kara-now");
+      if (!sent) return;
+      if (!sb) { sb = sent.closest(".screen-body"); if (!sb) return; sb.addEventListener("wheel", onUser, { passive: true }); sb.addEventListener("touchmove", onUser, { passive: true }); }
+      if (Date.now() < hold) return;
+      const done = sent.querySelectorAll(".kara-done");
+      const el = done.length ? done[done.length - 1] : sent;
+      const r = el.getBoundingClientRect(), b = sb.getBoundingClientRect();
+      const diff = (done.length ? r.top + r.height / 2 : r.top + 14) - (b.top + b.height * 0.42); /* השורה הנקראת: מעט מעל מרכז המסך, תמיד באותו גובה */
+      if (Math.abs(diff) < 1.5) return;
+      const step = diff * 0.045;
+      sb.scrollTop += Math.abs(step) < 0.6 ? Math.sign(diff) * 0.6 : step;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelAnimationFrame(raf); if (sb) { sb.removeEventListener("wheel", onUser); sb.removeEventListener("touchmove", onUser); } };
+  }, [reading]);
+  /* 📖 מילון ארמי בזמן ההקראה: לכל משפט ארמי נשמר ב-book.flex.gloss[i] מערך פירושים — פירוש עברי קצר לכל מילה (לפי סדר המילים).
+     מופק פעם אחת (Claude, חבילות של עד 3 משפטים, מהמשפט הנקרא והלאה) ונשמר עם הספר. */
+  const [glossOn, setGlossOn] = useState(() => { try { return localStorage.getItem("lomedtv-gloss") !== "off"; } catch { return true; } });
+  const [glossBusy, setGlossBusy] = useState("");
+  const glossRun = useRef(false);
+  useEffect(() => { try { localStorage.setItem("lomedtv-gloss", glossOn ? "on" : "off"); } catch {} }, [glossOn]);
+  const splitWords = (t) => (t || "").match(/\S+/g) || [];
+  const glossOf = (i) => {
+    if (!glossOn || !readerOn) return null;
+    const g = book?.flex?.gloss?.[i];
+    return Array.isArray(g) && g.length === splitWords(sentences[i]).length ? g : null;
+  };
+  /* ארמית? פסקה שאחריה "הסולם:", או (בספר בלי סולם) משפט שרוב סימניו ארמיים */
+  const isAramaicSent = (i, chParas) => {
+    const pi = chParas.findIndex(([st, c]) => i >= st && i < st + c);
+    if (pi < 0) return false;
+    const kind = paraKind(sentences, chParas, pi).trim();
+    if (kind === "sulam") return false;
+    if (kind === "zohar") return true;
+    const ws = splitWords(stripNikud(sentences[i]));
+    if (ws.length < 3) return false;
+    const hits = ws.filter((x) => /(א|ין|הו|וי)$/.test(x) || /^(ד|כד|בגין|אי|הא|לאו|מאן|האי|דא|כלא|קב"ה|דאיהו)/.test(x)).length;
+    return hits / ws.length >= 0.3;
+  };
+  useEffect(() => {
+    if (!glossOn || !readerOn || readPos?.i == null || glossRun.current) return;
+    const [rs, re] = chapterRanges[chIdx] || [0, 0];
+    const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
+    const todo = [];
+    const have = bookRef.current?.flex?.gloss || {};
+    for (let i = readPos.i; i < re && todo.length < 3; i++) {
+      if (have[i] || !isAramaicSent(i, chParas)) continue;
+      todo.push(i);
+      if (i - readPos.i > 6) break; // לא רצים קדימה יותר מדי — רק מה שבדרך
+    }
+    if (!todo.length) return;
+    glossRun.current = true;
+    setGlossBusy("📖 מכין את המילון…");
+    (async () => {
+      try {
+        const lists = todo.map((i) => splitWords(sentences[i]));
+        const body = todo.map((i, n) => `משפט ${n + 1}:\n` + lists[n].map((wd, k) => `${k + 1}. ${wd}`).join("\n")).join("\n\n");
+        const data = await askClaude(
+          `לפניך משפטים מהזוהר בארמית, מפוצלים למילים ממוספרות. לכל מילה כתוב פירוש עברי קצר (מילה אחת עד שלוש) לפי ההקשר במשפט — תרגום מילולי של המילה בלבד, לא ביאור. למילה שהיא כבר עברית/שם/ציון מקור (כגון "ישעיהו", "ל"ב:כ'", אות סימון) החזר מחרוזת ריקה. שמור על מספר הפירושים = מספר המילים, באותו סדר.\n\n${body}\n\nהחזר JSON בלבד: {"s":[["פירוש מילה 1","פירוש מילה 2",...], ...]} — מערך אחד לכל משפט, לפי הסדר.`,
+          1200,
+          true
+        );
+        const arr = Array.isArray(data?.s) ? data.s : [];
+        const b = bookRef.current; if (!b) return;
+        const gloss = { ...(b.flex?.gloss || {}) };
+        todo.forEach((i, n) => {
+          const g = Array.isArray(arr[n]) ? arr[n].map((x) => String(x || "").trim()) : [];
+          const need = lists[n].length;
+          gloss[i] = g.length >= need ? g.slice(0, need) : [...g, ...Array(need - g.length).fill("")];
+        });
+        await persist({ ...b, flex: { ...(b.flex || {}), gloss } });
+      } catch (e) {
+        setGlossBusy("📖 המילון לא הוכן: " + e.message);
+        setTimeout(() => setGlossBusy(""), 6000);
+        glossRun.current = false;
+        return;
+      }
+      setGlossBusy("");
+      glossRun.current = false;
+    })();
+  }, [glossOn, readerOn, readPos?.i, book?.flex?.gloss]);
   const [nikudOn, setNikudOn] = useState(() => { try { return localStorage.getItem("lomedtv-nikud") === "on"; } catch { return false; } }); // נִ הניקוד מוצג?
   const [nikudMsg, setNikudMsg] = useState("");
   const nikudRun = useRef(0); // מספר הריצה הנוכחית; כיבוי או ריצה חדשה עוצרים את הקודמת
@@ -3785,12 +3893,12 @@ export default function LearningTV() {
     dragJustRef.current = true;
     return true;
   };
-  const renderSentText = (plain, mk, pend, voc, kara) => {
+  const renderSentText = (plain, mk, pend, voc, kara, gloss) => {
     const txt = voc || plain;
     const cv = voc ? (r) => ({ ...r, s: nikudOff(plain, voc, r.s), e: nikudOff(plain, voc, r.e) }) : (r) => r;
     const w = ((mk && Array.isArray(mk.w)) ? mk.w : []).map(cv);
     const kc = kara == null ? null : voc ? nikudOff(plain, voc, kara) : kara;
-    return renderMarked(txt, mk ? { ...mk, w } : mk, pend ? cv(pend) : pend, kc);
+    return renderMarked(txt, mk ? { ...mk, w } : mk, pend ? cv(pend) : pend, kc, gloss || null);
   };
 
   /* בקשה ג': סימון קטע בתצוגת הפרק (ערוץ 00) —
@@ -4990,6 +5098,7 @@ export default function LearningTV() {
                     const items = [];
                     chParas.forEach(([start, count], pi) => { const kind = paraKind(sentences, chParas, pi).trim(); for (let i = start; i < start + count; i++) items.push({ i, kind, text: sentences[i] }); });
                     return <Reader key={key(chIdx, "reader")} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }}
+                      glossOn={glossOn} onGloss={setGlossOn} glossBusy={glossBusy}
                       store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
                   {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
@@ -5023,7 +5132,7 @@ export default function LearningTV() {
                                 onClick={() => (readerOn ? setReaderStart({ i, t: Date.now() }) : onReadSentClick(i))}
                               >
                                 {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
-                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i), readPos && readPos.i === i ? readPos.c : null)}
+                                {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i), readPos && readPos.i === i ? readPos.c : null, glossOf(i))}
                                 {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
                                 {book.notes?.[i] && (
                                   <sup
@@ -5910,7 +6019,14 @@ const css = `
 /* קריאה — טקסט הפרק */
 .read{display:flex;flex-direction:column;gap:16px}
 .read-sents{white-space:normal}
+.read-sents:has(.kara-now){padding-bottom:60vh}
 .read-sents .scroll-para{padding:0;margin:0 0 14px}
+/* 📖 המילון הארמי: המילה למעלה, הפירוש העברי קטן מתחתיה */
+.gl-w{display:inline-flex;flex-direction:column;align-items:center;vertical-align:baseline;line-height:1.1;margin:0 .04em}
+.gl-top{white-space:nowrap}
+.gl-t{font-family:'Heebo',sans-serif;font-weight:400;font-size:.44em;line-height:1.1;color:#8a6a2a;white-space:nowrap;margin-top:2px;max-width:9em;overflow:hidden;text-overflow:ellipsis;direction:rtl}
+.scroll-para:has(.gl-w){line-height:1.75}
+.kara-now .gl-t{color:#5c4410}
 .scroll-para.zohar{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.2em;color:#1a1408;margin-bottom:6px}
 .scroll-para.sulam,.read-sents .scroll-para.sulam{color:#4d4636;border-inline-start:3px solid var(--amber);padding-inline-start:12px;margin-bottom:22px}
 .read-mark-hint{margin:0}
