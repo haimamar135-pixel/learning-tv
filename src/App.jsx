@@ -5473,7 +5473,11 @@ const css = `
 }
 *{box-sizing:border-box;margin:0;padding:0}
 .studio{
-  min-height:100vh;background:radial-gradient(120% 90% at 50% 0%,var(--studio-2),var(--studio) 70%);
+  min-height:100vh;
+  background:
+    radial-gradient(70% 55% at 50% 38%,rgba(246,205,140,.07),transparent 70%),
+    radial-gradient(120% 90% at 50% 0%,var(--studio-2),var(--studio) 70%),
+    linear-gradient(180deg,#0f1530,#080b1a);
   font-family:'Heebo',sans-serif;color:#e8eaf4;
   display:flex;flex-direction:column;align-items:center;padding:28px 16px 60px;
   /* מובייל: לא להיכנס מתחת ל-notch ולפס הבית */
@@ -5608,10 +5612,33 @@ const css = `
 .mast-sub{color:#9aa1c4;font-size:.95rem}
  
 .tv{width:100%;max-width:1500px} /* צ'אט 20: הטלוויזיה גדלה עד שהיא נוגעת בגובה או ברוחב של המסך, ושומרת על הפרופורציה של טלוויזיה */
+/* ── הטלוויזיה כגוף (צ'אט 21): מסגרת עם עומק, מסך שקוע, והילה חמה על הקיר מאחור (כמו תאורת רקע של טלוויזיה) ── */
 .bezel{
-  background:linear-gradient(180deg,#232a4c,#171d3a);
-  border:1px solid #323b68;border-radius:26px;padding:16px;
-  box-shadow:0 22px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
+  position:relative;
+  background:linear-gradient(160deg,#2a3258 0%,#1b2244 45%,#141a35 100%);
+  border:1px solid #39436f;border-radius:26px;padding:16px;
+  box-shadow:
+    0 30px 70px rgba(0,0,0,.6),
+    0 0 0 1px rgba(0,0,0,.5),
+    0 0 90px 18px rgba(242,190,120,.10),
+    inset 0 1px 0 rgba(255,255,255,.10),
+    inset 0 -2px 0 rgba(0,0,0,.45),
+    inset 1px 0 0 rgba(255,255,255,.04),
+    inset -1px 0 0 rgba(0,0,0,.3);
+}
+.bezel::before{ /* ברק עדין על הקצה העליון של המסגרת */
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(180deg,rgba(255,255,255,.07),rgba(255,255,255,0) 18%);
+}
+.bezel::after{ /* ההילה על הקיר — דועכת למטה ולצדדים */
+  content:"";position:absolute;inset:-6% -4% -2%;z-index:-1;border-radius:40px;pointer-events:none;
+  background:radial-gradient(60% 55% at 50% 40%,rgba(246,205,140,.16),rgba(246,205,140,.05) 55%,transparent 75%);
+  filter:blur(18px);
+}
+.screen{box-shadow:inset 0 0 0 1px rgba(0,0,0,.6),inset 0 6px 18px rgba(0,0,0,.55),inset 0 -3px 10px rgba(0,0,0,.35)}
+.screen::before{ /* ויניטה קלה בפינות המסך — זכוכית */
+  content:"";position:absolute;inset:0;pointer-events:none;z-index:3;border-radius:inherit;
+  background:radial-gradient(120% 100% at 50% 50%,transparent 70%,rgba(20,16,8,.12) 100%);
 }
 .screen{
   position:relative;background:#0a0e20;border-radius:16px;overflow:hidden;
