@@ -1,122 +1,562 @@
 {
- "install": {
-  "hash": "6c10e4b1cd",
-  "bytes": 344860,
-  "chars": 414,
+ "install-1": {
+  "hash": "e7d5830181",
+  "bytes": 132328,
+  "chars": 144,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:09:30.672Z"
+  "at": "2026-10-05T22:17:48.290Z"
  },
- "face": {
-  "hash": "bba1235d67",
-  "bytes": 158032,
-  "chars": 204,
+ "install-2": {
+  "hash": "7c6188d140",
+  "bytes": 60021,
+  "chars": 72,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:09:37.820Z"
+  "at": "2026-10-05T22:17:51.167Z"
  },
- "book": {
-  "hash": "06794790a2",
-  "bytes": 392298,
-  "chars": 421,
+ "install-3": {
+  "hash": "4aa03b1f00",
+  "bytes": 26166,
+  "chars": 22,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:09:52.804Z"
+  "at": "2026-10-05T22:17:52.925Z"
  },
- "guide": {
-  "hash": "15d9c94039",
-  "bytes": 472964,
-  "chars": 425,
+ "install-4": {
+  "hash": "25f49ebba6",
+  "bytes": 24912,
+  "chars": 24,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:10:08.140Z"
+  "at": "2026-10-05T22:17:54.255Z"
  },
- "remote": {
-  "hash": "ff9bbc9228",
-  "bytes": 347995,
-  "chars": 381,
+ "install-5": {
+  "hash": "514044f20d",
+  "bytes": 155524,
+  "chars": 182,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:10:21.927Z"
+  "at": "2026-10-05T22:18:00.959Z"
  },
- "layer": {
-  "hash": "2f0c5dd110",
-  "bytes": 418421,
-  "chars": 490,
+ "face-1": {
+  "hash": "7833d6b9da",
+  "bytes": 63364,
+  "chars": 72,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:10:37.132Z"
+  "at": "2026-10-05T22:18:03.693Z"
  },
- "reader": {
-  "hash": "cf3f078da6",
-  "bytes": 396687,
-  "chars": 422,
+ "face-2": {
+  "hash": "c74b8ab393",
+  "bytes": 43511,
+  "chars": 55,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:10:50.933Z"
+  "at": "2026-10-05T22:18:05.723Z"
  },
- "dict": {
-  "hash": "6000a68bc8",
-  "bytes": 282793,
-  "chars": 340,
+ "face-3": {
+  "hash": "b955c9b6f9",
+  "bytes": 85098,
+  "chars": 100,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:02.465Z"
+  "at": "2026-10-05T22:18:09.527Z"
  },
- "nikud": {
-  "hash": "4f01c03513",
-  "bytes": 176004,
-  "chars": 223,
+ "book-1": {
+  "hash": "ed88c91ac1",
+  "bytes": 63364,
+  "chars": 65,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:10.368Z"
+  "at": "2026-10-05T22:18:11.891Z"
  },
- "scroll": {
-  "hash": "87d6747af4",
-  "bytes": 174541,
-  "chars": 187,
+ "book-2": {
+  "hash": "ee104fb2f1",
+  "bytes": 27420,
+  "chars": 35,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:17.138Z"
+  "at": "2026-10-05T22:18:13.301Z"
  },
- "mirror": {
-  "hash": "82ae9bedb5",
-  "bytes": 242460,
-  "chars": 283,
+ "book-3": {
+  "hash": "cd0fa4aa86",
+  "bytes": 32644,
+  "chars": 39,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:26.436Z"
+  "at": "2026-10-05T22:18:15.104Z"
  },
- "share": {
-  "hash": "1fa15ccba1",
-  "bytes": 253327,
-  "chars": 281,
+ "book-4": {
+  "hash": "4958c357ef",
+  "bytes": 33271,
+  "chars": 30,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:37.452Z"
+  "at": "2026-10-05T22:18:16.761Z"
  },
- "shelf": {
-  "hash": "e3be7ff51e",
-  "bytes": 166391,
-  "chars": 167,
+ "book-5": {
+  "hash": "815b566dff",
+  "bytes": 55632,
+  "chars": 62,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:43.121Z"
+  "at": "2026-10-05T22:18:19.343Z"
  },
- "tools": {
-  "hash": "632a316b63",
-  "bytes": 182274,
-  "chars": 178,
+ "book-6": {
+  "hash": "45d03bee8c",
+  "bytes": 53751,
+  "chars": 64,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:11:49.658Z"
+  "at": "2026-10-05T22:18:21.608Z"
  },
- "tests": {
+ "book-7": {
+  "hash": "4ea1b0831d",
+  "bytes": 191260,
+  "chars": 210,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:30.524Z"
+ },
+ "guide-1": {
+  "hash": "1531be3743",
+  "bytes": 29928,
+  "chars": 36,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:32.084Z"
+ },
+ "guide-2": {
+  "hash": "dd29b28ba6",
+  "bytes": 35779,
+  "chars": 44,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:34.089Z"
+ },
+ "guide-3": {
+  "hash": "f8c74023c3",
+  "bytes": 38287,
+  "chars": 49,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:36.268Z"
+ },
+ "guide-4": {
+  "hash": "a8d0b66b31",
+  "bytes": 19061,
+  "chars": 30,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:37.803Z"
+ },
+ "guide-5": {
+  "hash": "a9306f9b72",
+  "bytes": 124804,
+  "chars": 131,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:42.719Z"
+ },
+ "channels-1": {
+  "hash": "60309cbb3f",
+  "bytes": 109340,
+  "chars": 135,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:47.628Z"
+ },
+ "channels-2": {
+  "hash": "e1d3544364",
+  "bytes": 42884,
+  "chars": 45,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:50.093Z"
+ },
+ "channels-3": {
+  "hash": "06ea87fb2c",
+  "bytes": 71515,
+  "chars": 78,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:54.284Z"
+ },
+ "channels-4": {
+  "hash": "6ed227ef93",
+  "bytes": 16553,
+  "chars": 16,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:55.881Z"
+ },
+ "channels-5": {
+  "hash": "144b6c6e84",
+  "bytes": 60021,
+  "chars": 70,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:18:58.937Z"
+ },
+ "channels-6": {
+  "hash": "2e17855b38",
+  "bytes": 75485,
+  "chars": 80,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:02.176Z"
+ },
+ "channels-7": {
+  "hash": "3e5ed923cb",
+  "bytes": 43511,
+  "chars": 47,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:04.303Z"
+ },
+ "channels-8": {
+  "hash": "e0750a5991",
+  "bytes": 84471,
+  "chars": 94,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:07.647Z"
+ },
+ "channels-9": {
+  "hash": "32cb39264e",
+  "bytes": 15926,
+  "chars": 15,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:08.962Z"
+ },
+ "channels-10": {
+  "hash": "0a7ad583c7",
+  "bytes": 73604,
+  "chars": 78,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:12.381Z"
+ },
+ "channels-11": {
+  "hash": "1c0c89b99a",
+  "bytes": 136925,
+  "chars": 147,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:17.353Z"
+ },
+ "layer-1": {
+  "hash": "f46760ccf9",
+  "bytes": 136925,
+  "chars": 126,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:22.870Z"
+ },
+ "layer-2": {
+  "hash": "bcdbbeb827",
+  "bytes": 153435,
+  "chars": 184,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:28.849Z"
+ },
+ "layer-3": {
+  "hash": "e005611c01",
+  "bytes": 61901,
+  "chars": 76,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:31.803Z"
+ },
+ "layer-4": {
+  "hash": "e1ee1f82bb",
+  "bytes": 61901,
+  "chars": 86,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:34.608Z"
+ },
+ "reader-1": {
+  "hash": "2b223970a7",
+  "bytes": 40795,
+  "chars": 37,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:36.629Z"
+ },
+ "reader-2": {
+  "hash": "8420a3573a",
+  "bytes": 31181,
+  "chars": 39,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:38.379Z"
+ },
+ "reader-3": {
+  "hash": "084ee5ca60",
+  "bytes": 51035,
+  "chars": 56,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:40.246Z"
+ },
+ "reader-4": {
+  "hash": "c8b226ad48",
+  "bytes": 94711,
+  "chars": 108,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:43.829Z"
+ },
+ "reader-5": {
+  "hash": "596e0d10e1",
+  "bytes": 194395,
+  "chars": 185,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:50.106Z"
+ },
+ "dict-1": {
+  "hash": "565374f416",
+  "bytes": 54378,
+  "chars": 68,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:52.645Z"
+ },
+ "dict-2": {
+  "hash": "768842e139",
+  "bytes": 50408,
+  "chars": 68,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:19:55.174Z"
+ },
+ "dict-3": {
+  "hash": "dfca511cc8",
+  "bytes": 172661,
+  "chars": 202,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:01.640Z"
+ },
+ "nikud-1": {
+  "hash": "9bb173f026",
+  "bytes": 79247,
+  "chars": 100,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:05.242Z"
+ },
+ "nikud-2": {
+  "hash": "cc6bd1446b",
+  "bytes": 94084,
+  "chars": 122,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:09.231Z"
+ },
+ "scroll-1": {
+  "hash": "8c6b9421e4",
+  "bytes": 49781,
+  "chars": 45,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:11.162Z"
+ },
+ "scroll-2": {
+  "hash": "febb45622e",
+  "bytes": 51661,
+  "chars": 60,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:14.132Z"
+ },
+ "scroll-3": {
+  "hash": "897713ac11",
+  "bytes": 30555,
+  "chars": 29,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:15.797Z"
+ },
+ "scroll-4": {
+  "hash": "24f8f0a0a0",
+  "bytes": 17180,
+  "chars": 22,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:16.829Z"
+ },
+ "scroll-5": {
+  "hash": "c003d2ef12",
+  "bytes": 58767,
+  "chars": 73,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:19.255Z"
+ },
+ "mirror-1": {
+  "hash": "ebe56aafd4",
+  "bytes": 76112,
+  "chars": 89,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:22.268Z"
+ },
+ "mirror-2": {
+  "hash": "bb6e63466b",
+  "bytes": 58767,
+  "chars": 73,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:24.782Z"
+ },
+ "mirror-3": {
+  "hash": "945151726d",
+  "bytes": 108713,
+  "chars": 129,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:29.603Z"
+ },
+ "share-1": {
+  "hash": "39c96e120d",
+  "bytes": 41421,
+  "chars": 42,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:31.480Z"
+ },
+ "share-2": {
+  "hash": "9897415801",
+  "bytes": 43511,
+  "chars": 57,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:33.585Z"
+ },
+ "share-3": {
+  "hash": "6e2c30c7ab",
+  "bytes": 72977,
+  "chars": 67,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:36.365Z"
+ },
+ "share-4": {
+  "hash": "61910556e2",
+  "bytes": 102235,
+  "chars": 119,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:40.406Z"
+ },
+ "shelf-1": {
+  "hash": "06521b816b",
+  "bytes": 61901,
+  "chars": 65,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:43.147Z"
+ },
+ "shelf-2": {
+  "hash": "fe2b9e94ce",
+  "bytes": 12791,
+  "chars": 11,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:44.191Z"
+ },
+ "shelf-3": {
+  "hash": "f0775b24fd",
+  "bytes": 45392,
+  "chars": 47,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:46.662Z"
+ },
+ "shelf-4": {
+  "hash": "d0534bac5b",
+  "bytes": 31181,
+  "chars": 41,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:48.439Z"
+ },
+ "tools-1": {
+  "hash": "cd08cb4407",
+  "bytes": 47273,
+  "chars": 60,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:50.732Z"
+ },
+ "tools-2": {
+  "hash": "c27d0ecfbb",
+  "bytes": 66499,
+  "chars": 69,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:53.970Z"
+ },
+ "tools-3": {
+  "hash": "3d871fc766",
+  "bytes": 12164,
+  "chars": 8,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:55.499Z"
+ },
+ "tools-4": {
+  "hash": "7272a45880",
+  "bytes": 23658,
+  "chars": 25,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:20:57.552Z"
+ },
+ "tools-5": {
+  "hash": "2f2f7c07a1",
+  "bytes": 46646,
+  "chars": 56,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:21:00.060Z"
+ },
+ "tools-6": {
+  "hash": "bf63c39233",
+  "bytes": 17180,
+  "chars": 11,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:21:01.033Z"
+ },
+ "tools-7": {
+  "hash": "79c5e8fda0",
+  "bytes": 28047,
+  "chars": 34,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:21:02.668Z"
+ },
+ "tools-8": {
+  "hash": "702f6866cb",
+  "bytes": 15926,
+  "chars": 10,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T22:21:03.700Z"
+ },
+ "tests-1": {
   "hash": "5ace10ccb7",
-  "bytes": 354473,
+  "bytes": 362205,
   "chars": 389,
   "voice": "onwK4e9ZLuTAKqWW03F9",
   "model": "eleven_v3",
-  "at": "2026-10-05T20:12:03.071Z"
+  "at": "2026-10-05T22:21:14.488Z"
  }
 }
