@@ -1,0 +1,122 @@
+{
+ "install": {
+  "hash": "6c10e4b1cd",
+  "bytes": 344860,
+  "chars": 414,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:09:30.672Z"
+ },
+ "face": {
+  "hash": "bba1235d67",
+  "bytes": 158032,
+  "chars": 204,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:09:37.820Z"
+ },
+ "book": {
+  "hash": "06794790a2",
+  "bytes": 392298,
+  "chars": 421,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:09:52.804Z"
+ },
+ "guide": {
+  "hash": "15d9c94039",
+  "bytes": 472964,
+  "chars": 425,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:10:08.140Z"
+ },
+ "remote": {
+  "hash": "ff9bbc9228",
+  "bytes": 347995,
+  "chars": 381,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:10:21.927Z"
+ },
+ "layer": {
+  "hash": "2f0c5dd110",
+  "bytes": 418421,
+  "chars": 490,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:10:37.132Z"
+ },
+ "reader": {
+  "hash": "cf3f078da6",
+  "bytes": 396687,
+  "chars": 422,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:10:50.933Z"
+ },
+ "dict": {
+  "hash": "6000a68bc8",
+  "bytes": 282793,
+  "chars": 340,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:02.465Z"
+ },
+ "nikud": {
+  "hash": "4f01c03513",
+  "bytes": 176004,
+  "chars": 223,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:10.368Z"
+ },
+ "scroll": {
+  "hash": "87d6747af4",
+  "bytes": 174541,
+  "chars": 187,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:17.138Z"
+ },
+ "mirror": {
+  "hash": "82ae9bedb5",
+  "bytes": 242460,
+  "chars": 283,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:26.436Z"
+ },
+ "share": {
+  "hash": "1fa15ccba1",
+  "bytes": 253327,
+  "chars": 281,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:37.452Z"
+ },
+ "shelf": {
+  "hash": "e3be7ff51e",
+  "bytes": 166391,
+  "chars": 167,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:43.121Z"
+ },
+ "tools": {
+  "hash": "632a316b63",
+  "bytes": 182274,
+  "chars": 178,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:11:49.658Z"
+ },
+ "tests": {
+  "hash": "5ace10ccb7",
+  "bytes": 354473,
+  "chars": 389,
+  "voice": "onwK4e9ZLuTAKqWW03F9",
+  "model": "eleven_v3",
+  "at": "2026-10-05T20:12:03.071Z"
+ }
+}
