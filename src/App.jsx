@@ -2726,8 +2726,10 @@ export default function LearningTV() {
   const glossOf = (i) => {
     if (!glossOn || view !== "tv" || channel !== "read") return null;
     const g = book?.flex?.gloss?.[i];
-    return Array.isArray(g) && g.length === splitWords(sentences[i]).length ? g : null;
+    return Array.isArray(g) && g.length === splitWords(sentences[i]).length && glossHasNikud(g) ? g : null;
   };
+  /* פירושים שהוכנו לפני שהמילון נוקד (בלי אף סימן ניקוד) מוכנים מחדש */
+  const glossHasNikud = (g) => { const t = g.filter(Boolean); return !t.length || t.some((x) => /[\u0591-\u05C7]/.test(x)); };
   /* ארמית? פסקה שאחריה "הסולם:", או (בספר בלי סולם) משפט שרוב סימניו ארמיים */
   const isAramaicSent = (i, chParas) => {
     const pi = chParas.findIndex(([st, c]) => i >= st && i < st + c);
@@ -2749,7 +2751,7 @@ export default function LearningTV() {
     /* בזמן הקראה — מהמשפט הנקרא והלאה; אחרת — כל הפרק הפתוח מתחילתו (בחבילות, אחת אחרי השנייה) */
     const from = readerOn && readPos?.i != null ? readPos.i : rs;
     for (let i = from; i < re && todo.length < 3; i++) {
-      if (have[i] || !isAramaicSent(i, chParas)) continue;
+      if ((have[i] && glossHasNikud(have[i])) || !isAramaicSent(i, chParas)) continue;
       todo.push(i);
     }
     if (!todo.length) return;
@@ -2760,7 +2762,7 @@ export default function LearningTV() {
         const lists = todo.map((i) => splitWords(sentences[i]));
         const body = todo.map((i, n) => `משפט ${n + 1}:\n` + lists[n].map((wd, k) => `${k + 1}. ${wd}`).join("\n")).join("\n\n");
         const data = await askClaude(
-          `לפניך משפטים מהזוהר בארמית, מפוצלים למילים ממוספרות. לכל מילה כתוב פירוש עברי קצר (מילה אחת עד שלוש) לפי ההקשר במשפט — תרגום מילולי של המילה בלבד, לא ביאור. למילה שהיא כבר עברית/שם/ציון מקור (כגון "ישעיהו", "ל"ב:כ'", אות סימון) החזר מחרוזת ריקה. שמור על מספר הפירושים = מספר המילים, באותו סדר.\n\n${body}\n\nהחזר JSON בלבד: {"s":[["פירוש מילה 1","פירוש מילה 2",...], ...]} — מערך אחד לכל משפט, לפי הסדר.`,
+          `לפניך משפטים מהזוהר בארמית, מפוצלים למילים ממוספרות. לכל מילה כתוב פירוש עברי קצר (מילה אחת עד שלוש) לפי ההקשר במשפט — תרגום מילולי של המילה בלבד, לא ביאור. כתוב כל פירוש בניקוד מלא ומדויק (למשל: "אָמַר", "שֶׁל הָעוֹלָם"). למילה שהיא כבר עברית/שם/ציון מקור (כגון "ישעיהו", "ל"ב:כ'", אות סימון) החזר מחרוזת ריקה. שמור על מספר הפירושים = מספר המילים, באותו סדר.\n\n${body}\n\nהחזר JSON בלבד: {"s":[["פירוש מילה 1","פירוש מילה 2",...], ...]} — מערך אחד לכל משפט, לפי הסדר.`,
           1200,
           true
         );
