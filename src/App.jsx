@@ -2026,7 +2026,7 @@ function Reader({ items, question, startAt, onPos, onClose }) {
   const [pos, setPos] = useState(-1);          // אינדקס בתור
   const queue = useMemo(() => items.filter((x) => mode === "all" || (mode === "zohar" ? x.kind === "zohar" : x.kind === "sulam")), [items, mode]);
   const posRef = useRef(-1), stateRef = useRef("idle"), timerRef = useRef(null), uRef = useRef(null), askedQ = useRef(false), rateRef = useRef(rate);
-  const [mini, setMini] = useState(false); // הנגן מכווץ לשורה אחת בזמן ההקראה
+  const [mini, setMini] = useState(true); // true = רק השורה בסרגל; false = לוח ההגדרות פתוח
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem("lomedtv-kara") || "amber"; } catch { return "amber"; } });
   const [showColors, setShowColors] = useState(false);
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -2089,21 +2089,43 @@ function Reader({ items, question, startAt, onPos, onClose }) {
   }, [startAt]);
   useEffect(() => { if (state !== "idle") stop(); }, [mode]);
   const step = (d) => { const k = Math.max(0, Math.min(queue.length - 1, (posRef.current < 0 ? 0 : posRef.current) + d)); play(k); };
-  if (!synth) return <div className="reader"><span className="reader-note">הדפדפן הזה לא תומך בהקראה.</span></div>;
   const KARA = [["amber", "ענבר"], ["green", "ירוק"], ["blue", "תכלת"], ["rose", "ורוד"], ["soft", "עדין"]];
-  if (mini) return (
-    <div className="reader mini" dir="rtl">
-      <div className="reader-row">
-        {state === "playing"
-          ? <button className="tts-btn sm" onClick={pause}>⏸</button>
-          : <button className="tts-btn sm" onClick={() => play()}>▶</button>}
-        <button className="tts-btn ghost sm" onClick={() => step(-1)} title="משפט קודם">⏮</button>
-        <button className="tts-btn ghost sm" onClick={() => step(1)} title="משפט הבא">⏭</button>
-        <span className="reader-pos">{pos >= 0 ? `${pos + 1}/${queue.length}` : queue.length}</span>
-        <button className="tts-btn ghost sm reader-x" onClick={() => setMini(false)} title="הרחב את הנגן">▾</button>
-      </div>
-    </div>
+  /* הנגן יושב בשורת המסך העליונה (ליד הכותרת, מימין לענן): שורה קטנה תמיד; ▾ פותח לוח מתחתיה עם קצב, צבע ומה להקריא */
+  const slot = typeof document !== "undefined" ? document.getElementById("reader-slot") : null;
+  const ui = !synth ? <span className="reader-note">הדפדפן הזה לא תומך בהקראה.</span> : (
+    <span className="reader-bar" dir="rtl">
+      {state === "playing"
+        ? <button className="rb-btn main" onClick={pause} title="השהה">⏸</button>
+        : <button className="rb-btn main" onClick={() => play()} title={state === "paused" ? "המשך" : "הקרא"}>▶</button>}
+      <button className="rb-btn" onClick={() => step(-1)} title="משפט קודם">⏮</button>
+      <button className="rb-btn" onClick={() => step(1)} title="משפט הבא">⏭</button>
+      <span className="rb-pos">{pos >= 0 ? `${pos + 1}/${queue.length}` : queue.length}</span>
+      <button className={"rb-btn " + (!mini ? "on" : "")} onClick={() => setMini((m) => !m)} title={mini ? "הגדרות ההקראה" : "סגור הגדרות"}>{mini ? "▾" : "▴"}</button>
+      <button className="rb-btn" onClick={() => { stop(); onClose?.(); }} title="סגור את ההקראה">✕</button>
+      {!mini && (
+        <div className="reader-pop" dir="rtl">
+          <div className="reader-row">
+            <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
+            <button className="tts-btn ghost sm" onClick={stop} title="עצור וחזור להתחלה">⏹ מההתחלה</button>
+          </div>
+          <div className="reader-row pill-row">
+            <span className="reader-note">צבע ההארה:</span>
+            {KARA.map(([k, l]) => <button key={k} className={"pill kara-pick " + (theme === k ? "on" : "")} data-kara={k} onClick={() => setTheme(k)}><i className="kara-sw" /> {l}</button>)}
+          </div>
+          {hasSulam && (
+            <div className="reader-row pill-row">
+              <span className="reader-note">מה להקריא:</span>
+              <button className={"pill " + (mode === "all" ? "on" : "")} onClick={() => setMode("all")}>הכול, כסדר הדף</button>
+              <button className={"pill " + (mode === "zohar" ? "on" : "")} onClick={() => setMode("zohar")}>הארמית בלבד</button>
+              <button className={"pill " + (mode === "sulam" ? "on" : "")} onClick={() => setMode("sulam")}>הסולם בלבד</button>
+            </div>
+          )}
+          <div className="reader-note">לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות</div>
+        </div>
+      )}
+    </span>
   );
+  if (slot) return createPortal(ui, slot);
   return (
     <div className="reader" dir="rtl">
       <div className="reader-row">
@@ -4103,6 +4125,7 @@ export default function LearningTV() {
                 {barTitle}
                 {(view === "tv" || view === "scroll") && book ? ` · ${book.title}` : ""}
               </span>
+              <span id="reader-slot" className="reader-slot" />
               <span className="font-btns">
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
@@ -5777,6 +5800,18 @@ const css = `
 :root[data-kara="soft"]{--kara-sent:transparent;--kara-line:#c9c0a8;--kara-word:#eee7d4}
 .scroll-sent.kara-now{background:var(--kara-sent);box-shadow:0 2px 0 var(--kara-line);border-radius:4px}
 .kara-done{background:var(--kara-word);color:#1a1408}
+.reader-slot{position:static;display:inline-flex;align-items:center;margin-inline-start:4px;flex:none}
+.screen-bar{position:relative}
+.screen-bar .ch-name{flex:1 1 auto;min-width:0}
+.reader-bar{display:inline-flex;align-items:center;gap:4px;background:#1b2a4a;border:1px solid var(--amber);border-radius:999px;padding:2px 6px}
+.rb-btn{background:transparent;border:none;color:#cfd3e6;font-size:.82rem;cursor:pointer;padding:3px 6px;border-radius:999px;line-height:1;font-family:inherit}
+.rb-btn:hover{background:#2a3a62}
+.rb-btn.main{background:var(--amber);color:#241a08;font-weight:800;padding:3px 9px}
+.rb-btn.on{background:#2a3a62;color:var(--amber)}
+.rb-pos{font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:#f8c778;padding:0 4px}
+.reader-pop{position:absolute;top:calc(100% + 6px);right:10px;left:auto;z-index:40;min-width:300px;max-width:min(92vw,560px);background:#fff8e6;color:#3a2c14;border:1.5px solid #e0c98f;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-family:'Heebo',sans-serif;white-space:normal;text-align:start}
+.reader-pop .reader-row{flex-wrap:wrap}
+@media (max-width:640px){.screen-bar{flex-wrap:wrap;row-gap:6px}.reader-slot{order:3;margin-inline-start:0}.reader-pop{left:8px;right:8px;min-width:0;max-width:none}}
 .reader.mini{padding:3px 8px}
 .reader .tts-btn.sm{padding:4px 9px;font-size:.85rem;min-width:34px}
 .kara-pick .kara-sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:middle;background:var(--sw,#f8d98a);margin-inline-end:4px}
