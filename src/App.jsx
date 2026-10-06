@@ -2076,6 +2076,9 @@ function HelpView({ onClose }) {
   const [beat, setBeat] = useState(0);
   const [speaking, setSpeaking] = useState(false);
   const [movie, setMovie] = useState(false);
+  const [rate, setRate] = useState(() => { try { return +localStorage.getItem("lomedtv-help-rate") || 1; } catch { return 1; } }); // קצב הקריינות במדריך
+  const rateRef = useRef(rate);
+  useEffect(() => { rateRef.current = rate; try { localStorage.setItem("lomedtv-help-rate", String(rate)); } catch {} if (audioRef.current) audioRef.current.playbackRate = rate; }, [rate]);
   const [laser, setLaser] = useState(null); // {x1,y1,x2,y2,box:[x,y,w,h] בפיקסלים של הבמה} או null
   const runRef = useRef(0), audioRef = useRef(null), kRef = useRef(k), stageRef = useRef(null), imgRef = useRef(null), tipRef = useRef(null), tweenRef = useRef(null);
   const v = encodeURIComponent(data?.version || "");
@@ -2099,7 +2102,7 @@ function HelpView({ onClose }) {
       const synth = window.speechSynthesis; if (!synth) return finish();
       synth.cancel();
       const u = new SpeechSynthesisUtterance(text);
-      u.lang = "he-IL"; const vv = pickHebrewVoice(synth); if (vv) u.voice = vv;
+      u.lang = "he-IL"; u.rate = rateRef.current; const vv = pickHebrewVoice(synth); if (vv) u.voice = vv;
       u.onend = finish; u.onerror = finish;
       synth.speak(u); setSpeaking(true);
     };
@@ -2107,6 +2110,7 @@ function HelpView({ onClose }) {
     if (voices && voices[id]) {
       const a = new Audio(`/guide/voice/${id}.mp3?v=${voices[id].hash || ""}`);
       audioRef.current = a;
+      a.playbackRate = rateRef.current; a.onloadedmetadata = () => { a.playbackRate = rateRef.current; };
       a.onended = finish; a.onerror = () => { if (runRef.current !== run) return finish(); audioRef.current = null; browserVoice(); };
       a.play().then(() => setSpeaking(true)).catch(() => { if (runRef.current !== run) return finish(); audioRef.current = null; browserVoice(); });
     } else browserVoice();
@@ -2195,6 +2199,7 @@ function HelpView({ onClose }) {
       <div className="help-head">
         <span className="help-title">❔ המדריך · {steps.length ? `${k + 1} / ${steps.length}` : ""}</span>
         <button className={"tts-btn sm " + (movie ? "" : "ghost")} onClick={playMovie} disabled={!steps.length} title="עובר על כל הצעדים ברצף, עם קריינות">{movie ? "⏹ עצור את הסרטון" : "▶ כסרטון"}</button>
+        <label className="tts-rate help-rate" title="מהירות הקריינות">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
         <button className="tts-btn sm" onClick={() => { stopAll(); onClose(); }}>↩ חזרה ללימוד</button>
       </div>
       {err && <div className="err">{err}</div>}
@@ -6451,6 +6456,8 @@ const css = `
 }
 .tts-btn.ghost{background:transparent;border:1.5px solid #cfc8b4;box-shadow:none;color:var(--ink-soft)}
 .tts-rate{display:flex;align-items:center;gap:8px;color:var(--ink-soft);font-size:.92rem}
+.help-rate{white-space:nowrap}.help-rate input{width:90px}
+@media (max-width:640px){.help-rate input{width:64px}}
 .tts-note{color:#8a8467;font-size:.85rem;line-height:1.6}
 .tts-text{
   max-height:220px;overflow-y:auto;border:1px dashed #cfc8b4;border-radius:10px;padding:14px;
