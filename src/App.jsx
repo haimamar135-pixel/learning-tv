@@ -1227,17 +1227,28 @@ function VideoTile({ tile }) {
 function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied, video, onVideo }) {
   const holderName = share.holder === me ? "אתה" : (peers[share.holder]?.name || share.hostName || "—");
   const online = Object.values(peers);
+  const [min, setMin] = useState(() => { try { return localStorage.getItem("lomedtv-share-min") === "1"; } catch { return false; } });
+  const toggleMin = () => setMin((m) => { try { localStorage.setItem("lomedtv-share-min", m ? "0" : "1"); } catch {} return !m; });
+  /* מצומצם: פס דק — רק מי בחדר ומי מחזיק את הדף; לחיצה פותחת בחזרה */
+  if (min) return (
+    <button className="share-bar share-min" dir="rtl" onClick={toggleMin} title="הצג את כפתורי הלימוד המשותף">
+      <span>🕯 {online.length ? online.map((p) => p.name).join(" · ") : "מחכה לחבר…"}</span>
+      <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
+      <span className="share-min-open">▾ הצג</span>
+    </button>
+  );
   return (
     <div className="share-bar" dir="rtl">
       <span className="share-title">🕯 לימוד משותף</span>
       <span className="share-code" title="קוד ההזמנה">{share.code}</span>
-      <button className="mark-btn" onClick={onCopy}>{copied ? "✓ הועתק" : "🔗 העתק קישור"}</button>
+      <button className="mark-btn share-copy" onClick={onCopy}>{copied ? "✓ הועתק" : "🔗 העתק קישור"}</button>
       <span className="share-who">{online.length ? online.map((p) => <span key={p.uid} className="share-peer" style={{ "--c": p.color }}>{p.name}</span>) : <span className="share-wait">מחכה לחבר…</span>}</span>
       <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
       {share.holder !== me && <button className="mark-btn" onClick={onTake}>✋ קח את הדף</button>}
       {share.holder !== me && <button className={"mark-btn" + (share.follow ? " on" : "")} onClick={onFollow}>{share.follow ? "👁 עוקב" : "👁 חופשי"}</button>}
       <button className={"mark-btn" + (video ? " on" : "")} onClick={onVideo}>{video ? "📹 סגור וידאו" : "📹 וידאו"}</button>
       <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
+      <button className="mark-btn share-hide" onClick={toggleMin} title="צמצם את החלונית לפס דק">▴ הסתר</button>
     </div>
   );
 }
@@ -4792,6 +4803,8 @@ export default function LearningTV() {
             )}
  
             {helpOn && <HelpView onClose={() => setHelpOn(false)} />}
+            {/* 🕯 חלונית הלימוד המשותף — מחוץ לאזור הגלילה, כך שהיא תמיד מול העיניים */}
+            {!helpOn && share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
             <div className={"screen-body" + (helpOn ? " behind-help" : "")} style={{ zoom: fontScale }}>
               {view === "boot" && (
                 <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את הספרייה…</p></div>
@@ -5354,7 +5367,6 @@ export default function LearningTV() {
                       glossOn={glossOn} onGloss={setGlossOn} glossBusy={glossBusy}
                       store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
-                  {share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
                   {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} onClose={() => setShareVideo(false)} />}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
@@ -6169,10 +6181,11 @@ const css = `
 .share-wait{color:#8a7a55;font-size:.85rem}
 .share-holder{font-size:.85rem}
 .share-bar .mark-btn.on{border-color:var(--amber);background:#fdeed3}
-/* החלונית נשארת צמודה לראש המסך בזמן גלילה — כדי ש"קח את הדף", וידאו ו"צא" תמיד בהישג יד */
-.share-bar{position:sticky;top:0;z-index:4;box-shadow:0 4px 14px rgba(60,40,10,.18)}
-.share-bar~.read-sents [data-si]{scroll-margin-top:70px}
-@media (max-width:640px){.share-bar{gap:5px;padding:5px 8px;font-size:.8rem}.share-bar .mark-btn{padding:3px 8px;font-size:.8rem}.share-bar~.read-sents [data-si]{scroll-margin-top:130px}}
+/* החלונית יושבת מעל אזור הגלילה (לא בתוכו) — "קח את הדף", וידאו ו"צא" תמיד בהישג יד. בטלפון: שורה אחת צרה שנגללת לצדדים */
+.screen>.share-bar{margin:0;border-radius:0;border-width:0 0 1.5px;flex:none}
+.share-bar.share-min{width:100%;cursor:pointer;font:inherit;font-size:.78rem;padding:2px 12px;gap:10px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;text-align:start}
+.share-min .share-min-open{margin-inline-start:auto;opacity:.7}
+@media (max-width:640px){.screen>.share-bar{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;gap:6px;padding:5px 8px;font-size:.8rem;-webkit-overflow-scrolling:touch}.screen>.share-bar>*{flex:none}.screen>.share-bar .mark-btn{padding:3px 8px;font-size:.8rem;order:-1}.screen>.share-bar .share-title,.screen>.share-bar .share-copy{display:none}}
 .share-msg{max-width:860px;margin:10px auto;background:#fff8e6;border:1px solid #e0c98f;border-radius:10px;padding:8px 12px;color:#4a3a1a;display:flex;gap:10px;align-items:center;justify-content:space-between}
 .ch-key.share{border-color:#b7a6f2}
 .scroll-sent.peer-hl{box-shadow:inset 0 -3px 0 var(--peer,#4aa3ff);border-radius:3px}
