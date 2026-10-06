@@ -6169,6 +6169,10 @@ const css = `
 .share-wait{color:#8a7a55;font-size:.85rem}
 .share-holder{font-size:.85rem}
 .share-bar .mark-btn.on{border-color:var(--amber);background:#fdeed3}
+/* החלונית נשארת צמודה לראש המסך בזמן גלילה — כדי ש"קח את הדף", וידאו ו"צא" תמיד בהישג יד */
+.share-bar{position:sticky;top:0;z-index:4;box-shadow:0 4px 14px rgba(60,40,10,.18)}
+.share-bar~.read-sents [data-si]{scroll-margin-top:70px}
+@media (max-width:640px){.share-bar{gap:5px;padding:5px 8px;font-size:.8rem}.share-bar .mark-btn{padding:3px 8px;font-size:.8rem}.share-bar~.read-sents [data-si]{scroll-margin-top:130px}}
 .share-msg{max-width:860px;margin:10px auto;background:#fff8e6;border:1px solid #e0c98f;border-radius:10px;padding:8px 12px;color:#4a3a1a;display:flex;gap:10px;align-items:center;justify-content:space-between}
 .ch-key.share{border-color:#b7a6f2}
 .scroll-sent.peer-hl{box-shadow:inset 0 -3px 0 var(--peer,#4aa3ff);border-radius:3px}
