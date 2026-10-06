@@ -2222,11 +2222,12 @@ function HelpView({ onClose }) {
               )}
             </div>
           )}
-          <h2 className="help-h"><span className="n">{k + 1}</span>{st.title}</h2>
+          {/* הטקסט מנוקד כשיש ניקוד ב-steps.json (tools/guide-nikud.mjs, הנקדן של דיקטה) — בקשת חיים, צ'אט 22 */}
+          <h2 className="help-h"><span className="n">{k + 1}</span>{st.title_nikud || st.title}</h2>
           <p className="help-text">
-            {beats.map((b, i) => <span key={i} className={"help-beat" + (i === beat ? " on" : "") + (b.at ? " aimed" : "")} onClick={() => goBeat(i)} title={b.at ? "הלייזר מצביע" : undefined}>{b.say} </span>)}
+            {beats.map((b, i) => <span key={i} className={"help-beat" + (i === beat ? " on" : "") + (b.at ? " aimed" : "")} onClick={() => goBeat(i)} title={b.at ? "הלייזר מצביע" : undefined}>{b.nikud || b.say} </span>)}
           </p>
-          {st.tip && <div className="help-tip">💡 {st.tip}</div>}
+          {st.tip && <div className="help-tip">💡 {st.tip_nikud || st.tip}</div>}
           <div className="help-dots">{steps.map((x, i) => <button key={x.id} className={"help-dot " + (i === k ? "on" : "")} onClick={() => go(i)} title={x.title} />)}</div>
           <div className="help-foot">המדריך המלא, עם טופס משוב: <a href={SITE_URL + "/guide/"} target="_blank" rel="noopener noreferrer">famous-rolypoly…/guide</a></div>
         </div>
@@ -6398,7 +6399,7 @@ const css = `
 .help-nav{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .help-h{font-family:'Frank Ruhl Libre',serif;font-weight:800;font-size:1.35rem;margin:4px 0;display:flex;align-items:center;gap:10px}
 .help-h .n{display:inline-grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--amber);color:#241a08;font-family:'IBM Plex Mono',monospace;font-size:.9rem}
-.help-text{line-height:1.9;font-size:1.05rem;white-space:pre-wrap}
+.help-text{line-height:2.1;font-size:1.1rem;white-space:pre-wrap;font-family:'Frank Ruhl Libre',serif}
 .help-tip{background:#fff3c4;border-inline-start:3px solid var(--amber);border-radius:8px;padding:8px 12px;font-size:.95rem;line-height:1.7}
 .help-shot{width:100%;max-width:420px;align-self:center;border:1px solid #d9d2bd;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
 .help-body.movie .help-shot{box-shadow:0 0 0 2px var(--amber),0 10px 30px rgba(0,0,0,.25)}
