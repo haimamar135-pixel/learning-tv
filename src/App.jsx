@@ -1131,7 +1131,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const [audioBlocked, setAudioBlocked] = useState(false);
   /* גודל (3 מדרגות) ומיקום (גרירה בכותרת) — נשמרים לפעם הבאה */
   const SIZES = [220, 320, 560];
-  const [sizeIdx, setSizeIdx] = useState(() => { try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
+  const [sizeIdx, setSizeIdx] = useState(() => { if (watch && typeof window !== "undefined" && window.innerWidth <= 640) return 0; try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
   const [pos, setPos] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-video-pos") || "null"); } catch { return null; } });
   const panelRef = useRef(null);
   const cycleSize = () => setSizeIdx((i) => { const n = (i + 1) % SIZES.length; try { localStorage.setItem("lomedtv-video-size", String(n)); } catch {} return n; });
@@ -1238,9 +1238,9 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
       {state === "error" && <div className="video-msg"><button className="mark-btn" onClick={reconnect}>↻ התחבר מחדש</button></div>}
       {state === "on" && audioBlocked && <div className="video-msg"><button className="mark-btn" onClick={unblockAudio}>🔊 הפעל שמע</button></div>}
       {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>📷🎙 הצטרף עם מצלמה ומיקרופון</button> <span>אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.</span></div>}
-      {state === "on" && tiles.length <= 1 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
+      {state === "on" && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
       <div className="video-grid">
-        {tiles.map((t) => <VideoTile key={t.id} tile={t} />)}
+        {tiles.filter((t) => !(watching && t.local)).map((t) => <VideoTile key={t.id} tile={t} />)}
       </div>
     </div>
   );
@@ -3142,8 +3142,27 @@ export default function LearningTV() {
   const [cloudMsg, setCloudMsg] = useState("");
   const [cloudCode, setCloudCode] = useState("");      // קוד כניסה מהמייל (מובייל)
   const [cloudSent, setCloudSent] = useState(false);   // נשלח מייל — להציג שדה קוד
+  const [authReady, setAuthReady] = useState(false);   // כבר יודעים אם יש חשבון מחובר (לא שואלים לפני כן)
+  /* 🕯 אורח בשם בלבד (צ'אט 24): מי שהגיע מקישור הזמנה נכנס בלי מייל — כותב שם ובפנים */
+  const [guestAsk, setGuestAsk] = useState(false);
+  const [guestName, setGuestName] = useState(() => { try { return localStorage.getItem("lomedtv-guest-name") || ""; } catch { return ""; } });
+  const [guestMsg, setGuestMsg] = useState("");
+  const [guestBusy, setGuestBusy] = useState(false);
+  const authErrHe = (m) => /security purposes|rate limit|only request this after/i.test(m || "") ? "רגע — אפשר לבקש קישור חדש רק פעם בדקה. המייל הקודם שנשלח עדיין בתוקף." : /invalid|not valid/i.test(m || "") ? "כתובת המייל לא תקינה — לבדוק שאין תו מיותר בסוף." : "שגיאה: " + m;
+  async function guestEnter() {
+    const name = guestName.trim().slice(0, 30);
+    if (!name) { setGuestMsg("לכתוב שם — כך החבר יראה אותך."); return; }
+    setGuestBusy(true); setGuestMsg("");
+    try { localStorage.setItem("lomedtv-guest-name", name); } catch {}
+    try {
+      const { error } = await supa.auth.signInAnonymously({ options: { data: { name } } });
+      if (error) { console.warn("guest sign-in", error.message); setGuestMsg("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה)."); }
+      else setGuestAsk(false); /* ההצטרפות עצמה קורית מעצמה כשהחשבון נכנס */
+    } catch (e) { console.warn("guest sign-in", e); setGuestMsg("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה)."); }
+    setGuestBusy(false);
+  }
   useEffect(() => {
-    supa.auth.getSession().then(({ data }) => setCloudUser(data?.session?.user || null));
+    supa.auth.getSession().then(({ data }) => { setCloudUser(data?.session?.user || null); setAuthReady(true); }).catch(() => setAuthReady(true));
     const { data: sub } = supa.auth.onAuthStateChange((_ev, session) => setCloudUser(session?.user || null));
     /* מובייל: הקישור מהמייל מפנה ל-lomedtv://auth#access_token=... —
        iOS פותח את האפליקציה עם הכתובת, ואנחנו מכניסים את הסשן. */
@@ -3185,7 +3204,7 @@ export default function LearningTV() {
       email,
       options: { emailRedirectTo: IS_NATIVE ? "lomedtv://auth" : window.location.origin + (() => { try { const v = JSON.parse(localStorage.getItem("lomedtv-pending-join") || "null"); return v && v.c && Date.now() - v.t < 24 * 3600e3 ? "/?join=" + encodeURIComponent(v.c) : ""; } catch { return ""; } })() },
     });
-    if (error) { setCloudMsg("שגיאה: " + error.message); return; }
+    if (error) { setCloudMsg(authErrHe(error.message)); return; }
     setCloudSent(true);
     setCloudMsg(IS_NATIVE
       ? "✅ נשלח! פתח את המייל בטלפון ולחץ על הקישור — האפליקציה תיפתח מחוברת. (אם יש במייל קוד — אפשר גם להזין אותו כאן)"
@@ -3331,7 +3350,7 @@ export default function LearningTV() {
     }
   }
   function queueSync(job) {
-    if (!cloudRef.current) return;
+    if (!cloudRef.current || cloudRef.current.is_anonymous) return; /* אורח: שום דבר לא עולה לענן */
     if (job.k !== "meta") { runSync(job); return; }
     syncJob.current = job;
     clearTimeout(syncTimer.current);
@@ -3417,6 +3436,7 @@ export default function LearningTV() {
     if (!cloudUser) { if (pullChecked) setPullChecked(false); return; }
     if (pullChecked) return;
     setPullChecked(true);
+    if (cloudUser.is_anonymous) return;
     (async () => {
       try {
         const cloud = await fetchCloudIndex(cloudUser.id);
@@ -3429,7 +3449,7 @@ export default function LearningTV() {
         if (!raw) for (const c of cloud) if (localIds.has(c.id)) setSyncStamp(c.id, c.updated_at);
         const st = syncStamps();
         const fresh = cloud.filter((c) => {
-          if (!localIds.has(c.id)) return true; // ספר שאין כאן בכלל
+          if (!localIds.has(c.id)) return !String(c.id).startsWith("shared-"); // ספר שאין כאן בכלל (עותקי לימוד משותף ישנים — לא מציעים)
           if (st[c.id] === c.updated_at) return false; // המכשיר הזה כתב אותו אחרון
           const loc = localIdx.find((b) => b.id === c.id);
           return (Date.parse(c.updated_at) || 0) > ((loc && loc.updatedAt) || 0);
@@ -3638,7 +3658,7 @@ export default function LearningTV() {
       if (!existing) await persist(b, { k: "meta" });
     }
     try { localStorage.setItem("lomedtv-share-active", JSON.stringify({ c: row.code, t: Date.now() })); } catch {}
-    setShareLost(false); setShowOpening(false);
+    setShareLost(false); setShowOpening(false); setShowCloud(false); setGuestAsk(false);
     if (!isHost) { setShareWatch(true); setShareVideo(true); }
     setShare({ id: row.id, code: row.code, hostId: row.host, hostName: row.host_name || "", holder: row.holder || row.host, follow: !isHost, bookId: b.id });
     setPeers({});
@@ -3648,19 +3668,33 @@ export default function LearningTV() {
     setError(null);
     setView("tv");
   };
+  const hostCodes = () => { try { return JSON.parse(localStorage.getItem("lomedtv-share-host") || "{}") || {}; } catch { return {}; } };
+  const rememberHostCode = (bookId, code) => { try { const m = hostCodes(); if (code) m[bookId] = { c: code, t: Date.now() }; else delete m[bookId]; localStorage.setItem("lomedtv-share-host", JSON.stringify(m)); } catch {} };
   const startShare = async () => {
     if (!book) return;
     if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להזמין ללימוד משותף."); return; }
     setShareMsg("");
     const code = makeShareCode();
     const snap = { id: book.id, title: book.title, chapters: (book.chapters || []).map((c) => ({ title: c.title, text: c.text })) };
-    /* יש כבר שיעור פתוח שלי על הספר הזה? חוזרים אליו — הקוד והקישור שנשלחו נשארים בתוקף */
+    /* יש כבר שיעור פתוח שלי על הספר הזה? חוזרים אליו — הקוד והקישור שנשלחו נשארים בתוקף.
+       קודם לפי הקוד שהמכשיר זוכר (אותה דרך שבה אורח מצטרף), ואחר כך בחיפוש בטבלה. */
     try {
-      const { data: old } = await supa.from("sessions").select("*").eq("host", cloudUser.id).eq("status", "open").eq("book->>id", book.id).limit(1);
-      if (old && old[0]) { try { await supa.from("sessions").update({ book: snap }).eq("id", old[0].id); } catch {} await openSharedBook({ ...old[0], book: snap }, true); return; }
+      const mem = hostCodes()[book.id];
+      if (mem && Date.now() - mem.t < 12 * 3600e3) {
+        const { data: j, error: je } = await supa.rpc("join_session", { p_code: mem.c, p_name: shareNameOf(cloudUser), p_color: myShareColor(cloudUser.id) });
+        if (je) console.warn("share reuse (code)", je.message);
+        if (j && j.id && j.host === cloudUser.id) { try { await supa.from("sessions").update({ book: snap }).eq("id", j.id); } catch {} await openSharedBook({ ...j, book: snap }, true); return; }
+        console.warn("share reuse (code): not reusable", mem.c, j);
+      }
+    } catch (e) { console.warn("share reuse (code)", e); }
+    try {
+      const { data: old, error: oe } = await supa.from("sessions").select("*").eq("host", cloudUser.id).eq("status", "open").eq("book->>id", book.id).limit(1);
+      if (oe) console.warn("share reuse (select)", oe.message);
+      if (old && old[0]) { rememberHostCode(book.id, old[0].code); try { await supa.from("sessions").update({ book: snap }).eq("id", old[0].id); } catch {} await openSharedBook({ ...old[0], book: snap }, true); return; }
     } catch {}
     const { data, error } = await supa.from("sessions").insert({ code, host: cloudUser.id, host_name: shareNameOf(cloudUser), book: snap, holder: cloudUser.id }).select("*").single();
     if (error) { setShareMsg("לא הצלחתי לפתוח שיעור: " + error.message); return; }
+    rememberHostCode(book.id, code);
     await openSharedBook(data, true);
   };
   const joinShare = async (code, quiet) => {
@@ -3678,7 +3712,9 @@ export default function LearningTV() {
   };
   const leaveShare = async () => {
     const sh = shareRef.current;
-    if (sh && sh.hostId === myUid) { shareSend("closed", {}); try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
+    /* "סיים" סוגר את החדר לכולם — לא בלחיצה בטעות */
+    if (sh && sh.hostId === myUid && !window.confirm("לסיים את הלימוד המשותף? החדר ייסגר לכולם, והקישור שנשלח יפסיק לעבוד.")) return;
+    if (sh && sh.hostId === myUid) { rememberHostCode(sh.bookId, null); shareSend("closed", {}); try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
     try { localStorage.removeItem("lomedtv-share-active"); } catch {}
     setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareLost(false);
   };
@@ -3700,7 +3736,7 @@ export default function LearningTV() {
     const sh = shareRef.current; if (!sh) return;
     /* באפליקציה (Capacitor) הכתובת היא capacitor://localhost — הקישור חייב להצביע על האתר */
     const url = `${IS_NATIVE ? SITE_URL + "/" : location.origin + location.pathname}?join=${sh.code}`;
-    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור והיכנס עם המייל שלך — הדף והווידאו ייפתחו מעצמם: ${url}`;
+    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור וכתוב את שמך — הדף והווידאו ייפתחו מעצמם: ${url}`;
     /* בטלפון: גיליון השיתוף (וואטסאפ וכו'); במחשב: העתקה ללוח */
     if (navigator.share && (IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent))) {
       try { await navigator.share({ title: "לימוד משותף", text, url }); return; } catch (e) { if (e?.name === "AbortError") return; }
@@ -3732,13 +3768,15 @@ export default function LearningTV() {
     if (pendingJoinRef.current && cloudUser && view !== "boot") { const c = pendingJoinRef.current, q = pendingQuietRef.current; pendingJoinRef.current = null; pendingQuietRef.current = false; if (!q) setShowOpening(false); joinShare(c, q); }
     else if (pendingQuietRef.current) { /* שחזור שקט בלי חשבון — לא מציקים */ }
     /* בלי חשבון: הקישור נשמר, ומזמינים להיכנס — ההצטרפות תקרה אחרי הכניסה */
-    else if (pendingJoinRef.current && !cloudUser && view !== "boot" && !shareMsg) { setShareMsg("כדי להצטרף ללימוד המשותף — להיכנס לחשבון (☁ למעלה) עם המייל שלך."); setShowCloud(true); }
-  }, [cloudUser, view]);
+    else if (pendingJoinRef.current && !cloudUser && authReady && view !== "boot" && !guestAsk && !showCloud) { setShowOpening(false); setGuestAsk(true); }
+  }, [cloudUser, view, authReady]);
+  const dropPendingJoin = () => { pendingJoinRef.current = null; try { localStorage.removeItem("lomedtv-pending-join"); } catch {} setGuestAsk(false); };
   /* 🕯 הצטרפות עם קוד מתוך האפליקציה (צ'אט 22) — בלי קישור: חבר אומר את הקוד, מקלידים */
   const joinByCode = () => {
-    if (!cloudUser) { setShareMsg("כדי להצטרף ללימוד המשותף — להיכנס לחשבון (☁ למעלה)."); setShowCloud(true); return; }
-    const c = window.prompt("קוד השיעור (6 תווים, מהחבר שפתח את הלימוד):", "");
-    if (c && c.trim()) joinShare(c.trim().toUpperCase());
+    const c = (window.prompt("קוד השיעור (6 תווים, מהחבר שפתח את הלימוד):", "") || "").trim().toUpperCase();
+    if (!c) return;
+    if (!cloudUser) { pendingJoinRef.current = c; try { localStorage.setItem("lomedtv-pending-join", JSON.stringify({ c, t: Date.now() })); } catch {} setGuestAsk(true); return; }
+    joinShare(c);
   };
   /* הערוץ: presence (מי כאן) + broadcast (סימונים, הערות, מיקום, מחזיק הדף) */
   useEffect(() => {
@@ -4784,13 +4822,32 @@ export default function LearningTV() {
               )}
             </div>
 
+            {guestAsk && !cloudUser && (
+              <div className="cloud-overlay">
+                <div className="cloud-box" dir="rtl">
+                  <h3>🕯 הזמינו אותך ללמוד יחד</h3>
+                  <p>איך קוראים לך? כך החבר יראה אותך בדף.</p>
+                  <input className="cloud-input" type="text" dir="auto" placeholder="השם שלך" maxLength={30} autoFocus value={guestName}
+                    onChange={(e) => setGuestName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guestEnter(); }} />
+                  <div className="cloud-actions">
+                    <button className="cloud-btn" onClick={guestEnter} disabled={guestBusy}>{guestBusy ? "נכנס…" : "🚪 היכנס לדף"}</button>
+                  </div>
+                  {guestMsg && <p style={{ fontSize: ".85rem", color: "#f8c778", marginTop: 8 }}>{guestMsg}</p>}
+                  <div className="cloud-actions" style={{ marginTop: 10 }}>
+                    <button className="cloud-btn ghost" onClick={() => { setGuestAsk(false); setShowCloud(true); }}>יש לי חשבון — כניסה במייל</button>
+                    <button className="cloud-btn ghost" onClick={dropPendingJoin}>לא עכשיו</button>
+                  </div>
+                  <p style={{ fontSize: ".78rem", opacity: 0.7, marginTop: 8 }}>כאורח לא נשמר לך דבר לפעם הבאה. כניסה במייל שומרת את הסימונים וההערות.</p>
+                </div>
+              </div>
+            )}
             {showCloud && (
               <div className="cloud-overlay" onClick={() => setShowCloud(false)}>
                 <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
                   <h3>☁ חשבון ענן</h3>
                   {cloudUser ? (
                     <>
-                      <p>מחובר בתור:<br /><b dir="ltr">{cloudUser.email}</b></p>
+                      <p>{cloudUser.is_anonymous ? "נכנסת כאורח:" : "מחובר בתור:"}<br /><b dir="auto">{cloudUser.is_anonymous ? shareNameOf(cloudUser) : cloudUser.email}</b></p>
                       <p className="sync-line">
                         {syncState === "saving" ? "⏳ שומר בענן..." : syncState === "err" ? "⚠ " + syncErr : "✅ סנכרון שוטף פעיל — כל מרקר, הערה, תוצר וציון נשמרים גם בענן."}
                       </p>
@@ -4849,7 +4906,7 @@ export default function LearningTV() {
             )}
 
             {/* שלב 3: הצעת הורדה — נפתחת רק כשבענן יש משהו חדש יותר ממה שיש כאן */}
-            {pullList && (
+            {pullList && !share && (
               <div className="cloud-overlay" onClick={() => { if (!pulling) { setPullList(null); setPullMsg(""); } }}>
                 <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
                   <h3>⬇ יש חדש בענן</h3>
