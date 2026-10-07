@@ -69,7 +69,7 @@ async function verifyUser(token) {
     const r = await supaFetch("/auth/v1/user", token);
     if (!r.ok) return null;
     const u = await r.json();
-    return u && u.id ? { id: u.id, email: (u.email || "").toLowerCase() } : null;
+    return u && u.id ? { id: u.id, email: (u.email || "").toLowerCase(), anon: !!u.is_anonymous } : null;
   } catch {
     return null;
   }
@@ -107,6 +107,11 @@ async function gate(event, fn, units = 1) {
   const user = await verifyUser(token);
   if (!user) {
     return { reject: json(401, { code: "login", error: { message: "החיבור לחשבון פג — היכנס שוב דרך ☁" } }) };
+  }
+  /* אורח בשם בלבד (כניסה אנונימית): לומד יחד בדף ובווידאו, אבל לא מפעיל שירותים שעולים כסף —
+     אחרת כל אחד היה יכול לפתוח אינסוף אורחים ולעקוף את המכסה. */
+  if (user.anon && fn !== "livekit") {
+    return { reject: json(401, { code: "login", error: { message: "כאורח אפשר ללמוד יחד בדף ובווידאו. לערוצי הלימוד (סיכום, מבחן, קול…) — להיכנס לחשבון במייל דרך ☁ למעלה" } }) };
   }
   if (ADMINS.includes(user.email)) return { user, admin: true };
 
