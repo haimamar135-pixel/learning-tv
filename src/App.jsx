@@ -1130,11 +1130,14 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const [retry, setRetry] = useState(0);
   const [audioBlocked, setAudioBlocked] = useState(false);
   /* גודל (3 מדרגות) ומיקום (גרירה בכותרת) — נשמרים לפעם הבאה */
-  const SIZES = [220, 320, 560];
-  const [sizeIdx, setSizeIdx] = useState(() => { if (watch && typeof window !== "undefined" && window.innerWidth <= 640) return 0; try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
+  /* בטלפון החלון קטן בהרבה: החבר באריח אחד, אני בפינה שלו — כדי לא להסתיר את הדף */
+  const NARROW = typeof window !== "undefined" && window.innerWidth <= 640;
+  const SIZES = NARROW ? [164, 230, 9999] : [220, 320, 560];
+  const [mini, setMini] = useState(false); // מצומצם לפס הכותרת בלבד — הקול ממשיך
+  const [sizeIdx, setSizeIdx] = useState(() => { if (NARROW) { try { const v = parseInt(localStorage.getItem("lomedtv-video-size-m"), 10); return v >= 0 && v <= 2 ? v : 0; } catch { return 0; } } try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
   const [pos, setPos] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-video-pos") || "null"); } catch { return null; } });
   const panelRef = useRef(null);
-  const cycleSize = () => setSizeIdx((i) => { const n = (i + 1) % SIZES.length; try { localStorage.setItem("lomedtv-video-size", String(n)); } catch {} return n; });
+  const cycleSize = () => setSizeIdx((i) => { const n = (i + 1) % SIZES.length; try { localStorage.setItem(NARROW ? "lomedtv-video-size-m" : "lomedtv-video-size", String(n)); } catch {} return n; });
   const onGrab = (e) => {
     if (e.target.closest("button")) return;
     const r = panelRef.current?.getBoundingClientRect(); if (!r) return;
@@ -1223,11 +1226,13 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const style = pos
     ? { width: w, left: Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w)), top: Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - 120)), bottom: "auto" }
     : { width: w };
+  const shown = tiles.filter((t) => !(watching && t.local));
   const node = (
-    <div ref={panelRef} className="video-panel" style={style} dir="rtl">
+    <div ref={panelRef} className={"video-panel" + (NARROW ? " narrow sz" + sizeIdx : "") + (NARROW && sizeIdx < 2 && shown.some((t) => !t.local) && shown.some((t) => t.local) ? " pip" : "") + (mini ? " mini" : "")} style={style} dir="rtl">
       <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={resetPos} title="אחוז וגרור · לחיצה כפולה: חזרה לפינה">
-        <span>⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
+        <span className="video-title">⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
         <span className="video-btns">
+          <button className="mark-btn" onClick={() => setMini((m) => !m)} title={mini ? "הצג את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴" : "▾"}</button>
           <button className="mark-btn" onClick={cycleSize} title="גודל: קטן / בינוני / גדול">{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
           <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
           <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
@@ -1240,7 +1245,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
       {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>📷🎙 הצטרף עם מצלמה ומיקרופון</button> <span>אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.</span></div>}
       {state === "on" && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
       <div className="video-grid">
-        {tiles.filter((t) => !(watching && t.local)).map((t) => <VideoTile key={t.id} tile={t} />)}
+        {shown.map((t) => <VideoTile key={t.id} tile={t} />)}
       </div>
     </div>
   );
@@ -6357,6 +6362,18 @@ const css = `
 .video-btns .mark-btn{padding:2px 7px;font-size:.85rem;background:#1d2c55;border-color:#2c3f70;color:#e9ecf8}
 .video-btns .mark-btn.off{background:#5a1d1d;border-color:#8a2d2d}
 .video-msg{padding:6px 10px;color:#f8c778;font-size:.8rem}
+.video-panel.mini .video-grid,.video-panel.mini .video-msg{display:none}
+.video-panel.narrow{left:8px;bottom:8px;font-size:.78rem}
+.video-panel.narrow .video-head{padding:4px 6px}
+.video-panel.narrow .video-btns .mark-btn{padding:2px 6px;font-size:.78rem}
+.video-panel.narrow.sz0 .video-title{display:none}
+.video-panel.narrow.sz0 .video-head{justify-content:center}
+.video-panel.narrow .video-msg{padding:4px 6px;font-size:.72rem}
+.video-panel.narrow .video-grid{grid-template-columns:1fr;padding:3px}
+.video-panel.narrow.sz2 .video-grid{grid-template-columns:1fr 1fr}
+.video-panel.pip .video-grid{position:relative}
+.video-panel.pip .video-tile.local{position:absolute;width:36%;left:7px;bottom:7px;z-index:2;border:1.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.5)}
+.video-panel.pip .video-tile.local .video-name{display:none}
 .video-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:4px;padding:4px}
 .video-tile{position:relative;aspect-ratio:4/3;background:#0a1128;border-radius:8px;overflow:hidden;border:2px solid transparent}
 .video-tile.speaking{border-color:var(--green,#39d98a)}
