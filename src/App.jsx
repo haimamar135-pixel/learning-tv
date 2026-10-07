@@ -1111,12 +1111,24 @@ const shareNameOf = (user) => (user?.user_metadata?.name || (user?.email || "").
 /* 📹 חלון הווידאו של הלימוד המשותף — LiveKit (שלב ב).
    הכרטיס מגיע מ-netlify/functions/livekit-token (רק לחברי השיעור). מצלמה + מיקרופון של הלומד,
    והחברים באריחים קטנים. בטלפון: מי שמדבר גדול יותר (LiveKit מוריד רזולוציה לבד). */
-function VideoPanel({ sessionId, myName, onClose }) {
+/* הודעת הרשאות בעברית (צ'אט 24) — בלי הטקסט האנגלי של הדפדפן */
+const mediaErrHe = (e) => {
+  const n = e?.name || "";
+  if (n === "NotAllowedError" || n === "SecurityError" || /not allowed|denied/i.test(e?.message || "")) return "הדפדפן לא קיבל רשות למצלמה/מיקרופון — הגדרות ← Chrome/Safari ← מצלמה, מיקרופון ← לאשר, ולנסות שוב.";
+  if (n === "NotFoundError" || n === "OverconstrainedError") return "לא נמצאו מצלמה או מיקרופון במכשיר הזה.";
+  if (n === "NotReadableError" || n === "AbortError") return "המצלמה או המיקרופון תפוסים באפליקציה אחרת (FaceTime? זום?) — לסגור אותה ולנסות שוב.";
+  return "לא הצלחתי להפעיל מצלמה/מיקרופון. לנסות שוב.";
+};
+function VideoPanel({ sessionId, myName, onClose, watch }) {
   const [state, setState] = useState("connecting"); // connecting | on | error
   const [msg, setMsg] = useState("");
   const [tiles, setTiles] = useState([]); // [{id, name, local, videoTrack, audioTrack, speaking}]
-  const [mic, setMic] = useState(true);
-  const [cam, setCam] = useState(true);
+  /* watch = מי שהצטרף מקישור: רואה ושומע מיד, המצלמה והמיקרופון שלו — רק בלחיצה */
+  const [mic, setMic] = useState(!watch);
+  const [cam, setCam] = useState(!watch);
+  const [watching, setWatching] = useState(!!watch);
+  const [retry, setRetry] = useState(0);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   /* גודל (3 מדרגות) ומיקום (גרירה בכותרת) — נשמרים לפעם הבאה */
   const SIZES = [220, 320, 560];
   const [sizeIdx, setSizeIdx] = useState(() => { try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
@@ -1174,20 +1186,39 @@ function VideoPanel({ sessionId, myName, onClose }) {
         roomRef.current = room;
         const evs = [RoomEvent.TrackSubscribed, RoomEvent.TrackUnsubscribed, RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted];
         evs.forEach((e) => room.on(e, refresh));
-        room.on(RoomEvent.Disconnected, () => { if (!dead) { setState("error"); setMsg("החיבור לחדר נותק."); } });
+        room.on(RoomEvent.Disconnected, () => { if (!dead) { setState("error"); setMsg("החיבור לחדר הווידאו נותק."); } });
+        room.on(RoomEvent.AudioPlaybackStatusChanged, () => { if (!dead) setAudioBlocked(!room.canPlaybackAudio); });
         await room.connect(data.url, data.token);
-        try { await room.localParticipant.enableCameraAndMicrophone(); }
-        catch (e) { setMsg("אין גישה למצלמה/מיקרופון — אשר הרשאה בדפדפן. " + (e?.message || "")); try { await room.localParticipant.setMicrophoneEnabled(true); } catch {} }
+        if (dead) return;
+        setMsg("");
+        if (!watching) {
+          try { await room.localParticipant.enableCameraAndMicrophone(); setMic(true); setCam(true); }
+          catch (e) {
+            setMsg(mediaErrHe(e)); setCam(false);
+            try { await room.localParticipant.setMicrophoneEnabled(true); setMic(true); } catch { setMic(false); }
+          }
+        }
+        setAudioBlocked(!room.canPlaybackAudio);
         setState("on");
         refresh();
       } catch (e) {
-        if (!dead) { setState("error"); setMsg(e?.message || String(e)); }
+        if (!dead) { setState("error"); setMsg(/Failed to fetch|NetworkError|Load failed/i.test(e?.message || "") ? "אין חיבור לרשת — החדר לא נפתח." : (e?.message || String(e))); }
       }
     })();
     return () => { dead = true; try { room?.disconnect(); } catch {} roomRef.current = null; };
-  }, [sessionId]);
-  const toggleMic = async () => { const r = roomRef.current; if (!r) return; const next = !mic; setMic(next); try { await r.localParticipant.setMicrophoneEnabled(next); } catch {} };
-  const toggleCam = async () => { const r = roomRef.current; if (!r) return; const next = !cam; setCam(next); try { await r.localParticipant.setCameraEnabled(next); } catch {} };
+  }, [sessionId, retry]);
+  const reconnect = () => { setState("connecting"); setMsg(""); setRetry((n) => n + 1); };
+  const toggleMic = async () => { const r = roomRef.current; if (!r) return; const next = !mic; try { await r.localParticipant.setMicrophoneEnabled(next); setMic(next); setMsg(""); } catch (e) { setMsg(mediaErrHe(e)); } };
+  const toggleCam = async () => { const r = roomRef.current; if (!r) return; const next = !cam; try { await r.localParticipant.setCameraEnabled(next); setCam(next); setMsg(""); } catch (e) { setMsg(mediaErrHe(e)); } };
+  /* מצפייה להשתתפות: כאן הדפדפן מבקש רשות (אי אפשר לעקוף) */
+  const joinWithMedia = async () => {
+    const r = roomRef.current; if (!r) return;
+    setWatching(false); setMsg("");
+    try { await r.startAudio(); } catch {}
+    try { await r.localParticipant.enableCameraAndMicrophone(); setMic(true); setCam(true); }
+    catch (e) { setMsg(mediaErrHe(e)); try { await r.localParticipant.setMicrophoneEnabled(true); setMic(true); } catch {} }
+  };
+  const unblockAudio = async () => { try { await roomRef.current?.startAudio(); setAudioBlocked(false); } catch {} };
   const w = Math.min(SIZES[sizeIdx], window.innerWidth - 24);
   const style = pos
     ? { width: w, left: Math.min(Math.max(0, pos.x), Math.max(0, window.innerWidth - w)), top: Math.min(Math.max(0, pos.y), Math.max(0, window.innerHeight - 120)), bottom: "auto" }
@@ -1204,6 +1235,10 @@ function VideoPanel({ sessionId, myName, onClose }) {
         </span>
       </div>
       {msg && <div className="video-msg">{msg}</div>}
+      {state === "error" && <div className="video-msg"><button className="mark-btn" onClick={reconnect}>↻ התחבר מחדש</button></div>}
+      {state === "on" && audioBlocked && <div className="video-msg"><button className="mark-btn" onClick={unblockAudio}>🔊 הפעל שמע</button></div>}
+      {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>📷🎙 הצטרף עם מצלמה ומיקרופון</button> <span>אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.</span></div>}
+      {state === "on" && tiles.length <= 1 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
       <div className="video-grid">
         {tiles.map((t) => <VideoTile key={t.id} tile={t} />)}
       </div>
@@ -1224,12 +1259,20 @@ function VideoTile({ tile }) {
   );
 }
 
-function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied, video, onVideo }) {
+function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied, video, onVideo, lost, onRejoin, away, onBack }) {
   const holderName = share.holder === me ? "אתה" : (peers[share.holder]?.name || share.hostName || "—");
   const online = Object.values(peers);
   const [min, setMin] = useState(() => { try { return localStorage.getItem("lomedtv-share-min") === "1"; } catch { return false; } });
   const toggleMin = () => setMin((m) => { try { localStorage.setItem("lomedtv-share-min", m ? "0" : "1"); } catch {} return !m; });
   /* מצומצם: פס דק — רק מי בחדר ומי מחזיק את הדף; לחיצה פותחת בחזרה */
+  /* החיבור נפל — לא בשקט: הודעה וכפתור, גם כשהפס מצומצם */
+  if (lost) return (
+    <div className="share-bar share-lost" dir="rtl" role="alert">
+      <span>⚠ החיבור ללימוד המשותף נפל — החבר לא רואה אותך כרגע.</span>
+      <button className="mark-btn on" onClick={onRejoin}>↻ הצטרף מחדש</button>
+      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
+    </div>
+  );
   if (min) return (
     <button className="share-bar share-min" dir="rtl" onClick={toggleMin} title="הצג את כפתורי הלימוד המשותף">
       <span>🕯 {online.length ? online.map((p) => p.name).join(" · ") : "מחכה לחבר…"}</span>
@@ -1239,6 +1282,7 @@ function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied,
   );
   return (
     <div className="share-bar" dir="rtl">
+      {away && <button className="mark-btn on" onClick={onBack}>📖 חזרה לדף המשותף</button>}
       <span className="share-title">🕯 לימוד משותף</span>
       <span className="share-code" title="קוד ההזמנה">{share.code}</span>
       <button className="mark-btn share-copy" onClick={onCopy}>{copied ? "✓ הועתק" : "🔗 העתק קישור"}</button>
@@ -3077,7 +3121,7 @@ export default function LearningTV() {
     try { localStorage.setItem("lomedtv-opened", new Date().toISOString()); } catch {}
     setShowOpening(false);
     setError(null);
-    if (shareRef.current || pendingJoinRef.current) return; /* הגענו מקישור הזמנה — הדף המשותף כבר נפתח (או ייפתח אחרי הכניסה) */
+    if (shareRef.current || (pendingJoinRef.current && !pendingQuietRef.current)) return; /* הגענו מקישור הזמנה — הדף המשותף כבר נפתח (או ייפתח אחרי הכניסה) */
     const inputId = gate === "photo" ? "camera-scan-input" : gate === "video" ? "video-capture-input" : gate === "file" ? "media-transcribe-input" : null;
     if (inputId) {
       document.getElementById(inputId)?.click();
@@ -3139,7 +3183,7 @@ export default function LearningTV() {
     setCloudMsg("שולח קישור...");
     const { error } = await supa.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: IS_NATIVE ? "lomedtv://auth" : window.location.origin },
+      options: { emailRedirectTo: IS_NATIVE ? "lomedtv://auth" : window.location.origin + (() => { try { const v = JSON.parse(localStorage.getItem("lomedtv-pending-join") || "null"); return v && v.c && Date.now() - v.t < 24 * 3600e3 ? "/?join=" + encodeURIComponent(v.c) : ""; } catch { return ""; } })() },
     });
     if (error) { setCloudMsg("שגיאה: " + error.message); return; }
     setCloudSent(true);
@@ -3572,6 +3616,9 @@ export default function LearningTV() {
   const [shareMsg, setShareMsg] = useState("");
   const [shareCopied, setShareCopied] = useState(false);
   const [shareVideo, setShareVideo] = useState(false); // 📹 חלון הווידאו פתוח?
+  const [shareWatch, setShareWatch] = useState(false); // הווידאו נפתח מעצמו בצפייה (מי שהצטרף)
+  const [shareLost, setShareLost] = useState(false);   // הערוץ נפל
+  const [shareEpoch, setShareEpoch] = useState(0);     // "הצטרף מחדש" — בונה את הערוץ מחדש
   const shareChanRef = useRef(null);
   const shareRef = useRef(null);
   useEffect(() => { shareRef.current = share; }, [share]);
@@ -3581,13 +3628,18 @@ export default function LearningTV() {
   const openSharedBook = async (row, isHost) => {
     const snap = row.book || {};
     let b;
-    if (isHost) { b = book; }
-    else {
-      const id = "shared-" + row.code;
-      const existing = await loadBook(id);
+    /* מארח: הספר שלו (גם אם חזר אחרי טעינה מחדש — נטען לפי ספר המקור) */
+    if (isHost) { b = (book && (!snap.id || book.id === snap.id)) ? book : ((snap.id && await loadBook(snap.id)) || null); }
+    if (!b) {
+      /* אורח: עותק אחד לכל ספר מקור (snap.id), לא עותק לכל קוד — הסימונים וההערות נשארים מפעם לפעם */
+      const id = "shared-" + (snap.id || row.code);
+      const existing = (await loadBook(id)) || (await loadBook("shared-" + row.code));
       b = existing || { id, title: snap.title || "לימוד משותף", chapters: snap.chapters || [], results: {}, progress: {}, marks: {}, notes: {}, flex: {} };
-      await persist(b, { k: "meta" });
+      if (!existing) await persist(b, { k: "meta" });
     }
+    try { localStorage.setItem("lomedtv-share-active", JSON.stringify({ c: row.code, t: Date.now() })); } catch {}
+    setShareLost(false); setShowOpening(false);
+    if (!isHost) { setShareWatch(true); setShareVideo(true); }
     setShare({ id: row.id, code: row.code, hostId: row.host, hostName: row.host_name || "", holder: row.holder || row.host, follow: !isHost, bookId: b.id });
     setPeers({});
     setBook(b);
@@ -3602,22 +3654,33 @@ export default function LearningTV() {
     setShareMsg("");
     const code = makeShareCode();
     const snap = { id: book.id, title: book.title, chapters: (book.chapters || []).map((c) => ({ title: c.title, text: c.text })) };
+    /* יש כבר שיעור פתוח שלי על הספר הזה? חוזרים אליו — הקוד והקישור שנשלחו נשארים בתוקף */
+    try {
+      const { data: old } = await supa.from("sessions").select("*").eq("host", cloudUser.id).eq("status", "open").eq("book->>id", book.id).limit(1);
+      if (old && old[0]) { try { await supa.from("sessions").update({ book: snap }).eq("id", old[0].id); } catch {} await openSharedBook({ ...old[0], book: snap }, true); return; }
+    } catch {}
     const { data, error } = await supa.from("sessions").insert({ code, host: cloudUser.id, host_name: shareNameOf(cloudUser), book: snap, holder: cloudUser.id }).select("*").single();
     if (error) { setShareMsg("לא הצלחתי לפתוח שיעור: " + error.message); return; }
     await openSharedBook(data, true);
   };
-  const joinShare = async (code) => {
+  const joinShare = async (code, quiet) => {
     if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להצטרף ללימוד המשותף."); return; }
     setShareMsg("");
+    try { localStorage.removeItem("lomedtv-pending-join"); } catch {}
     const { data, error } = await supa.rpc("join_session", { p_code: code, p_name: shareNameOf(cloudUser), p_color: myShareColor(cloudUser.id) });
     console.log("join_session", code, error || data);
-    if (error || !data || !data.id) { setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + (error ? " (" + error.message + ")" : "")); return; }
+    if (error || !data || !data.id) {
+      try { localStorage.removeItem("lomedtv-share-active"); } catch {}
+      if (!quiet) setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + " — אולי המארח כבר סיים. לבקש ממנו קישור חדש.");
+      return;
+    }
     await openSharedBook(data, data.host === cloudUser.id);
   };
   const leaveShare = async () => {
     const sh = shareRef.current;
-    if (sh && sh.hostId === myUid) { try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
-    setShare(null); setPeers({}); setShareVideo(false);
+    if (sh && sh.hostId === myUid) { shareSend("closed", {}); try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
+    try { localStorage.removeItem("lomedtv-share-active"); } catch {}
+    setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareLost(false);
   };
   const takePage = async () => {
     const sh = shareRef.current; if (!sh || !myUid) return;
@@ -3625,12 +3688,19 @@ export default function LearningTV() {
     setShare({ ...sh, holder: myUid, follow: false });
     shareSend("holder", { uid: myUid });
   };
+  /* החדר חי גם כשיוצאים מהספר — מכאן חוזרים לדף המשותף */
+  const backToShare = async () => {
+    const sh = shareRef.current; if (!sh) return;
+    const b = book && book.id === sh.bookId ? book : await loadBook(sh.bookId);
+    if (!b) { setShareMsg("הספר של הלימוד המשותף לא נמצא במכשיר הזה."); return; }
+    setBook(b); setChannel("read"); setError(null); setView("tv");
+  };
   const toggleFollow = () => setShare((sh) => sh ? { ...sh, follow: !sh.follow } : sh);
   const copyShareLink = async () => {
     const sh = shareRef.current; if (!sh) return;
     /* באפליקציה (Capacitor) הכתובת היא capacitor://localhost — הקישור חייב להצביע על האתר */
     const url = `${IS_NATIVE ? SITE_URL + "/" : location.origin + location.pathname}?join=${sh.code}`;
-    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור, היכנס עם המייל שלך, ולחץ 📹 וידאו: ${url}`;
+    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור והיכנס עם המייל שלך — הדף והווידאו ייפתחו מעצמם: ${url}`;
     /* בטלפון: גיליון השיתוף (וואטסאפ וכו'); במחשב: העתקה ללוח */
     if (navigator.share && (IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent))) {
       try { await navigator.share({ title: "לימוד משותף", text, url }); return; } catch (e) { if (e?.name === "AbortError") return; }
@@ -3639,9 +3709,28 @@ export default function LearningTV() {
   };
   /* הצטרפות מקישור ?join=CODE — אחרי שיש כניסה לחשבון */
   const pendingJoinRef = useRef(null);
-  useEffect(() => { try { const c = new URLSearchParams(location.search).get("join"); if (c) { pendingJoinRef.current = c.toUpperCase(); setShowOpening(false); history.replaceState(null, "", location.pathname); } } catch {} }, []);
+  const pendingQuietRef = useRef(false);
   useEffect(() => {
-    if (pendingJoinRef.current && cloudUser && view !== "boot") { const c = pendingJoinRef.current; pendingJoinRef.current = null; setShowOpening(false); joinShare(c); }
+    try {
+      const fresh = (k, hours) => { try { const v = JSON.parse(localStorage.getItem(k) || "null"); return v && v.c && Date.now() - v.t < hours * 3600e3 ? String(v.c).toUpperCase() : null; } catch { return null; } };
+      const c = new URLSearchParams(location.search).get("join");
+      if (c) {
+        /* נשמר גם בדפדפן: הכניסה במייל טוענת את האתר מחדש בלי ?join= — וההזמנה הייתה אובדת */
+        pendingJoinRef.current = c.toUpperCase();
+        try { localStorage.setItem("lomedtv-pending-join", JSON.stringify({ c: pendingJoinRef.current, t: Date.now() })); } catch {}
+        setShowOpening(false); history.replaceState(null, "", location.pathname + location.hash);
+      } else {
+        const saved = fresh("lomedtv-pending-join", 24);
+        const active = fresh("lomedtv-share-active", 12);
+        if (saved) { pendingJoinRef.current = saved; setShowOpening(false); }
+        /* הייתי בחדר והדף נטען מחדש — חוזרים אליו בשקט (אם עוד פתוח) */
+        else if (active) { pendingJoinRef.current = active; pendingQuietRef.current = true; }
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (pendingJoinRef.current && cloudUser && view !== "boot") { const c = pendingJoinRef.current, q = pendingQuietRef.current; pendingJoinRef.current = null; pendingQuietRef.current = false; if (!q) setShowOpening(false); joinShare(c, q); }
+    else if (pendingQuietRef.current) { /* שחזור שקט בלי חשבון — לא מציקים */ }
     /* בלי חשבון: הקישור נשמר, ומזמינים להיכנס — ההצטרפות תקרה אחרי הכניסה */
     else if (pendingJoinRef.current && !cloudUser && view !== "boot" && !shareMsg) { setShareMsg("כדי להצטרף ללימוד המשותף — להיכנס לחשבון (☁ למעלה) עם המייל שלך."); setShowCloud(true); }
   }, [cloudUser, view]);
@@ -3676,17 +3765,27 @@ export default function LearningTV() {
     });
     ch.on("broadcast", { event: "holder" }, ({ payload }) => setShare((sh) => sh ? { ...sh, holder: payload.uid, follow: payload.uid !== myUid } : sh));
     ch.on("broadcast", { event: "hello" }, () => { const b = bookRef.current; shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} }); });
-    ch.on("broadcast", { event: "closed" }, () => { setShare(null); setPeers({}); setShareMsg("המארח סיים את הלימוד המשותף."); });
+    ch.on("broadcast", { event: "closed" }, () => { try { localStorage.removeItem("lomedtv-share-active"); } catch {} setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareMsg("המארח סיים את הלימוד המשותף."); });
+    let gone = false;
     ch.subscribe(async (status) => {
+      if (gone) return;
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") { setShareLost(true); return; }
       if (status === "SUBSCRIBED") {
+        setShareLost(false);
         await ch.track({ name: shareNameOf(cloudRef.current), color: myShareColor(myUid) });
         const b = bookRef.current;
         shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} });
         shareSend("hello", {});
       }
     });
-    return () => { if (shareRef.current?.hostId === myUid) { try { ch.send({ type: "broadcast", event: "closed", payload: {} }); } catch {} } supa.removeChannel(ch); shareChanRef.current = null; };
-  }, [share?.id, myUid]);
+    /* הרשת חזרה / חזרנו ללשונית — אם הערוץ לא מחובר, בונים אותו מחדש לבד */
+    const revive = () => { if (gone) return; if (ch.state !== "joined" && ch.state !== "joining") setShareEpoch((n) => n + 1); else if (ch.state === "joined") setShareLost(false); };
+    const onVis = () => { if (document.visibilityState === "visible") revive(); };
+    const onOff = () => setShareLost(true);
+    window.addEventListener("online", revive); window.addEventListener("offline", onOff); document.addEventListener("visibilitychange", onVis);
+    /* שים לב: סגירת הערוץ כאן אינה סוגרת את השיעור — רק "סיים" (leaveShare) משדר closed */
+    return () => { gone = true; window.removeEventListener("online", revive); window.removeEventListener("offline", onOff); document.removeEventListener("visibilitychange", onVis); supa.removeChannel(ch); shareChanRef.current = null; };
+  }, [share?.id, myUid, shareEpoch]);
   const bookRef = useRef(null); useEffect(() => { bookRef.current = book; }, [book]);
   const chIdxRef = useRef(0); useEffect(() => { chIdxRef.current = chIdx; }, [chIdx]);
   /* הסימונים וההערות שלי יוצאים לחבר בכל שינוי (עם השהיה קצרה) */
@@ -4804,7 +4903,8 @@ export default function LearningTV() {
  
             {helpOn && <HelpView onClose={() => setHelpOn(false)} />}
             {/* 🕯 חלונית הלימוד המשותף — מחוץ לאזור הגלילה, כך שהיא תמיד מול העיניים */}
-            {!helpOn && share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => setShareVideo((v) => !v)} />}
+            {!helpOn && share && <ShareBar share={share} peers={peers} me={myUid} onTake={takePage} onFollow={toggleFollow} onLeave={leaveShare} onCopy={copyShareLink} copied={shareCopied} video={shareVideo} onVideo={() => { setShareWatch(false); setShareVideo((v) => !v); }} away={view !== "tv" || !book || book.id !== share.bookId} onBack={backToShare} lost={shareLost} onRejoin={() => { setShareLost(false); setShareEpoch((n) => n + 1); }} />}
+            {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} watch={shareWatch} onClose={() => setShareVideo(false)} />}
             <div className={"screen-body" + (helpOn ? " behind-help" : "")} style={{ zoom: fontScale }}>
               {view === "boot" && (
                 <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את הספרייה…</p></div>
@@ -5367,7 +5467,6 @@ export default function LearningTV() {
                       glossOn={glossOn} onGloss={setGlossOn} glossBusy={glossBusy}
                       store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
-                  {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} onClose={() => setShareVideo(false)} />}
                   <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
@@ -5645,7 +5744,7 @@ export default function LearningTV() {
               <span className="key-label">שיקוף</span>
             </button>
           )}
-          <button className="ch-key share" onClick={share ? () => { setChannel("read"); setView("tv"); } : startShare} title="לימוד משותף — אותו דף, שני לומדים, בזמן אמת">
+          <button className="ch-key share" onClick={share ? backToShare : startShare} title="לימוד משותף — אותו דף, שני לומדים, בזמן אמת">
             <span className="key-num">🕯</span>
             <span className="key-label">{share ? "חזרה ללימוד המשותף" : "לימוד משותף"}</span>
           </button>
@@ -6179,6 +6278,7 @@ const css = `
 .share-who{display:flex;gap:6px;flex-wrap:wrap}
 .share-peer{background:var(--c);color:#fff;border-radius:999px;padding:1px 9px;font-size:.82rem;font-weight:600}
 .share-wait{color:#8a7a55;font-size:.85rem}
+.share-bar.share-lost{background:#ffe9e4;border-color:#d9534f;color:#7a1f1c;font-weight:600}
 .share-holder{font-size:.85rem}
 .share-bar .mark-btn.on{border-color:var(--amber);background:#fdeed3}
 /* החלונית יושבת מעל אזור הגלילה (לא בתוכו) — "קח את הדף", וידאו ו"צא" תמיד בהישג יד. בטלפון: שורה אחת צרה שנגללת לצדדים */
