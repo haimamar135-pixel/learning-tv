@@ -1132,7 +1132,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   /* גודל (3 מדרגות) ומיקום (גרירה בכותרת) — נשמרים לפעם הבאה */
   /* בטלפון החלון קטן בהרבה: החבר באריח אחד, אני בפינה שלו — כדי לא להסתיר את הדף */
   const NARROW = typeof window !== "undefined" && window.innerWidth <= 640;
-  const SIZES = NARROW ? [164, 230, 9999] : [220, 320, 560];
+  const SIZES = NARROW ? [120, 190, 9999] : [220, 320, 560];
   const [mini, setMini] = useState(false); // מצומצם לפס הכותרת בלבד — הקול ממשיך
   const [sizeIdx, setSizeIdx] = useState(() => { if (NARROW) { try { const v = parseInt(localStorage.getItem("lomedtv-video-size-m"), 10); return v >= 0 && v <= 2 ? v : 0; } catch { return 0; } } try { const v = parseInt(localStorage.getItem("lomedtv-video-size"), 10); return v >= 0 && v <= 2 ? v : 1; } catch { return 1; } });
   const [pos, setPos] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-video-pos") || "null"); } catch { return null; } });
@@ -1143,8 +1143,11 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
     const r = panelRef.current?.getBoundingClientRect(); if (!r) return;
     const p0 = e.touches ? e.touches[0] : e;
     const dx = p0.clientX - r.left, dy = p0.clientY - r.top;
+    let moved = false;
     const move = (ev) => {
       const p = ev.touches ? ev.touches[0] : ev;
+      if (!moved && Math.abs(p.clientX - p0.clientX) + Math.abs(p.clientY - p0.clientY) < 7) return; /* רעד קטן של האצבע אינו גרירה */
+      moved = true;
       const x = Math.min(Math.max(0, p.clientX - dx), window.innerWidth - r.width), y = Math.min(Math.max(0, p.clientY - dy), window.innerHeight - r.height);
       setPos({ x, y });
       if (ev.cancelable) ev.preventDefault();
@@ -1152,6 +1155,8 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
     const up = () => {
       window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
       window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+      /* בטלפון: הקשה על הפס (בלי להזיז) מצמצמת את החלון לשורה, והקשה נוספת פותחת */
+      if (!moved) { if (NARROW) setMini((m) => !m); return; }
       setPos((p) => { try { p ? localStorage.setItem("lomedtv-video-pos", JSON.stringify(p)) : localStorage.removeItem("lomedtv-video-pos"); } catch {} return p; });
     };
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
@@ -1230,9 +1235,9 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const node = (
     <div ref={panelRef} className={"video-panel" + (NARROW ? " narrow sz" + sizeIdx : "") + (NARROW && sizeIdx < 2 && shown.some((t) => !t.local) && shown.some((t) => t.local) ? " pip" : "") + (mini ? " mini" : "")} style={style} dir="rtl">
       <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={resetPos} title="אחוז וגרור · לחיצה כפולה: חזרה לפינה">
-        <span className="video-title">⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</span>
+        <span className="video-title">{NARROW ? <><i className="video-handle" />{state === "connecting" ? "…" : state === "error" ? "⚠" : `📹 ${tiles.length}`}<i className="video-chev">{mini ? "▴" : "▾"}</i></> : <>⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</>}</span>
         <span className="video-btns">
-          <button className="mark-btn" onClick={() => setMini((m) => !m)} title={mini ? "הצג את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴" : "▾"}</button>
+          {!NARROW && <button className="mark-btn" onClick={() => setMini((m) => !m)} title={mini ? "הצג את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴" : "▾"}</button>}
           <button className="mark-btn" onClick={cycleSize} title="גודל: קטן / בינוני / גדול">{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
           <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
           <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
@@ -1243,7 +1248,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
       {state === "error" && <div className="video-msg"><button className="mark-btn" onClick={reconnect}>↻ התחבר מחדש</button></div>}
       {state === "on" && audioBlocked && <div className="video-msg"><button className="mark-btn" onClick={unblockAudio}>🔊 הפעל שמע</button></div>}
       {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>📷🎙 הצטרף עם מצלמה ומיקרופון</button> <span>אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.</span></div>}
-      {state === "on" && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
+      {state === "on" && !NARROW && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
       <div className="video-grid">
         {shown.map((t) => <VideoTile key={t.id} tile={t} />)}
       </div>
@@ -6363,11 +6368,15 @@ const css = `
 .video-btns .mark-btn.off{background:#5a1d1d;border-color:#8a2d2d}
 .video-msg{padding:6px 10px;color:#f8c778;font-size:.8rem}
 .video-panel.mini .video-grid,.video-panel.mini .video-msg{display:none}
-.video-panel.narrow{left:8px;bottom:8px;font-size:.78rem}
-.video-panel.narrow .video-head{padding:4px 6px}
-.video-panel.narrow .video-btns .mark-btn{padding:2px 6px;font-size:.78rem}
-.video-panel.narrow.sz0 .video-title{display:none}
-.video-panel.narrow.sz0 .video-head{justify-content:center}
+.video-panel.mini .video-btns{display:none}
+.video-panel.narrow{left:8px;bottom:calc(8px + env(safe-area-inset-bottom));font-size:.74rem;border-radius:11px}
+.video-panel.narrow .video-head{flex-direction:column;gap:2px;padding:0 3px 3px}
+.video-panel.narrow.mini .video-head{padding-bottom:0}
+.video-panel.narrow .video-title{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:6px 0 5px;font-size:.72rem;line-height:1}
+.video-handle{display:inline-block;width:30px;height:4px;border-radius:4px;background:#8fa0d8}
+.video-chev{font-style:normal;opacity:.75}
+.video-panel.narrow .video-btns{gap:3px;justify-content:center;flex-wrap:wrap}
+.video-panel.narrow .video-btns .mark-btn{padding:1px 5px;font-size:.72rem;min-width:0}
 .video-panel.narrow .video-msg{padding:4px 6px;font-size:.72rem}
 .video-panel.narrow .video-grid{grid-template-columns:1fr;padding:3px}
 .video-panel.narrow.sz2 .video-grid{grid-template-columns:1fr 1fr}
