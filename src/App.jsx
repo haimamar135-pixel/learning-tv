@@ -1138,8 +1138,11 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const [pos, setPos] = useState(() => { try { return JSON.parse(localStorage.getItem("lomedtv-video-pos") || "null"); } catch { return null; } });
   const panelRef = useRef(null);
   const cycleSize = () => setSizeIdx((i) => { const n = (i + 1) % SIZES.length; try { localStorage.setItem(NARROW ? "lomedtv-video-size-m" : "lomedtv-video-size", String(n)); } catch {} return n; });
+  const lastTouch = useRef(0);
   const onGrab = (e) => {
     if (e.target.closest("button")) return;
+    /* בטלפון כל הקשה מגיעה פעמיים (מגע ואז "עכבר" מדומה) — בלי זה ההקשה צמצמה ומיד פתחה בחזרה */
+    if (e.touches) lastTouch.current = Date.now(); else if (Date.now() - lastTouch.current < 900) return;
     const r = panelRef.current?.getBoundingClientRect(); if (!r) return;
     const p0 = e.touches ? e.touches[0] : e;
     const dx = p0.clientX - r.left, dy = p0.clientY - r.top;
@@ -1156,7 +1159,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
       window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
       window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
       /* בטלפון: הקשה על הפס (בלי להזיז) מצמצמת את החלון לשורה, והקשה נוספת פותחת */
-      if (!moved) { if (NARROW) setMini((m) => !m); return; }
+      if (!moved) { setMini((m) => !m); return; }
       setPos((p) => { try { p ? localStorage.setItem("lomedtv-video-pos", JSON.stringify(p)) : localStorage.removeItem("lomedtv-video-pos"); } catch {} return p; });
     };
     window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
@@ -1234,10 +1237,10 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
   const shown = tiles.filter((t) => !(watching && t.local));
   const node = (
     <div ref={panelRef} className={"video-panel" + (NARROW ? " narrow sz" + sizeIdx : "") + (NARROW && sizeIdx < 2 && shown.some((t) => !t.local) && shown.some((t) => t.local) ? " pip" : "") + (mini ? " mini" : "")} style={style} dir="rtl">
-      <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} onDoubleClick={resetPos} title="אחוז וגרור · לחיצה כפולה: חזרה לפינה">
+      <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} title={mini ? "לחיצה: פתח את הווידאו · אחוז וגרור להזזה" : "לחיצה: צמצם לפס · אחוז וגרור להזזה"}>
         <span className="video-title">{NARROW ? <><i className="video-handle" />{state === "connecting" ? "…" : state === "error" ? "⚠" : `📹 ${tiles.length}`}<i className="video-chev">{mini ? "▴" : "▾"}</i></> : <>⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</>}</span>
         <span className="video-btns">
-          {!NARROW && <button className="mark-btn" onClick={() => setMini((m) => !m)} title={mini ? "הצג את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴" : "▾"}</button>}
+          {!NARROW && <button className="mark-btn vmini" onClick={() => setMini((m) => !m)} title={mini ? "פתח את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴ פתח" : "▾"}</button>}
           <button className="mark-btn" onClick={cycleSize} title="גודל: קטן / בינוני / גדול">{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
           <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
           <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
@@ -6368,7 +6371,10 @@ const css = `
 .video-btns .mark-btn.off{background:#5a1d1d;border-color:#8a2d2d}
 .video-msg{padding:6px 10px;color:#f8c778;font-size:.8rem}
 .video-panel.mini .video-grid,.video-panel.mini .video-msg{display:none}
-.video-panel.mini .video-btns{display:none}
+.video-panel.mini .video-btns .mark-btn:not(.vmini){display:none}
+.video-panel.mini{width:auto!important;min-width:104px}
+.video-panel.mini .video-head{cursor:pointer}
+.video-panel.narrow.mini .video-btns{display:none}
 .video-panel.narrow{left:8px;bottom:calc(8px + env(safe-area-inset-bottom));font-size:.74rem;border-radius:11px}
 .video-panel.narrow .video-head{flex-direction:column;gap:2px;padding:0 3px 3px}
 .video-panel.narrow.mini .video-head{padding-bottom:0}
