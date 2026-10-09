@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Room, RoomEvent, Track } from "livekit-client";
 import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
+import { tx, getLang, setLang, langDir, LANGS } from "./i18n.js";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
    המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
@@ -553,7 +554,7 @@ function restoreBackupFile(file) {
       }
       const keys = Object.keys(payload.data);
       const nBooks = keys.filter((k) => k.startsWith("ltv-book-")).length;
-      const when = payload.savedAt ? new Date(payload.savedAt).toLocaleString("he-IL") : "";
+      const when = payload.savedAt ? new Date(payload.savedAt).toLocaleString(getLang()) : "";
       if (!window.confirm("לשחזר גיבוי מ-" + when + "?\nהקובץ מכיל " + nBooks + " ספרים.\nנתונים קיימים באותם שמות יוחלפו.")) return;
       const restoredIdx = [];
       for (const k of keys) {
@@ -1081,7 +1082,7 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
   };
   const node = (
     <div className="note-ed-back" onMouseDown={(e) => { if (e.target === e.currentTarget) { stopAll(); onCancel(); } }}>
-      <div className="note-ed" dir="rtl" role="dialog">
+      <div className="note-ed" dir={langDir()} role="dialog">
         <div className="note-ed-head">📝 הערה על הקטע</div>
         {src && <div className="note-ed-src">«{src}»</div>}
         <textarea ref={ta} className="note-ed-ta" rows={4} value={txt} onChange={(e) => setTxt(e.target.value)} placeholder="כתוב כאן — או לחץ על המיקרופון ודבר" />
@@ -1107,17 +1108,17 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
    הדף המשותף רץ על ערוץ Supabase Realtime (broadcast + presence) — בלי שרת נוסף. הווידאו (LiveKit) — שלב ב. */
 const SHARE_COLORS = ["#4aa3ff", "#ff7bb0", "#39d98a", "#f2a33c", "#b7a6f2", "#ff7b7b"];
 const makeShareCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let c = ""; for (let i = 0; i < 6; i++) c += A[Math.floor(Math.random() * A.length)]; return c; };
-const shareNameOf = (user) => (user?.user_metadata?.name || (user?.email || "").split("@")[0] || "לומד");
+const shareNameOf = (user) => (user?.user_metadata?.name || (user?.email || "").split("@")[0] || tx("לומד"));
 /* 📹 חלון הווידאו של הלימוד המשותף — LiveKit (שלב ב).
    הכרטיס מגיע מ-netlify/functions/livekit-token (רק לחברי השיעור). מצלמה + מיקרופון של הלומד,
    והחברים באריחים קטנים. בטלפון: מי שמדבר גדול יותר (LiveKit מוריד רזולוציה לבד). */
 /* הודעת הרשאות בעברית (צ'אט 24) — בלי הטקסט האנגלי של הדפדפן */
 const mediaErrHe = (e) => {
   const n = e?.name || "";
-  if (n === "NotAllowedError" || n === "SecurityError" || /not allowed|denied/i.test(e?.message || "")) return "הדפדפן לא קיבל רשות למצלמה/מיקרופון — הגדרות ← Chrome/Safari ← מצלמה, מיקרופון ← לאשר, ולנסות שוב.";
-  if (n === "NotFoundError" || n === "OverconstrainedError") return "לא נמצאו מצלמה או מיקרופון במכשיר הזה.";
-  if (n === "NotReadableError" || n === "AbortError") return "המצלמה או המיקרופון תפוסים באפליקציה אחרת (FaceTime? זום?) — לסגור אותה ולנסות שוב.";
-  return "לא הצלחתי להפעיל מצלמה/מיקרופון. לנסות שוב.";
+  if (n === "NotAllowedError" || n === "SecurityError" || /not allowed|denied/i.test(e?.message || "")) return tx("הדפדפן לא קיבל רשות למצלמה/מיקרופון — הגדרות ← Chrome/Safari ← מצלמה, מיקרופון ← לאשר, ולנסות שוב.");
+  if (n === "NotFoundError" || n === "OverconstrainedError") return tx("לא נמצאו מצלמה או מיקרופון במכשיר הזה.");
+  if (n === "NotReadableError" || n === "AbortError") return tx("המצלמה או המיקרופון תפוסים באפליקציה אחרת (FaceTime? זום?) — לסגור אותה ולנסות שוב.");
+  return tx("לא הצלחתי להפעיל מצלמה/מיקרופון. לנסות שוב.");
 };
 function VideoPanel({ sessionId, myName, onClose, watch }) {
   const [state, setState] = useState("connecting"); // connecting | on | error
@@ -1191,13 +1192,13 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
         const headers = await authHeaders();
         const res = await fetch(API_BASE + "/.netlify/functions/livekit-token", { method: "POST", headers, body: JSON.stringify({ session: sessionId, name: myName }) });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.error?.message || "שגיאה בקבלת כרטיס לחדר (" + res.status + ")");
+        if (!res.ok) throw new Error(data?.error?.message || tx("שגיאה בקבלת כרטיס לחדר (") + res.status + ")");
         if (dead) return;
         room = new Room({ adaptiveStream: true, dynacast: true, videoCaptureDefaults: { resolution: { width: 640, height: 360, frameRate: 24 } } });
         roomRef.current = room;
         const evs = [RoomEvent.TrackSubscribed, RoomEvent.TrackUnsubscribed, RoomEvent.ParticipantConnected, RoomEvent.ParticipantDisconnected, RoomEvent.LocalTrackPublished, RoomEvent.LocalTrackUnpublished, RoomEvent.ActiveSpeakersChanged, RoomEvent.TrackMuted, RoomEvent.TrackUnmuted];
         evs.forEach((e) => room.on(e, refresh));
-        room.on(RoomEvent.Disconnected, () => { if (!dead) { setState("error"); setMsg("החיבור לחדר הווידאו נותק."); } });
+        room.on(RoomEvent.Disconnected, () => { if (!dead) { setState("error"); setMsg(tx("החיבור לחדר הווידאו נותק.")); } });
         room.on(RoomEvent.AudioPlaybackStatusChanged, () => { if (!dead) setAudioBlocked(!room.canPlaybackAudio); });
         await room.connect(data.url, data.token);
         if (dead) return;
@@ -1213,7 +1214,7 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
         setState("on");
         refresh();
       } catch (e) {
-        if (!dead) { setState("error"); setMsg(/Failed to fetch|NetworkError|Load failed/i.test(e?.message || "") ? "אין חיבור לרשת — החדר לא נפתח." : (e?.message || String(e))); }
+        if (!dead) { setState("error"); setMsg(/Failed to fetch|NetworkError|Load failed/i.test(e?.message || "") ? tx("אין חיבור לרשת — החדר לא נפתח.") : (e?.message || String(e))); }
       }
     })();
     return () => { dead = true; try { room?.disconnect(); } catch {} roomRef.current = null; };
@@ -1236,22 +1237,22 @@ function VideoPanel({ sessionId, myName, onClose, watch }) {
     : { width: w };
   const shown = tiles.filter((t) => !(watching && t.local));
   const node = (
-    <div ref={panelRef} className={"video-panel" + (NARROW ? " narrow sz" + sizeIdx : "") + (NARROW && sizeIdx < 2 && shown.some((t) => !t.local) && shown.some((t) => t.local) ? " pip" : "") + (mini ? " mini" : "")} style={style} dir="rtl">
-      <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} title={mini ? "לחיצה: פתח את הווידאו · אחוז וגרור להזזה" : "לחיצה: צמצם לפס · אחוז וגרור להזזה"}>
-        <span className="video-title">{NARROW ? <><i className="video-handle" />{state === "connecting" ? "…" : state === "error" ? "⚠" : `📹 ${tiles.length}`}<i className="video-chev">{mini ? "▴" : "▾"}</i></> : <>⋮⋮ 📹 {state === "connecting" ? "מתחבר לחדר…" : state === "error" ? "שגיאה" : `${tiles.length} בחדר`}</>}</span>
+    <div ref={panelRef} className={"video-panel" + (NARROW ? " narrow sz" + sizeIdx : "") + (NARROW && sizeIdx < 2 && shown.some((t) => !t.local) && shown.some((t) => t.local) ? " pip" : "") + (mini ? " mini" : "")} style={style} dir={langDir()}>
+      <div className="video-head" onMouseDown={onGrab} onTouchStart={onGrab} title={mini ? tx("לחיצה: פתח את הווידאו · אחוז וגרור להזזה") : tx("לחיצה: צמצם לפס · אחוז וגרור להזזה")}>
+        <span className="video-title">{NARROW ? <><i className="video-handle" />{state === "connecting" ? "…" : state === "error" ? "⚠" : `📹 ${tiles.length}`}<i className="video-chev">{mini ? "▴" : "▾"}</i></> : <>⋮⋮ 📹 {state === "connecting" ? tx("מתחבר לחדר…") : state === "error" ? tx("שגיאה") : tx("{n} בחדר", { n: tiles.length })}</>}</span>
         <span className="video-btns">
-          {!NARROW && <button className="mark-btn vmini" onClick={() => setMini((m) => !m)} title={mini ? "פתח את הווידאו" : "צמצם לפס — הקול ממשיך"}>{mini ? "▴ פתח" : "▾"}</button>}
-          <button className="mark-btn" onClick={cycleSize} title="גודל: קטן / בינוני / גדול">{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
-          <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title="מיקרופון">{mic ? "🎙" : "🔇"}</button>
-          <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title="מצלמה">{cam ? "📷" : "🚫"}</button>
-          <button className="mark-btn" onClick={onClose} title="צא מהחדר">✕</button>
+          {!NARROW && <button className="mark-btn vmini" onClick={() => setMini((m) => !m)} title={mini ? tx("פתח את הווידאו") : tx("צמצם לפס — הקול ממשיך")}>{mini ? tx("▴ פתח") : "▾"}</button>}
+          <button className="mark-btn" onClick={cycleSize} title={tx("גודל: קטן / בינוני / גדול")}>{sizeIdx === 0 ? "S" : sizeIdx === 1 ? "M" : "L"}</button>
+          <button className={"mark-btn" + (mic ? "" : " off")} onClick={toggleMic} title={tx("מיקרופון")}>{mic ? "🎙" : "🔇"}</button>
+          <button className={"mark-btn" + (cam ? "" : " off")} onClick={toggleCam} title={tx("מצלמה")}>{cam ? "📷" : "🚫"}</button>
+          <button className="mark-btn" onClick={onClose} title={tx("צא מהחדר")}>✕</button>
         </span>
       </div>
       {msg && <div className="video-msg">{msg}</div>}
-      {state === "error" && <div className="video-msg"><button className="mark-btn" onClick={reconnect}>↻ התחבר מחדש</button></div>}
-      {state === "on" && audioBlocked && <div className="video-msg"><button className="mark-btn" onClick={unblockAudio}>🔊 הפעל שמע</button></div>}
-      {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>📷🎙 הצטרף עם מצלמה ומיקרופון</button> <span>אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.</span></div>}
-      {state === "on" && !NARROW && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">מחכים שהחבר יפתח 📹 וידאו…</div>}
+      {state === "error" && <div className="video-msg"><button className="mark-btn" onClick={reconnect}>{tx("↻ התחבר מחדש")}</button></div>}
+      {state === "on" && audioBlocked && <div className="video-msg"><button className="mark-btn" onClick={unblockAudio}>{tx("🔊 הפעל שמע")}</button></div>}
+      {state === "on" && watching && <div className="video-msg"><button className="mark-btn" onClick={joinWithMedia}>{tx("📷🎙 הצטרף עם מצלמה ומיקרופון")}</button> <span>{tx("אתה צופה בלבד — החבר עוד לא רואה ולא שומע אותך.")}</span></div>}
+      {state === "on" && !NARROW && tiles.filter((t) => !t.local).length === 0 && <div className="video-msg">{tx("מחכים שהחבר יפתח 📹 וידאו…")}</div>}
       <div className="video-grid">
         {shown.map((t) => <VideoTile key={t.id} tile={t} />)}
       </div>
@@ -1267,45 +1268,45 @@ function VideoTile({ tile }) {
     <div className={"video-tile" + (tile.speaking ? " speaking" : "") + (tile.local ? " local" : "")}>
       {tile.videoTrack ? <video ref={vRef} autoPlay playsInline muted={tile.local} /> : <div className="video-off">{tile.name}</div>}
       {!tile.local && <audio ref={aRef} autoPlay />}
-      <span className="video-name">{tile.local ? "אתה" : tile.name}</span>
+      <span className="video-name">{tile.local ? tx("אתה") : tile.name}</span>
     </div>
   );
 }
 
 function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied, video, onVideo, lost, onRejoin, away, onBack }) {
-  const holderName = share.holder === me ? "אתה" : (peers[share.holder]?.name || share.hostName || "—");
+  const holderName = share.holder === me ? tx("אתה") : (peers[share.holder]?.name || share.hostName || "—");
   const online = Object.values(peers);
   const [min, setMin] = useState(() => { try { return localStorage.getItem("lomedtv-share-min") === "1"; } catch { return false; } });
   const toggleMin = () => setMin((m) => { try { localStorage.setItem("lomedtv-share-min", m ? "0" : "1"); } catch {} return !m; });
   /* מצומצם: פס דק — רק מי בחדר ומי מחזיק את הדף; לחיצה פותחת בחזרה */
   /* החיבור נפל — לא בשקט: הודעה וכפתור, גם כשהפס מצומצם */
   if (lost) return (
-    <div className="share-bar share-lost" dir="rtl" role="alert">
-      <span>⚠ החיבור ללימוד המשותף נפל — החבר לא רואה אותך כרגע.</span>
-      <button className="mark-btn on" onClick={onRejoin}>↻ הצטרף מחדש</button>
-      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
+    <div className="share-bar share-lost" dir={langDir()} role="alert">
+      <span>{tx("⚠ החיבור ללימוד המשותף נפל — החבר לא רואה אותך כרגע.")}</span>
+      <button className="mark-btn on" onClick={onRejoin}>{tx("↻ הצטרף מחדש")}</button>
+      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? tx("סיים") : tx("צא")}</button>
     </div>
   );
   if (min) return (
-    <button className="share-bar share-min" dir="rtl" onClick={toggleMin} title="הצג את כפתורי הלימוד המשותף">
-      <span>🕯 {online.length ? online.map((p) => p.name).join(" · ") : "מחכה לחבר…"}</span>
-      <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
-      <span className="share-min-open">▾ הצג</span>
+    <button className="share-bar share-min" dir={langDir()} onClick={toggleMin} title={tx("הצג את כפתורי הלימוד המשותף")}>
+      <span>🕯 {online.length ? online.map((p) => p.name).join(" · ") : tx("מחכה לחבר…")}</span>
+      <span className="share-holder">{tx("מחזיק הדף:")} <b>{holderName}</b></span>
+      <span className="share-min-open">{tx("▾ הצג")}</span>
     </button>
   );
   return (
-    <div className="share-bar" dir="rtl">
-      {away && <button className="mark-btn on" onClick={onBack}>📖 חזרה לדף המשותף</button>}
-      <span className="share-title">🕯 לימוד משותף</span>
-      <span className="share-code" title="קוד ההזמנה">{share.code}</span>
-      <button className="mark-btn share-copy" onClick={onCopy}>{copied ? "✓ הועתק" : "🔗 העתק קישור"}</button>
-      <span className="share-who">{online.length ? online.map((p) => <span key={p.uid} className="share-peer" style={{ "--c": p.color }}>{p.name}</span>) : <span className="share-wait">מחכה לחבר…</span>}</span>
-      <span className="share-holder">מחזיק הדף: <b>{holderName}</b></span>
-      {share.holder !== me && <button className="mark-btn" onClick={onTake}>✋ קח את הדף</button>}
-      {share.holder !== me && <button className={"mark-btn" + (share.follow ? " on" : "")} onClick={onFollow}>{share.follow ? "👁 עוקב" : "👁 חופשי"}</button>}
-      <button className={"mark-btn" + (video ? " on" : "")} onClick={onVideo}>{video ? "📹 סגור וידאו" : "📹 וידאו"}</button>
-      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? "סיים" : "צא"}</button>
-      <button className="mark-btn share-hide" onClick={toggleMin} title="צמצם את החלונית לפס דק">▴ הסתר</button>
+    <div className="share-bar" dir={langDir()}>
+      {away && <button className="mark-btn on" onClick={onBack}>{tx("📖 חזרה לדף המשותף")}</button>}
+      <span className="share-title">{tx("🕯 לימוד משותף")}</span>
+      <span className="share-code" title={tx("קוד ההזמנה")}>{share.code}</span>
+      <button className="mark-btn share-copy" onClick={onCopy}>{copied ? tx("✓ הועתק") : tx("🔗 העתק קישור")}</button>
+      <span className="share-who">{online.length ? online.map((p) => <span key={p.uid} className="share-peer" style={{ "--c": p.color }}>{p.name}</span>) : <span className="share-wait">{tx("מחכה לחבר…")}</span>}</span>
+      <span className="share-holder">{tx("מחזיק הדף:")} <b>{holderName}</b></span>
+      {share.holder !== me && <button className="mark-btn" onClick={onTake}>{tx("✋ קח את הדף")}</button>}
+      {share.holder !== me && <button className={"mark-btn" + (share.follow ? " on" : "")} onClick={onFollow}>{share.follow ? tx("👁 עוקב") : tx("👁 חופשי")}</button>}
+      <button className={"mark-btn" + (video ? " on" : "")} onClick={onVideo}>{video ? tx("📹 סגור וידאו") : tx("📹 וידאו")}</button>
+      <button className="mark-btn" onClick={onLeave}>✕ {share.hostId === me ? tx("סיים") : tx("צא")}</button>
+      <button className="mark-btn share-hide" onClick={toggleMin} title={tx("צמצם את החלונית לפס דק")}>{tx("▴ הסתר")}</button>
     </div>
   );
 }
@@ -1602,7 +1603,7 @@ function FloatingMarkBar({ anchorIdx, word, children }) {
   }, [anchorIdx, word]);
   const style = pos ? { top: pos.top, left: pos.left, "--arrow": pos.arrow + "px" } : { bottom: 12, left: "50%", transform: "translateX(-50%)" };
   const node = (
-    <div ref={ref} className={"mark-bar floating" + (pos ? (pos.flip ? " below" : " above") : " parked")} style={style} dir="rtl">
+    <div ref={ref} className={"mark-bar floating" + (pos ? (pos.flip ? " below" : " above") : " parked")} style={style} dir={langDir()}>
       {children}
     </div>
   );
@@ -2263,7 +2264,7 @@ function HelpView({ onClose }) {
   const aim = laser ? (() => { const dx = laser.x2 - laser.x1, dy = laser.y2 - laser.y1, L = Math.hypot(dx, dy) || 1; return { ax: dx / L, ay: dy / L }; })() : null;
   const hq = !!(voices && st && voices[`${st.id}-1`]);
   return (
-    <div className="help" dir="rtl" role="dialog" aria-label="המדריך">
+    <div className="help" dir={langDir()} role="dialog" aria-label="המדריך">
       <div className="help-head">
         <span className="help-title">❔ המדריך · {steps.length ? `${k + 1} / ${steps.length}` : ""}</span>
         <button className={"tts-btn sm " + (movie ? "" : "ghost")} onClick={playMovie} disabled={!steps.length} title="עובר על כל הצעדים ברצף, עם קריינות">{movie ? "⏹ עצור את הסרטון" : "▶ כסרטון"}</button>
@@ -2541,7 +2542,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
   /* הנגן יושב בשורת המסך העליונה (ליד הכותרת, מימין לענן): שורה קטנה תמיד; ▾ פותח לוח מתחתיה עם קצב, צבע ומה להקריא */
   const slot = typeof document !== "undefined" ? document.getElementById("reader-slot") : null;
   const ui = !synth ? <span className="reader-note">הדפדפן הזה לא תומך בהקראה.</span> : (
-    <span className="reader-bar" dir="rtl">
+    <span className="reader-bar" dir={langDir()}>
       {state === "playing"
         ? <button className="rb-btn main" onClick={pause} title="השהה">⏸</button>
         : <button className="rb-btn main" onClick={() => play()} title={state === "paused" ? "המשך" : "הקרא"}>▶</button>}
@@ -2551,7 +2552,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
       <button className={"rb-btn " + (!mini ? "on" : "")} onClick={() => setMini((m) => !m)} title={mini ? "הגדרות ההקראה" : "סגור הגדרות"}>{mini ? "▾" : "▴"}</button>
       <button className="rb-btn" onClick={() => { stop(); onClose?.(); }} title="סגור את ההקראה">✕</button>
       {!mini && (
-        <div className="reader-pop" dir="rtl">
+        <div className="reader-pop" dir={langDir()}>
           <div className="reader-row">
             <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
             <button className="tts-btn ghost sm" onClick={stop} title="עצור וחזור להתחלה">⏹ מההתחלה</button>
@@ -2585,7 +2586,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
   );
   if (slot) return createPortal(ui, slot);
   return (
-    <div className="reader" dir="rtl">
+    <div className="reader" dir={langDir()}>
       <div className="reader-row">
         {state === "playing"
           ? <button className="tts-btn" onClick={pause}>⏸ השהה</button>
@@ -3116,6 +3117,9 @@ export default function LearningTV() {
      מוצג בפעם הראשונה (אין lomedtv-opened), ובכל פעם שהלומד חוזר אליו דרך "ל · הפנים".
      השאלה שהלומד נושא נשמרת (lomedtv-question) ומלווה אותו בספרייה ובקליטה כפתק ❓ —
      הצעד הראשון של "השאלות הפתוחות שלי". */
+  /* שפת הממשק (צ'אט 25): הבחירה נשמרת ב-lomedtv-lang; ההחלפה מציירת את המסך מחדש */
+  const [, setLangTick] = useState(0);
+  const changeLang = (l) => { setLang(l); setLangTick((n) => n + 1); };
   const [showOpening, setShowOpening] = useState(() => {
     try { return !localStorage.getItem("lomedtv-opened"); } catch { return true; }
   });
@@ -3161,17 +3165,17 @@ export default function LearningTV() {
   const [guestName, setGuestName] = useState(() => { try { return localStorage.getItem("lomedtv-guest-name") || ""; } catch { return ""; } });
   const [guestMsg, setGuestMsg] = useState("");
   const [guestBusy, setGuestBusy] = useState(false);
-  const authErrHe = (m) => /security purposes|rate limit|only request this after/i.test(m || "") ? "רגע — אפשר לבקש קישור חדש רק פעם בדקה. המייל הקודם שנשלח עדיין בתוקף." : /invalid|not valid/i.test(m || "") ? "כתובת המייל לא תקינה — לבדוק שאין תו מיותר בסוף." : "שגיאה: " + m;
+  const authErrHe = (m) => /security purposes|rate limit|only request this after/i.test(m || "") ? tx("רגע — אפשר לבקש קישור חדש רק פעם בדקה. המייל הקודם שנשלח עדיין בתוקף.") : /invalid|not valid/i.test(m || "") ? tx("כתובת המייל לא תקינה — לבדוק שאין תו מיותר בסוף.") : tx("שגיאה: ") + m;
   async function guestEnter() {
     const name = guestName.trim().slice(0, 30);
-    if (!name) { setGuestMsg("לכתוב שם — כך החבר יראה אותך."); return; }
+    if (!name) { setGuestMsg(tx("לכתוב שם — כך החבר יראה אותך.")); return; }
     setGuestBusy(true); setGuestMsg("");
     try { localStorage.setItem("lomedtv-guest-name", name); } catch {}
     try {
       const { error } = await supa.auth.signInAnonymously({ options: { data: { name } } });
-      if (error) { console.warn("guest sign-in", error.message); setGuestMsg("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה)."); }
+      if (error) { console.warn("guest sign-in", error.message); setGuestMsg(tx("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה).")); }
       else setGuestAsk(false); /* ההצטרפות עצמה קורית מעצמה כשהחשבון נכנס */
-    } catch (e) { console.warn("guest sign-in", e); setGuestMsg("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה)."); }
+    } catch (e) { console.warn("guest sign-in", e); setGuestMsg(tx("כניסת אורח לא זמינה כרגע — אפשר להיכנס במייל (למטה).")); }
     setGuestBusy(false);
   }
   useEffect(() => {
@@ -3192,12 +3196,12 @@ export default function LearningTV() {
           const code = params.get("code");
           if (access_token && refresh_token) {
             const { error } = await supa.auth.setSession({ access_token, refresh_token });
-            setCloudMsg(error ? "שגיאת כניסה: " + error.message : "✅ מחובר!");
+            setCloudMsg(error ? tx("שגיאת כניסה: ") + error.message : tx("✅ מחובר!"));
           } else if (code) {
             const { error } = await supa.auth.exchangeCodeForSession(code);
-            setCloudMsg(error ? "שגיאת כניסה: " + error.message : "✅ מחובר!");
+            setCloudMsg(error ? tx("שגיאת כניסה: ") + error.message : tx("✅ מחובר!"));
           } else if (params.get("error_description")) {
-            setCloudMsg("שגיאת כניסה: " + params.get("error_description"));
+            setCloudMsg(tx("שגיאת כניסה: ") + params.get("error_description"));
           }
         } catch (e) {
           console.error("appUrlOpen failed", e);
@@ -3211,8 +3215,8 @@ export default function LearningTV() {
   }, []);
   async function sendMagicLink() {
     const email = cloudEmail.trim();
-    if (!email || !email.includes("@")) { setCloudMsg("כתובת מייל לא תקינה"); return; }
-    setCloudMsg("שולח קישור...");
+    if (!email || !email.includes("@")) { setCloudMsg(tx("כתובת מייל לא תקינה")); return; }
+    setCloudMsg(tx("שולח קישור..."));
     const { error } = await supa.auth.signInWithOtp({
       email,
       options: { emailRedirectTo: IS_NATIVE ? "lomedtv://auth" : window.location.origin + (() => { try { const v = JSON.parse(localStorage.getItem("lomedtv-pending-join") || "null"); return v && v.c && Date.now() - v.t < 24 * 3600e3 ? "/?join=" + encodeURIComponent(v.c) : ""; } catch { return ""; } })() },
@@ -3220,21 +3224,21 @@ export default function LearningTV() {
     if (error) { setCloudMsg(authErrHe(error.message)); return; }
     setCloudSent(true);
     setCloudMsg(IS_NATIVE
-      ? "✅ נשלח! פתח את המייל בטלפון ולחץ על הקישור — האפליקציה תיפתח מחוברת. (אם יש במייל קוד — אפשר גם להזין אותו כאן)"
-      : "✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר.");
+      ? tx("✅ נשלח! פתח את המייל בטלפון ולחץ על הקישור — האפליקציה תיפתח מחוברת. (אם יש במייל קוד — אפשר גם להזין אותו כאן)")
+      : tx("✅ נשלח! פתח את המייל שלך ולחץ על הקישור — תחזור לכאן מחובר."));
   }
   /* כניסה עם קוד מהמייל — הדרך במובייל, שם הקישור נפתח בדפדפן ולא באפליקציה.
      דורש שתבנית המייל ב-Supabase תכלול את {{ .Token }}. */
   async function verifyCode() {
     const email = cloudEmail.trim();
     const token = cloudCode.replace(/\D/g, "");
-    if (!email || token.length < 6) { setCloudMsg("הזן את המייל ואת הקוד בן 6 הספרות מהמייל"); return; }
-    setCloudMsg("בודק קוד...");
+    if (!email || token.length < 6) { setCloudMsg(tx("הזן את המייל ואת הקוד בן 6 הספרות מהמייל")); return; }
+    setCloudMsg(tx("בודק קוד..."));
     const { error } = await supa.auth.verifyOtp({ email, token, type: "email" });
-    if (error) { setCloudMsg("הקוד לא התקבל: " + error.message); return; }
+    if (error) { setCloudMsg(tx("הקוד לא התקבל: ") + error.message); return; }
     setCloudCode("");
     setCloudSent(false);
-    setCloudMsg("✅ מחובר!");
+    setCloudMsg(tx("✅ מחובר!"));
   }
   async function cloudSignOut() {
     await supa.auth.signOut();
@@ -3381,26 +3385,26 @@ export default function LearningTV() {
     if (!cloudUser || migrating) return;
     setMigrating(true);
     try {
-      setCloudMsg("קורא את הספרייה המקומית...");
+      setCloudMsg(tx("קורא את הספרייה המקומית..."));
       const idx = await loadIndex();
-      if (!idx.length) { setCloudMsg("אין ספרים מקומיים להעלאה."); setMigrating(false); return; }
+      if (!idx.length) { setCloudMsg(tx("אין ספרים מקומיים להעלאה.")); setMigrating(false); return; }
       let nBooks = 0, nOutputs = 0, nNotes = 0;
       for (let i = 0; i < idx.length; i++) {
         const b = await loadBook(idx[i].id);
         if (!b) continue;
-        setCloudMsg("מעלה ספר " + (i + 1) + "/" + idx.length + ": " + (b.title || "") + "...");
+        setCloudMsg(tx("מעלה ספר ") + (i + 1) + "/" + idx.length + ": " + (b.title || "") + "...");
         try {
           const r = await pushWholeBook(b, cloudUser.id);
           nBooks++;
           nOutputs += r.outputs;
           nNotes += r.notes;
         } catch (e) {
-          throw new Error('ספר "' + (b.title || "") + '": ' + e.message);
+          throw new Error(tx("ספר") + ' "' + (b.title || "") + '": ' + e.message);
         }
       }
-      setCloudMsg("✅ ההעלאה הושלמה! " + nBooks + " ספרים · " + nOutputs + " תוצרים · " + nNotes + " הערות — שמורים בענן.");
+      setCloudMsg(tx("✅ ההעלאה הושלמה! ") + nBooks + tx(" ספרים · ") + nOutputs + tx(" תוצרים · ") + nNotes + tx(" הערות — שמורים בענן."));
     } catch (e) {
-      setCloudMsg("שגיאה בהעלאה: " + e.message);
+      setCloudMsg(tx("שגיאה בהעלאה: ") + e.message);
     }
     setMigrating(false);
   }
@@ -3516,16 +3520,16 @@ export default function LearningTV() {
   /* כפתור ידני בחלון החשבון — למכשיר חדש, או כשרוצים לרענן ביוזמה. */
   async function manualPull() {
     if (!cloudUser) return;
-    setCloudMsg("בודק מה יש בענן...");
+    setCloudMsg(tx("בודק מה יש בענן..."));
     try {
       const cloud = await fetchCloudIndex(cloudUser.id);
-      if (!cloud.length) { setCloudMsg("אין ספרים בענן עדיין."); return; }
+      if (!cloud.length) { setCloudMsg(tx("אין ספרים בענן עדיין.")); return; }
       setCloudMsg("");
       setShowCloud(false);
       setPullMsg("");
       setPullList(cloud.map((c) => ({ ...c, isNew: false, manual: true })));
     } catch (e) {
-      setCloudMsg("שגיאה: " + e.message);
+      setCloudMsg(tx("שגיאה: ") + e.message);
     }
   }
  
@@ -3685,7 +3689,7 @@ export default function LearningTV() {
   const rememberHostCode = (bookId, code) => { try { const m = hostCodes(); if (code) m[bookId] = { c: code, t: Date.now() }; else delete m[bookId]; localStorage.setItem("lomedtv-share-host", JSON.stringify(m)); } catch {} };
   const startShare = async () => {
     if (!book) return;
-    if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להזמין ללימוד משותף."); return; }
+    if (!cloudUser) { setShareMsg(tx("להיכנס לחשבון (☁) כדי להזמין ללימוד משותף.")); return; }
     setShareMsg("");
     const code = makeShareCode();
     const snap = { id: book.id, title: book.title, chapters: (book.chapters || []).map((c) => ({ title: c.title, text: c.text })) };
@@ -3706,19 +3710,19 @@ export default function LearningTV() {
       if (old && old[0]) { rememberHostCode(book.id, old[0].code); try { await supa.from("sessions").update({ book: snap }).eq("id", old[0].id); } catch {} await openSharedBook({ ...old[0], book: snap }, true); return; }
     } catch {}
     const { data, error } = await supa.from("sessions").insert({ code, host: cloudUser.id, host_name: shareNameOf(cloudUser), book: snap, holder: cloudUser.id }).select("*").single();
-    if (error) { setShareMsg("לא הצלחתי לפתוח שיעור: " + error.message); return; }
+    if (error) { setShareMsg(tx("לא הצלחתי לפתוח שיעור: ") + error.message); return; }
     rememberHostCode(book.id, code);
     await openSharedBook(data, true);
   };
   const joinShare = async (code, quiet) => {
-    if (!cloudUser) { setShareMsg("להיכנס לחשבון (☁) כדי להצטרף ללימוד המשותף."); return; }
+    if (!cloudUser) { setShareMsg(tx("להיכנס לחשבון (☁) כדי להצטרף ללימוד המשותף.")); return; }
     setShareMsg("");
     try { localStorage.removeItem("lomedtv-pending-join"); } catch {}
     const { data, error } = await supa.rpc("join_session", { p_code: code, p_name: shareNameOf(cloudUser), p_color: myShareColor(cloudUser.id) });
     console.log("join_session", code, error || data);
     if (error || !data || !data.id) {
       try { localStorage.removeItem("lomedtv-share-active"); } catch {}
-      if (!quiet) setShareMsg("לא נמצא שיעור פתוח עם הקוד " + code + " — אולי המארח כבר סיים. לבקש ממנו קישור חדש.");
+      if (!quiet) setShareMsg(tx("לא נמצא שיעור פתוח עם הקוד ") + code + tx(" — אולי המארח כבר סיים. לבקש ממנו קישור חדש."));
       return;
     }
     await openSharedBook(data, data.host === cloudUser.id);
@@ -3726,7 +3730,7 @@ export default function LearningTV() {
   const leaveShare = async () => {
     const sh = shareRef.current;
     /* "סיים" סוגר את החדר לכולם — לא בלחיצה בטעות */
-    if (sh && sh.hostId === myUid && !window.confirm("לסיים את הלימוד המשותף? החדר ייסגר לכולם, והקישור שנשלח יפסיק לעבוד.")) return;
+    if (sh && sh.hostId === myUid && !window.confirm(tx("לסיים את הלימוד המשותף? החדר ייסגר לכולם, והקישור שנשלח יפסיק לעבוד."))) return;
     if (sh && sh.hostId === myUid) { rememberHostCode(sh.bookId, null); shareSend("closed", {}); try { await supa.from("sessions").update({ status: "closed" }).eq("id", sh.id); } catch {} }
     try { localStorage.removeItem("lomedtv-share-active"); } catch {}
     setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareLost(false);
@@ -3741,7 +3745,7 @@ export default function LearningTV() {
   const backToShare = async () => {
     const sh = shareRef.current; if (!sh) return;
     const b = book && book.id === sh.bookId ? book : await loadBook(sh.bookId);
-    if (!b) { setShareMsg("הספר של הלימוד המשותף לא נמצא במכשיר הזה."); return; }
+    if (!b) { setShareMsg(tx("הספר של הלימוד המשותף לא נמצא במכשיר הזה.")); return; }
     setBook(b); setChannel("read"); setError(null); setView("tv");
   };
   const toggleFollow = () => setShare((sh) => sh ? { ...sh, follow: !sh.follow } : sh);
@@ -3749,12 +3753,12 @@ export default function LearningTV() {
     const sh = shareRef.current; if (!sh) return;
     /* באפליקציה (Capacitor) הכתובת היא capacitor://localhost — הקישור חייב להצביע על האתר */
     const url = `${IS_NATIVE ? SITE_URL + "/" : location.origin + location.pathname}?join=${sh.code}`;
-    const text = `בוא נלמד יחד ב"מסך הלמידה" — "${book?.title || ""}". פתח את הקישור וכתוב את שמך — הדף והווידאו ייפתחו מעצמם: ${url}`;
+    const text = tx("בוא נלמד יחד במסך הלמידה — \"{title}\". פתח את הקישור וכתוב את שמך — הדף והווידאו ייפתחו מעצמם: {url}", { title: book?.title || "", url });
     /* בטלפון: גיליון השיתוף (וואטסאפ וכו'); במחשב: העתקה ללוח */
     if (navigator.share && (IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent))) {
-      try { await navigator.share({ title: "לימוד משותף", text, url }); return; } catch (e) { if (e?.name === "AbortError") return; }
+      try { await navigator.share({ title: tx("לימוד משותף"), text, url }); return; } catch (e) { if (e?.name === "AbortError") return; }
     }
-    try { await navigator.clipboard.writeText(url); setShareCopied(true); setTimeout(() => setShareCopied(false), 1800); } catch { window.prompt("הקישור להזמנה:", url); }
+    try { await navigator.clipboard.writeText(url); setShareCopied(true); setTimeout(() => setShareCopied(false), 1800); } catch { window.prompt(tx("הקישור להזמנה:"), url); }
   };
   /* הצטרפות מקישור ?join=CODE — אחרי שיש כניסה לחשבון */
   const pendingJoinRef = useRef(null);
@@ -3786,7 +3790,7 @@ export default function LearningTV() {
   const dropPendingJoin = () => { pendingJoinRef.current = null; try { localStorage.removeItem("lomedtv-pending-join"); } catch {} setGuestAsk(false); };
   /* 🕯 הצטרפות עם קוד מתוך האפליקציה (צ'אט 22) — בלי קישור: חבר אומר את הקוד, מקלידים */
   const joinByCode = () => {
-    const c = (window.prompt("קוד השיעור (6 תווים, מהחבר שפתח את הלימוד):", "") || "").trim().toUpperCase();
+    const c = (window.prompt(tx("קוד השיעור (6 תווים, מהחבר שפתח את הלימוד):"), "") || "").trim().toUpperCase();
     if (!c) return;
     if (!cloudUser) { pendingJoinRef.current = c; try { localStorage.setItem("lomedtv-pending-join", JSON.stringify({ c, t: Date.now() })); } catch {} setGuestAsk(true); return; }
     joinShare(c);
@@ -3801,7 +3805,7 @@ export default function LearningTV() {
       const st = ch.presenceState();
       setPeers((ps) => {
         const next = {};
-        for (const uid of Object.keys(st)) { if (uid === myUid) continue; const meta = st[uid][0] || {}; next[uid] = { uid, color: myShareColor(uid), marks: {}, notes: {}, ...(ps[uid] || {}), name: meta.name || ps[uid]?.name || "לומד" }; }
+        for (const uid of Object.keys(st)) { if (uid === myUid) continue; const meta = st[uid][0] || {}; next[uid] = { uid, color: myShareColor(uid), marks: {}, notes: {}, ...(ps[uid] || {}), name: meta.name || ps[uid]?.name || tx("לומד") }; }
         return next;
       });
     });
@@ -3816,7 +3820,7 @@ export default function LearningTV() {
     });
     ch.on("broadcast", { event: "holder" }, ({ payload }) => setShare((sh) => sh ? { ...sh, holder: payload.uid, follow: payload.uid !== myUid } : sh));
     ch.on("broadcast", { event: "hello" }, () => { const b = bookRef.current; shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} }); });
-    ch.on("broadcast", { event: "closed" }, () => { try { localStorage.removeItem("lomedtv-share-active"); } catch {} setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareMsg("המארח סיים את הלימוד המשותף."); });
+    ch.on("broadcast", { event: "closed" }, () => { try { localStorage.removeItem("lomedtv-share-active"); } catch {} setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareMsg(tx("המארח סיים את הלימוד המשותף.")); });
     let gone = false;
     ch.subscribe(async (status) => {
       if (gone) return;
@@ -4542,7 +4546,7 @@ export default function LearningTV() {
     setTransLoading(false);
   };
   const transBubble = (transLoading || transRes) && (
-    <div className="trans-bubble" dir="rtl">
+    <div className="trans-bubble" dir={langDir()}>
       {transLoading ? (
         <span>⏳ מתרגם…</span>
       ) : transRes.err ? (
@@ -4688,88 +4692,89 @@ export default function LearningTV() {
  
   const barTitle =
     view === "tv" && active ? active.label
-    : view === "tv" ? "בחר ערוץ"
-    : view === "scroll" ? "מגילה · לימוד גמיש"
-    : view === "guide" ? "לוח שידורים"
-    : view === "library" ? "ספריית השידורים"
-    : view === "mirror" ? "שיקוף · אור חוזר"
-    : view === "shelf" ? "ארון הספרים · ייבוא ללימוד"
-    : "קליטת טקסט";
+    : view === "tv" ? tx("בחר ערוץ")
+    : view === "scroll" ? tx("מגילה · לימוד גמיש")
+    : view === "guide" ? tx("לוח שידורים")
+    : view === "library" ? tx("ספריית השידורים")
+    : view === "mirror" ? tx("שיקוף · אור חוזר")
+    : view === "shelf" ? tx("ארון הספרים · ייבוא ללימוד")
+    : tx("קליטת טקסט");
   const barNum = view === "tv" && active ? `CH ${active.num}` : view === "scroll" ? "CH ∞" : view === "mirror" ? "CH 08" : "CH 00";
  
   return (
-    <div className="studio" dir="rtl">
+    <div className="studio" dir={langDir()} lang={getLang()}>
       <style>{css}</style>
 
       {/* ── הפנים: מסך הפתיחה ── */}
       {showOpening && (
-        <div className="opening" dir="rtl" lang="he">
+        <div className="opening" dir={langDir()} lang={getLang()}>
+          <select className="lang-pick op-lang" value={getLang()} onChange={(e) => changeLang(e.target.value)} aria-label="Language · שפה" title="Language · שפה">{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
           <div className="op-brand">
-            <div className="op-lamed" aria-label="למ״ד על השורה">
-              <div className="row">ב ר א ש י ת</div>
+            <div className="op-lamed" aria-label={tx("למ״ד על השורה")}>
+              <div className="row">{tx("ב ר א ש י ת")}</div>
               <div className="base" />
-              <div className="l">ל</div>
+              <div className="l">{tx("ל")}</div>
             </div>
-            <div className="op-name">מסך הלמידה<small>חברותא שלא הולכת הביתה</small></div>
+            <div className="op-name">{tx("מסך הלמידה")}<small>{tx("חברותא שלא הולכת הביתה")}</small></div>
           </div>
 
           <header className="op-hero">
-            <h1>מתי בפעם האחרונה<br />ספר ענה לך בחזרה?</h1>
-            <p>יש לך ספרים שאתה חוזר אליהם שנים. הידע שלך גדל — והספר לא יודע מזה כלום. עד היום.</p>
+            <h1>{tx("מתי בפעם האחרונה")}<br />{tx("ספר ענה לך בחזרה?")}</h1>
+            <p>{tx("יש לך ספרים שאתה חוזר אליהם שנים. הידע שלך גדל — והספר לא יודע מזה כלום. עד היום.")}</p>
           </header>
 
           <div className="op-vessel">
-            <label htmlFor="op-q">מה השאלה שאתה נושא איתך אל הספר?</label>
+            <label htmlFor="op-q">{tx("מה השאלה שאתה נושא איתך אל הספר?")}</label>
             <div className="field">
               <input
                 id="op-q"
                 ref={openQRef}
                 type="text"
                 defaultValue={openQ}
-                placeholder="למשל: מה חובתי בעולמי?"
+                placeholder={tx("למשל: מה חובתי בעולמי?")}
                 onKeyDown={(e) => { if (e.key === "Enter") enterFromOpening(true, null); }}
               />
-              <button className="go" onClick={() => enterFromOpening(true, null)}>היכנס עם השאלה</button>
+              <button className="go" onClick={() => enterFromOpening(true, null)}>{tx("היכנס עם השאלה")}</button>
             </div>
             <span className="skip">
-              אפשר גם <a href="#" onClick={(e) => { e.preventDefault(); enterFromOpening(false, null); }}>להיכנס בלי שאלה</a> — היא תגיע מתוך הלימוד
+              {tx("אפשר גם")} <a href="#" onClick={(e) => { e.preventDefault(); enterFromOpening(false, null); }}>{tx("להיכנס בלי שאלה")}</a> {tx("— היא תגיע מתוך הלימוד")}
             </span>
           </div>
 
-          <div className="op-peek">
+          {getLang() === "he" && <div className="op-peek">
             <div className="daf">
-              <div className="sefer">מסילת ישרים · פרק א — בביאור כלל חובת האדם בעולמו</div>
+              <div className="sefer">{tx("מסילת ישרים · פרק א — בביאור כלל חובת האדם בעולמו")}</div>
               <p className="torah">
                 יְסוֹד הַחֲסִידוּת וְשֹׁרֶשׁ הָעֲבוֹדָה הַתְּמִימָה הוּא{" "}
-                <span className="hl">שֶׁיִּתְבָּרֵר וְיִתְאַמֵּת אֵצֶל הָאָדָם מַה חוֹבָתוֹ בְּעוֹלָמוֹ</span><span className="fn">[1]</span>,
+                <span className="hl">{tx("שֶׁיִּתְבָּרֵר וְיִתְאַמֵּת אֵצֶל הָאָדָם מַה חוֹבָתוֹ בְּעוֹלָמוֹ")}</span><span className="fn">[1]</span>,
                 וּלְמָה צָרִיךְ שֶׁיָּשִׂים מַבָּטוֹ וּמְגַמָּתוֹ בְּכָל אֲשֶׁר הוּא{" "}
-                <span className="un">עָמֵל כָּל יְמֵי חַיָּיו</span>.
+                <span className="un">{tx("עָמֵל כָּל יְמֵי חַיָּיו")}</span>.
               </p>
-              <div className="note"><b>[1] ההערה שלך:</b> ❓ מה בין "חובתו" ל"מגמתו" — שני דברים או אחד?</div>
+              <div className="note"><b>{tx("[1] ההערה שלך:")}</b> {tx("❓ מה בין \"חובתו\" ל\"מגמתו\" — שני דברים או אחד?")}</div>
               <svg className="thread" viewBox="0 0 640 290" preserveAspectRatio="none" aria-hidden="true">
                 <path d="M 402 118 C 380 175, 300 150, 230 205" />
               </svg>
             </div>
-            <p className="cap">הדף שלך, כמו שהוא באמת בפנים: מרקר, קו, והערה שקשורה בחוט אל השורה שלה.</p>
-          </div>
+            <p className="cap">{tx("הדף שלך, כמו שהוא באמת בפנים: מרקר, קו, והערה שקשורה בחוט אל השורה שלה.")}</p>
+          </div>}
 
           <section className="op-gates">
-            <h2>חמישה שערים אל הספר</h2>
-            <p className="sub">מכל מקום שבו המציאות פוגשת אותך — היא נכנסת אל הדף</p>
+            <h2>{tx("חמישה שערים אל הספר")}</h2>
+            <p className="sub">{tx("מכל מקום שבו המציאות פוגשת אותך — היא נכנסת אל הדף")}</p>
             <div className="gate-row">
-              <button className="g" onClick={() => enterFromOpening(true, "text")}><span className="ic">＋</span><span className="t">הדבק טקסט</span></button>
-              <button className="g" onClick={() => enterFromOpening(true, "photo")}><span className="ic">📷</span><span className="t">צלם דף</span></button>
-              <button className="g" onClick={() => enterFromOpening(true, "rec")}><span className="ic">🎙</span><span className="t">הקלט שיעור</span></button>
-              <button className="g" onClick={() => enterFromOpening(true, "video")}><span className="ic">🎥</span><span className="t">צלם וידאו</span></button>
-              <button className="g" onClick={() => enterFromOpening(true, "file")}><span className="ic">🎬</span><span className="t">קובץ שמע/וידאו</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "text")}><span className="ic">＋</span><span className="t">{tx("הדבק טקסט")}</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "photo")}><span className="ic">📷</span><span className="t">{tx("צלם דף")}</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "rec")}><span className="ic">🎙</span><span className="t">{tx("הקלט שיעור")}</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "video")}><span className="ic">🎥</span><span className="t">{tx("צלם וידאו")}</span></button>
+              <button className="g" onClick={() => enterFromOpening(true, "file")}><span className="ic">🎬</span><span className="t">{tx("קובץ שמע/וידאו")}</span></button>
             </div>
           </section>
 
           <footer className="op-foot">
-            <p className="serif">יש כאן מי שמחכה ללמוד איתך.</p>
-            <p>בְּפִיךָ וּבִלְבָבְךָ · הלימוד קרוב</p>
+            <p className="serif">{tx("יש כאן מי שמחכה ללמוד איתך.")}</p>
+            <p>{tx("בְּפִיךָ וּבִלְבָבְךָ · הלימוד קרוב")}</p>
             {index.length > 0 && (
-              <button className="op-lib" onClick={() => enterFromOpening(false, null)}>↩ לספרייה שלי ({index.length})</button>
+              <button className="op-lib" onClick={() => enterFromOpening(false, null)}>{tx("↩ לספרייה שלי ({n})", { n: index.length })}</button>
             )}
           </footer>
         </div>
@@ -4778,8 +4783,8 @@ export default function LearningTV() {
       {powerOn && (
         <div className="power-on" aria-hidden="true">
           <span className="mast-dot" />
-          <h1>מסך הלמידה</h1>
-          <span className="mast-sub">כל טקסט הופך לשבעה ערוצי לימוד</span>
+          <h1>{tx("מסך הלמידה")}</h1>
+          <span className="mast-sub">{tx("כל טקסט הופך לשבעה ערוצי לימוד")}</span>
         </div>
       )}
  
@@ -4794,38 +4799,39 @@ export default function LearningTV() {
               </span>
               <span id="reader-slot" className="reader-slot" />
               <span className="font-btns">
-                <button className="font-btn" onClick={() => bumpFont(-0.1)} title="הקטנת טקסט" aria-label="הקטנת טקסט">אַ−</button>
-                <button className="font-btn" onClick={() => bumpFont(0.1)} title="הגדלת טקסט" aria-label="הגדלת טקסט">אַ+</button>
-                {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? "יציאה ממסך מלא" : "מסך מלא — הטלוויזיה על כל המסך"} aria-label="מסך מלא">⛶</button>}
-                <button className={"font-btn" + (bgOpen ? " on" : "")} onClick={() => setBgOpen((v) => !v)} title="הרקע מסביב לטלוויזיה" aria-label="רקע">🎨</button>
-                <button className="font-btn print-btn" onClick={() => window.print()} title="הדפסת התוכן המוצג" aria-label="הדפסה">🖨</button>
-                <button className="font-btn" onClick={downloadBackup} title="גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ" aria-label="גיבוי">⬇</button>
-                <button className="font-btn" onClick={pickRestoreFile} title="שחזור מקובץ גיבוי" aria-label="שחזור">⬆</button>
-                <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? "חזרה ללימוד" : "המדריך: איך משתמשים"} aria-label="המדריך">❔</button>
-                <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? "המילון הארמי מוצג — לחץ להסתיר" : "מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית")} aria-label="מילון ארמי" aria-pressed={glossOn}>📖</button>
-                <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? "הניקוד מוצג — לחץ להסתיר" : "הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)"} aria-label="ניקוד" aria-pressed={nikudOn}>בְּ</button>
-                <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? "שכבת הלומד מוצגת — לחץ להסתיר" : "שכבת הלומד מוסתרת — לחץ להציג"} aria-label="שכבת הלומד">✍️</button>
+                <select className="font-btn lang-pick" value={getLang()} onChange={(e) => changeLang(e.target.value)} aria-label="Language · שפה" title="Language · שפה">{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
+                <button className="font-btn" onClick={() => bumpFont(-0.1)} title={tx("הקטנת טקסט")} aria-label={tx("הקטנת טקסט")}>{tx("אַ−")}</button>
+                <button className="font-btn" onClick={() => bumpFont(0.1)} title={tx("הגדלת טקסט")} aria-label={tx("הגדלת טקסט")}>{tx("אַ+")}</button>
+                {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? tx("יציאה ממסך מלא") : tx("מסך מלא — הטלוויזיה על כל המסך")} aria-label={tx("מסך מלא")}>⛶</button>}
+                <button className={"font-btn" + (bgOpen ? " on" : "")} onClick={() => setBgOpen((v) => !v)} title={tx("הרקע מסביב לטלוויזיה")} aria-label={tx("רקע")}>🎨</button>
+                <button className="font-btn print-btn" onClick={() => window.print()} title={tx("הדפסת התוכן המוצג")} aria-label={tx("הדפסה")}>🖨</button>
+                <button className="font-btn" onClick={downloadBackup} title={tx("גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ")} aria-label={tx("גיבוי")}>⬇</button>
+                <button className="font-btn" onClick={pickRestoreFile} title={tx("שחזור מקובץ גיבוי")} aria-label={tx("שחזור")}>⬆</button>
+                <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? tx("חזרה ללימוד") : tx("המדריך: איך משתמשים")} aria-label={tx("המדריך")}>❔</button>
+                <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? tx("המילון הארמי מוצג — לחץ להסתיר") : tx("מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית"))} aria-label={tx("מילון ארמי")} aria-pressed={glossOn}>📖</button>
+                <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? tx("הניקוד מוצג — לחץ להסתיר") : tx("הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)")} aria-label={tx("ניקוד")} aria-pressed={nikudOn}>{tx("בְּ")}</button>
+                <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? tx("שכבת הלומד מוצגת — לחץ להסתיר") : tx("שכבת הלומד מוסתרת — לחץ להציג")} aria-label={tx("שכבת הלומד")}>✍️</button>
                 <button
                   className={"font-btn" + (cloudUser ? (syncState === "err" ? " cloud-err" : " cloud-on") : "")}
                   onClick={() => setShowCloud(true)}
                   title={
                     !cloudUser
-                      ? "חשבון ענן — כניסה"
+                      ? tx("חשבון ענן — כניסה")
                       : syncState === "saving"
-                      ? "שומר בענן..."
+                      ? tx("שומר בענן...")
                       : syncState === "err"
-                      ? "שגיאת סנכרון: " + syncErr
-                      : "מסונכרן לענן · " + (cloudUser.email || "")
+                      ? tx("שגיאת סנכרון: ") + syncErr
+                      : tx("מסונכרן לענן · ") + (cloudUser.email || "")
                   }
-                  aria-label="חשבון ענן"
+                  aria-label={tx("חשבון ענן")}
                 >
                   {cloudUser && syncState === "saving" ? "⏳" : cloudUser && syncState === "err" ? "⚠" : "☁"}
                 </button>
               </span>
               <span className={"onair " + (loading ? "live" : "")}>{loading ? "ON AIR" : ""}</span>
               {bgOpen && (
-                <div className="bg-pop" dir="rtl">
-                  <span className="reader-note">הרקע מסביב לטלוויזיה:</span>
+                <div className="bg-pop" dir={langDir()}>
+                  <span className="reader-note">{tx("הרקע מסביב לטלוויזיה:")}</span>
                   <div className="bg-swatches">
                     {BG_THEMES.map(([id, label, sw]) => (
                       <button key={id} className={"bg-sw " + (bgTheme === id ? "on" : "")} style={{ background: sw }} title={label} onClick={() => { setBgTheme(id); setBgOpen(false); }}><span>{label}</span></button>
@@ -4837,49 +4843,49 @@ export default function LearningTV() {
 
             {guestAsk && !cloudUser && (
               <div className="cloud-overlay">
-                <div className="cloud-box" dir="rtl">
-                  <h3>🕯 הזמינו אותך ללמוד יחד</h3>
-                  <p>איך קוראים לך? כך החבר יראה אותך בדף.</p>
-                  <input className="cloud-input" type="text" dir="auto" placeholder="השם שלך" maxLength={30} autoFocus value={guestName}
+                <div className="cloud-box" dir={langDir()}>
+                  <h3>{tx("🕯 הזמינו אותך ללמוד יחד")}</h3>
+                  <p>{tx("איך קוראים לך? כך החבר יראה אותך בדף.")}</p>
+                  <input className="cloud-input" type="text" dir="auto" placeholder={tx("השם שלך")} maxLength={30} autoFocus value={guestName}
                     onChange={(e) => setGuestName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") guestEnter(); }} />
                   <div className="cloud-actions">
-                    <button className="cloud-btn" onClick={guestEnter} disabled={guestBusy}>{guestBusy ? "נכנס…" : "🚪 היכנס לדף"}</button>
+                    <button className="cloud-btn" onClick={guestEnter} disabled={guestBusy}>{guestBusy ? tx("נכנס…") : tx("🚪 היכנס לדף")}</button>
                   </div>
                   {guestMsg && <p style={{ fontSize: ".85rem", color: "#f8c778", marginTop: 8 }}>{guestMsg}</p>}
                   <div className="cloud-actions" style={{ marginTop: 10 }}>
-                    <button className="cloud-btn ghost" onClick={() => { setGuestAsk(false); setShowCloud(true); }}>יש לי חשבון — כניסה במייל</button>
-                    <button className="cloud-btn ghost" onClick={dropPendingJoin}>לא עכשיו</button>
+                    <button className="cloud-btn ghost" onClick={() => { setGuestAsk(false); setShowCloud(true); }}>{tx("יש לי חשבון — כניסה במייל")}</button>
+                    <button className="cloud-btn ghost" onClick={dropPendingJoin}>{tx("לא עכשיו")}</button>
                   </div>
-                  <p style={{ fontSize: ".78rem", opacity: 0.7, marginTop: 8 }}>כאורח לא נשמר לך דבר לפעם הבאה. כניסה במייל שומרת את הסימונים וההערות.</p>
+                  <p style={{ fontSize: ".78rem", opacity: 0.7, marginTop: 8 }}>{tx("כאורח לא נשמר לך דבר לפעם הבאה. כניסה במייל שומרת את הסימונים וההערות.")}</p>
                 </div>
               </div>
             )}
             {showCloud && (
               <div className="cloud-overlay" onClick={() => setShowCloud(false)}>
                 <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
-                  <h3>☁ חשבון ענן</h3>
+                  <h3>{tx("☁ חשבון ענן")}</h3>
                   {cloudUser ? (
                     <>
-                      <p>{cloudUser.is_anonymous ? "נכנסת כאורח:" : "מחובר בתור:"}<br /><b dir="auto">{cloudUser.is_anonymous ? shareNameOf(cloudUser) : cloudUser.email}</b></p>
+                      <p>{cloudUser.is_anonymous ? tx("נכנסת כאורח:") : tx("מחובר בתור:")}<br /><b dir="auto">{cloudUser.is_anonymous ? shareNameOf(cloudUser) : cloudUser.email}</b></p>
                       <p className="sync-line">
-                        {syncState === "saving" ? "⏳ שומר בענן..." : syncState === "err" ? "⚠ " + syncErr : "✅ סנכרון שוטף פעיל — כל מרקר, הערה, תוצר וציון נשמרים גם בענן."}
+                        {syncState === "saving" ? tx("⏳ שומר בענן...") : syncState === "err" ? "⚠ " + syncErr : tx("✅ סנכרון שוטף פעיל — כל מרקר, הערה, תוצר וציון נשמרים גם בענן.")}
                       </p>
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={manualPull} disabled={migrating || pulling}>⬇ הורד את הספרים מהענן</button>
+                        <button className="cloud-btn" onClick={manualPull} disabled={migrating || pulling}>{tx("⬇ הורד את הספרים מהענן")}</button>
                       </div>
-                      <p style={{ fontSize: ".8rem", opacity: 0.75, marginTop: 8 }}>למכשיר חדש, או כדי למשוך עבודה שנעשתה במקום אחר. תמיד יוצג מה עומד לרדת לפני שמחליטים.</p>
+                      <p style={{ fontSize: ".8rem", opacity: 0.75, marginTop: 8 }}>{tx("למכשיר חדש, או כדי למשוך עבודה שנעשתה במקום אחר. תמיד יוצג מה עומד לרדת לפני שמחליטים.")}</p>
                       <div className="cloud-actions">
-                        <button className="cloud-btn ghost" onClick={migrateToCloud} disabled={migrating}>{migrating ? "⏳ מעלה..." : "☁ העלאה מלאה מחדש"}</button>
+                        <button className="cloud-btn ghost" onClick={migrateToCloud} disabled={migrating}>{migrating ? tx("⏳ מעלה...") : tx("☁ העלאה מלאה מחדש")}</button>
                       </div>
-                      <p style={{ fontSize: ".8rem", opacity: 0.6, marginTop: 8 }}>לרוב אין בזה צורך — הסנכרון השוטף מטפל בהכול. בטוח להריץ שוב: מעדכן ולא מכפיל.</p>
+                      <p style={{ fontSize: ".8rem", opacity: 0.6, marginTop: 8 }}>{tx("לרוב אין בזה צורך — הסנכרון השוטף מטפל בהכול. בטוח להריץ שוב: מעדכן ולא מכפיל.")}</p>
                       <div className="cloud-actions">
-                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)} disabled={migrating}>סגור</button>
-                        <button className="cloud-btn ghost" onClick={cloudSignOut} disabled={migrating}>התנתק</button>
+                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)} disabled={migrating}>{tx("סגור")}</button>
+                        <button className="cloud-btn ghost" onClick={cloudSignOut} disabled={migrating}>{tx("התנתק")}</button>
                       </div>
                     </>
                   ) : (
                     <>
-                      <p>כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה.</p>
+                      <p>{tx("כניסה בלי סיסמה: כתוב את המייל שלך ונשלח אליו קישור כניסה.")}</p>
                       <input
                         className="cloud-input"
                         type="email"
@@ -4890,8 +4896,8 @@ export default function LearningTV() {
                         onKeyDown={(e) => { if (e.key === "Enter") sendMagicLink(); }}
                       />
                       <div className="cloud-actions">
-                        <button className="cloud-btn" onClick={sendMagicLink}>📨 שלח לי קישור כניסה</button>
-                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)}>המשך בלי חשבון</button>
+                        <button className="cloud-btn" onClick={sendMagicLink}>{tx("📨 שלח לי קישור כניסה")}</button>
+                        <button className="cloud-btn ghost" onClick={() => setShowCloud(false)}>{tx("המשך בלי חשבון")}</button>
                       </div>
                       {cloudSent && (
                         <>
@@ -4901,13 +4907,13 @@ export default function LearningTV() {
                             inputMode="numeric"
                             autoComplete="one-time-code"
                             dir="ltr"
-                            placeholder="קוד מהמייל · 6 ספרות"
+                            placeholder={tx("קוד מהמייל · 6 ספרות")}
                             value={cloudCode}
                             onChange={(e) => setCloudCode(e.target.value)}
                             onKeyDown={(e) => { if (e.key === "Enter") verifyCode(); }}
                           />
                           <div className="cloud-actions">
-                            <button className="cloud-btn" onClick={verifyCode} disabled={cloudCode.replace(/\D/g, "").length < 6}>🔑 כניסה עם הקוד</button>
+                            <button className="cloud-btn" onClick={verifyCode} disabled={cloudCode.replace(/\D/g, "").length < 6}>{tx("🔑 כניסה עם הקוד")}</button>
                           </div>
                         </>
                       )}
@@ -4922,32 +4928,32 @@ export default function LearningTV() {
             {pullList && !share && (
               <div className="cloud-overlay" onClick={() => { if (!pulling) { setPullList(null); setPullMsg(""); } }}>
                 <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
-                  <h3>⬇ יש חדש בענן</h3>
+                  <h3>{tx("⬇ יש חדש בענן")}</h3>
                   <p style={{ fontSize: ".9rem" }}>
                     {pullList[0]?.manual
-                      ? "הספרים הבאים נמצאים בענן. ההורדה תחליף את העותק שבמכשיר הזה:"
-                      : "הספרים הבאים עודכנו במקום אחר, או שאינם קיימים במכשיר הזה:"}
+                      ? tx("הספרים הבאים נמצאים בענן. ההורדה תחליף את העותק שבמכשיר הזה:")
+                      : tx("הספרים הבאים עודכנו במקום אחר, או שאינם קיימים במכשיר הזה:")}
                   </p>
                   <ul className="pull-list">
                     {pullList.map((c) => (
                       <li key={c.id}>
-                        <b>{c.title || "ללא שם"}</b>
-                        {c.isNew ? <span className="pull-tag">חדש</span> : null}
-                        <span className="pull-when">{c.updated_at ? new Date(c.updated_at).toLocaleString("he-IL") : ""}</span>
+                        <b>{c.title || tx("ללא שם")}</b>
+                        {c.isNew ? <span className="pull-tag">{tx("חדש")}</span> : null}
+                        <span className="pull-when">{c.updated_at ? new Date(c.updated_at).toLocaleString(getLang()) : ""}</span>
                       </li>
                     ))}
                   </ul>
                   {pullMsg && <p className="cloud-msg">{pullMsg}</p>}
                   <div className="cloud-actions">
                     <button className="cloud-btn" onClick={() => doPull(pullList)} disabled={pulling}>
-                      {pulling ? "⏳ מוריד..." : "⬇ הורד הכול"}
+                      {pulling ? tx("⏳ מוריד...") : tx("⬇ הורד הכול")}
                     </button>
                     <button className="cloud-btn ghost" onClick={() => { setPullList(null); setPullMsg(""); }} disabled={pulling}>
-                      לא עכשיו
+                      {tx("לא עכשיו")}
                     </button>
                   </div>
                   <p style={{ fontSize: ".78rem", opacity: 0.6, marginTop: 10 }}>
-                    "לא עכשיו" בטוח לחלוטין — שום דבר לא נמחק, וההצעה תחזור בכניסה הבאה.
+                    {tx("\"לא עכשיו\" בטוח לחלוטין — שום דבר לא נמחק, וההצעה תחזור בכניסה הבאה.")}
                   </p>
                 </div>
               </div>
@@ -4977,23 +4983,23 @@ export default function LearningTV() {
             {share && shareVideo && <VideoPanel sessionId={share.id} myName={shareNameOf(cloudUser)} watch={shareWatch} onClose={() => setShareVideo(false)} />}
             <div className={"screen-body" + (helpOn ? " behind-help" : "")} style={{ zoom: fontScale }}>
               {view === "boot" && (
-                <div className="idle"><div className="idle-mark spin">✳</div><p>טוען את הספרייה…</p></div>
+                <div className="idle"><div className="idle-mark spin">✳</div><p>{tx("טוען את הספרייה…")}</p></div>
               )}
  
               {/* ── קליטת ספר חדש ── */}
               {view === "intake" && (
                 <div className="intake">
                   <p className="intake-lead">
-                    הדבק ספר, פרק או מאמר — או העלה קובץ — והמסך יהפוך אותו לסדרת פרקים עם ערוצי למידה: סיכום, מושגים, מפת חשיבה, מבחן ועוד. ההתקדמות נשמרת, כך שאפשר ללמוד ספר שלם לאורך זמן.
+                    {tx("הדבק ספר, פרק או מאמר — או העלה קובץ — והמסך יהפוך אותו לסדרת פרקים עם ערוצי למידה: סיכום, מושגים, מפת חשיבה, מבחן ועוד. ההתקדמות נשמרת, כך שאפשר ללמוד ספר שלם לאורך זמן.")}
                   </p>
                   {openQ && (
                     <div className="my-q">
                       <span className="my-q-ic">❓</span>
-                      <span className="my-q-body"><small>השאלה שאתה נושא איתך</small>{openQ}</span>
-                      <button className="my-q-x" onClick={() => saveOpenQ("")} title="להסיר את השאלה" aria-label="להסיר את השאלה">✕</button>
+                      <span className="my-q-body"><small>{tx("השאלה שאתה נושא איתך")}</small>{openQ}</span>
+                      <button className="my-q-x" onClick={() => saveOpenQ("")} title={tx("להסיר את השאלה")} aria-label={tx("להסיר את השאלה")}>✕</button>
                     </div>
                   )}
-                  <input ref={titleRef} className="intake-title" placeholder="שם הספר (למשל: אדיר במרום — הרמח״ל)" />
+                  <input ref={titleRef} className="intake-title" placeholder={tx("שם הספר (למשל: אדיר במרום — הרמח״ל)")} />
  
                   <input
                     ref={fileRef}
@@ -5014,7 +5020,7 @@ export default function LearningTV() {
                   />
                   <div className="upload-box">
                     <span className="upload-hint">
-                      ⬇ הכפתורים למטה: שדר טקסט, העלה קבצים (אפשר כמה בבת אחת — כל קובץ נהיה ספר), צילומים לפענוח OCR עברי, או 🎬 שיעור מוקלט — קובץ אודיו או וידאו שמתומלל לטקסט עברי והופך לספר.
+                      {tx("⬇ הכפתורים למטה: שדר טקסט, העלה קבצים (אפשר כמה בבת אחת — כל קובץ נהיה ספר), צילומים לפענוח OCR עברי, או 🎬 שיעור מוקלט — קובץ אודיו או וידאו שמתומלל לטקסט עברי והופך לספר.")}
                     </span>
                     {fileBusy && <span className="busy-line">⏳ {fileBusy}</span>}
                   </div>
@@ -5029,62 +5035,62 @@ export default function LearningTV() {
                     onChange={onSmartPicked}
                   />
                   <div className="scan-mode-row">
-                    <span className="scan-mode-title">📸 צלם דף חכם (AI · לדפי זוהר ודפים מפורשים) — תבנית:</span>
+                    <span className="scan-mode-title">{tx("📸 צלם דף חכם (AI · לדפי זוהר ודפים מפורשים) — תבנית:")}</span>
                     <select className="scan-mode-select" value={smartMode} onChange={(e) => setSmartMode(e.target.value)}>
                       {Object.entries(SCAN_MODES).map(([k, v]) => (
                         <option key={k} value={k}>{v.label}</option>
                       ))}
                     </select>
                     <label htmlFor="camera-scan-input" className="cam-btn" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
-                      📷 צלם עכשיו
+                      {tx("📷 צלם עכשיו")}
                     </label>
                   </div>
 
                   <div className="scan-mode-row zohar-row">
-                    <span className="scan-mode-title">📜 זוהר עם סולם צמוד — מאמר מספריא:</span>
-                    <select className="scan-mode-select" value={zoharForm.p} onChange={(e) => setZoharForm((f) => ({ ...f, p: +e.target.value }))} aria-label="פרשה">
+                    <span className="scan-mode-title">{tx("📜 זוהר עם סולם צמוד — מאמר מספריא:")}</span>
+                    <select className="scan-mode-select" value={zoharForm.p} onChange={(e) => setZoharForm((f) => ({ ...f, p: +e.target.value }))} aria-label={tx("פרשה")}>
                       {ZOHAR_PARSHIOT.map(([en, he], i) => (
                         <option key={en} value={i}>{he}</option>
                       ))}
                     </select>
-                    <select className="scan-mode-select" value="" onChange={(e) => pickZoharArticle(e.target.value)} aria-label="מאמר" disabled={!zoharArts || !zoharArts.length}>
-                      <option value="">{zoharArts === null ? "טוען מאמרים…" : zoharArts.length ? `בחר מאמר (${zoharArts.length})` : "אין רשימה — מלא אותיות ידנית"}</option>
+                    <select className="scan-mode-select" value="" onChange={(e) => pickZoharArticle(e.target.value)} aria-label={tx("מאמר")} disabled={!zoharArts || !zoharArts.length}>
+                      <option value="">{zoharArts === null ? tx("טוען מאמרים…") : zoharArts.length ? tx("בחר מאמר ({n})", { n: zoharArts.length }) : tx("אין רשימה — מלא אותיות ידנית")}</option>
                       {(zoharArts || []).map((a) => (
-                        <option key={a.n} value={a.n}>{(a.name || `מאמר ${a.n}`) + " · " + hebNum(a.from) + (a.to > a.from ? "–" + hebNum(a.to) : "")}</option>
+                        <option key={a.n} value={a.n}>{(a.name || tx("מאמר {n}", { n: a.n })) + " · " + hebNum(a.from) + (a.to > a.from ? "–" + hebNum(a.to) : "")}</option>
                       ))}
                     </select>
-                    <input className="zohar-in" placeholder="מאות (קמג)" value={zoharForm.from} onChange={(e) => setZoharForm((f) => ({ ...f, from: e.target.value }))} aria-label="מאות" />
-                    <input className="zohar-in" placeholder="עד אות (קמו)" value={zoharForm.to} onChange={(e) => setZoharForm((f) => ({ ...f, to: e.target.value }))} aria-label="עד אות" />
-                    <input className="zohar-in wide" placeholder="שם המאמר (ארבע קשרין)" value={zoharForm.name} onChange={(e) => setZoharForm((f) => ({ ...f, name: e.target.value }))} aria-label="שם המאמר" />
-                    <button className="cam-btn" onClick={importZohar} disabled={!!fileBusy}>📜 משוך מאמר</button>
+                    <input className="zohar-in" placeholder={tx("מאות (קמג)")} value={zoharForm.from} onChange={(e) => setZoharForm((f) => ({ ...f, from: e.target.value }))} aria-label={tx("מאות")} />
+                    <input className="zohar-in" placeholder={tx("עד אות (קמו)")} value={zoharForm.to} onChange={(e) => setZoharForm((f) => ({ ...f, to: e.target.value }))} aria-label={tx("עד אות")} />
+                    <input className="zohar-in wide" placeholder={tx("שם המאמר (ארבע קשרין)")} value={zoharForm.name} onChange={(e) => setZoharForm((f) => ({ ...f, name: e.target.value }))} aria-label={tx("שם המאמר")} />
+                    <button className="cam-btn" onClick={importZohar} disabled={!!fileBusy}>{tx("📜 משוך מאמר")}</button>
                     <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
-                      הארמית והסולם לפי האותיות שבספר · מאמר חדש מצטרף לספר של אותה פרשה
+                      {tx("הארמית והסולם לפי האותיות שבספר · מאמר חדש מצטרף לספר של אותה פרשה")}
                     </span>
                   </div>
                   <div className="scan-mode-row">
                     {!recOn ? (
                       <button className="rec-btn" onClick={startRec} disabled={!!fileBusy}>
-                        🎙 הקלט שיעור חי
+                        {tx("🎙 הקלט שיעור חי")}
                       </button>
                     ) : (
                       <>
-                        <span className="rec-live">● מקליט… {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
-                        <button className="rec-btn stop" onClick={stopRec}>⏹ עצור וסיים</button>
+                        <span className="rec-live">{tx("● מקליט…")} {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
+                        <button className="rec-btn stop" onClick={stopRec}>{tx("⏹ עצור וסיים")}</button>
                       </>
                     )}
                     <label htmlFor="video-capture-input" className="rec-btn" style={{ pointerEvents: fileBusy || recOn ? "none" : "auto", opacity: fileBusy || recOn ? 0.6 : 1, userSelect: "none" }}>
-                      🎥 צלם וידאו
+                      {tx("🎥 צלם וידאו")}
                     </label>
                     <span className="scan-mode-title" style={{ opacity: 0.75 }}>
-                      שיעור, הרצאה או הקראה — בסיום ההקלטה מתומללת והופכת לספר
+                      {tx("שיעור, הרצאה או הקראה — בסיום ההקלטה מתומללת והופכת לספר")}
                     </span>
                   </div>
 
-                  <div className="or-divider"><span>או הדבק טקסט</span></div>
+                  <div className="or-divider"><span>{tx("או הדבק טקסט")}</span></div>
  
-                  <textarea ref={inputRef} className="intake-text" placeholder="הדבק את הטקסט כאן..." />
+                  <textarea ref={inputRef} className="intake-text" placeholder={tx("הדבק את הטקסט כאן...")} />
                   <p className="intake-tip">
-                    טקסט ארוך יחולק אוטומטית לפרקים. לחלוקה ידנית — שורה של === בין הקטעים.
+                    {tx("טקסט ארוך יחולק אוטומטית לפרקים. לחלוקה ידנית — שורה של === בין הקטעים.")}
                   </p>
                   {error && <div className="err">{error}</div>}
                 </div>
@@ -5094,39 +5100,39 @@ export default function LearningTV() {
               {view === "library" && (
                 <div className="library">
                   <p className="intake-lead">
-                    הספרים שלך. כל ספר שומר את הפרקים, התוצרים והציונים שלו.
-                    <a href="#" className="to-opening" onClick={(e) => { e.preventDefault(); setShowOpening(true); }} title="חזרה למסך הפתיחה">ל · הפנים</a>
+                    {tx("הספרים שלך. כל ספר שומר את הפרקים, התוצרים והציונים שלו.")}
+                    <a href="#" className="to-opening" onClick={(e) => { e.preventDefault(); setShowOpening(true); }} title={tx("חזרה למסך הפתיחה")}>{tx("ל · הפנים")}</a>
                   </p>
                   {openQ && (
                     <div className="my-q">
                       <span className="my-q-ic">❓</span>
-                      <span className="my-q-body"><small>השאלה שאתה נושא איתך</small>{openQ}</span>
-                      <button className="my-q-x" onClick={() => saveOpenQ("")} title="להסיר את השאלה" aria-label="להסיר את השאלה">✕</button>
+                      <span className="my-q-body"><small>{tx("השאלה שאתה נושא איתך")}</small>{openQ}</span>
+                      <button className="my-q-x" onClick={() => saveOpenQ("")} title={tx("להסיר את השאלה")} aria-label={tx("להסיר את השאלה")}>✕</button>
                     </div>
                   )}
                   {fileBusy && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px" }}>⏳ {fileBusy}</div>}
-                  {!fileBusy && recOn && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px", color: "#ff8a8a" }}>● מקליט… לסיום לחץ ⏹ למטה</div>}
+                  {!fileBusy && recOn && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px", color: "#ff8a8a" }}>{tx("● מקליט… לסיום לחץ ⏹ למטה")}</div>}
                   {error && <div className="err">{error}</div>}
                   {index.map((b) => (
                     <div className="book-row" key={b.id}>
                       <button className="book-main" onClick={() => openBook(b.id)}>
                         <span className="book-title">{b.title}</span>
                         <span className="book-meta">
-                          {b.done}/{b.chapters} פרקים הושלמו
+                          {tx("{a}/{b} פרקים הושלמו", { a: b.done, b: b.chapters })}
                         </span>
                         <span className="mini-bar">
                           <span className="mini-fill" style={{ width: `${b.chapters ? (b.done / b.chapters) * 100 : 0}%` }} />
                         </span>
                       </button>
                       {(b.talk || 0) >= MIRROR_MIN && (
-                        <button className="mirror-btn" onClick={() => openMirror(b.id)} title={`🎧 שיקוף — ${b.talk} הערות וסימונים בספר הזה`} aria-label="שיקוף">
-                          🎧<small>שיקוף</small>
+                        <button className="mirror-btn" onClick={() => openMirror(b.id)} title={tx("🎧 שיקוף — {n} הערות וסימונים בספר הזה", { n: b.talk })} aria-label={tx("שיקוף")}>
+                          🎧<small>{tx("שיקוף")}</small>
                         </button>
                       )}
                       {deleteArm === b.id ? (
-                        <button className="del confirm" onClick={() => removeBook(b.id)}>בטוח?</button>
+                        <button className="del confirm" onClick={() => removeBook(b.id)}>{tx("בטוח?")}</button>
                       ) : (
-                        <button className="del" onClick={() => setDeleteArm(b.id)} title="מחק ספר">✕</button>
+                        <button className="del" onClick={() => setDeleteArm(b.id)} title={tx("מחק ספר")}>✕</button>
                       )}
                     </div>
                   ))}
@@ -5667,43 +5673,43 @@ export default function LearningTV() {
         <div className="deck">
           <button className="ch-key gold" onClick={() => { setError(null); setView("intake"); }} disabled={!!fileBusy}>
             <span className="key-num">＋</span>
-            <span className="key-label">ספר חדש</span>
+            <span className="key-label">{tx("ספר חדש")}</span>
           </button>
-          <button className="ch-key share" onClick={joinByCode} title="הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו">
+          <button className="ch-key share" onClick={joinByCode} title={tx("הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו")}>
             <span className="key-num">🕯</span>
-            <span className="key-label">הצטרף עם קוד</span>
+            <span className="key-label">{tx("הצטרף עם קוד")}</span>
           </button>
           <label htmlFor="camera-scan-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
-            <span className="key-label">צלם דף</span>
+            <span className="key-label">{tx("צלם דף")}</span>
           </label>
           <label htmlFor="video-capture-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">🎥</span>
-            <span className="key-label">צלם וידאו</span>
+            <span className="key-label">{tx("צלם וידאו")}</span>
           </label>
           {!recOn ? (
             <button className="ch-key media" onClick={startRec} disabled={!!fileBusy}>
               <span className="key-num">🎙</span>
-              <span className="key-label">הקלט שיעור</span>
+              <span className="key-label">{tx("הקלט שיעור")}</span>
             </button>
           ) : (
             <button className="ch-key rec-on" onClick={stopRec}>
               <span className="key-num">⏹</span>
-              <span className="key-label">עצור {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
+              <span className="key-label">{tx("עצור")} {Math.floor(recSec / 60)}:{String(recSec % 60).padStart(2, "0")}</span>
             </button>
           )}
           <label htmlFor="media-transcribe-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">🎬</span>
-            <span className="key-label">אודיו/וידאו</span>
+            <span className="key-label">{tx("אודיו/וידאו")}</span>
           </label>
           <button
             className="ch-key shelf"
             onClick={openShelf}
             disabled={!!fileBusy}
-            title="ארון הספרים — 70 ספרי מקור, לייבוא ללימוד"
+            title={tx("ארון הספרים — 70 ספרי מקור, לייבוא ללימוד")}
           >
             <span className="key-num">📚</span>
-            <span className="key-label">ארון הספרים</span>
+            <span className="key-label">{tx("ארון הספרים")}</span>
           </button>
         </div>
       )}
@@ -5713,16 +5719,16 @@ export default function LearningTV() {
           {shelfPick && shelfSegs && (
             <button className="ch-key" onClick={() => { setShelfPick(null); setShelfSegs(null); setShelfOpts([]); setShelfQ(""); }} disabled={!!fileBusy}>
               <span className="key-num">📚</span>
-              <span className="key-label">כל הספרים</span>
+              <span className="key-label">{tx("כל הספרים")}</span>
             </button>
           )}
-          <a className="ch-key shelf" href={SHELF_URL} target="_blank" rel="noopener noreferrer" title="פותח את הארון בלשונית חדשה">
+          <a className="ch-key shelf" href={SHELF_URL} target="_blank" rel="noopener noreferrer" title={tx("פותח את הארון בלשונית חדשה")}>
             <span className="key-num">↗</span>
-            <span className="key-label">פתח את הארון</span>
+            <span className="key-label">{tx("פתח את הארון")}</span>
           </a>
           <button className="ch-key newtext" onClick={() => { backToLibrary(); if (!index.length) setView("intake"); }} disabled={!!fileBusy}>
             <span className="key-num">↩</span>
-            <span className="key-label">חזרה לספרייה</span>
+            <span className="key-label">{tx("חזרה לספרייה")}</span>
           </button>
         </div>
       )}
@@ -5731,32 +5737,32 @@ export default function LearningTV() {
         <div className="deck">
           <button className="ch-key gold" onClick={createBook} disabled={!!fileBusy}>
             <span className="key-num">▸</span>
-            <span className="key-label">שדר טקסט</span>
+            <span className="key-label">{tx("שדר טקסט")}</span>
           </button>
           <button className="ch-key" onClick={() => fileRef.current?.click()} disabled={!!fileBusy}>
             <span className="key-num">⬆</span>
-            <span className="key-label">קבצים</span>
+            <span className="key-label">{tx("קבצים")}</span>
           </button>
           <label htmlFor="photo-ocr-input" className="ch-key green" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📷</span>
-            <span className="key-label">צילומים OCR</span>
+            <span className="key-label">{tx("צילומים OCR")}</span>
           </label>
           <label htmlFor="smart-scan-input" className="ch-key smart" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">📸</span>
-            <span className="key-label">דף חכם AI</span>
+            <span className="key-label">{tx("דף חכם AI")}</span>
           </label>
           <label htmlFor="media-transcribe-input" className="ch-key media" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
             <span className="key-num">🎬</span>
-            <span className="key-label">שיעור מוקלט</span>
+            <span className="key-label">{tx("שיעור מוקלט")}</span>
           </label>
-          <button className="ch-key share" onClick={joinByCode} title="הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו">
+          <button className="ch-key share" onClick={joinByCode} title={tx("הצטרפות ללימוד משותף שחבר פתח — עם הקוד שלו")}>
             <span className="key-num">🕯</span>
-            <span className="key-label">הצטרף עם קוד</span>
+            <span className="key-label">{tx("הצטרף עם קוד")}</span>
           </button>
           {index.length > 0 && (
             <button className="ch-key newtext" onClick={backToLibrary} disabled={!!fileBusy}>
               <span className="key-num">↩</span>
-              <span className="key-label">חזרה לספרייה</span>
+              <span className="key-label">{tx("חזרה לספרייה")}</span>
             </button>
           )}
         </div>
@@ -5820,11 +5826,11 @@ export default function LearningTV() {
           </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
             <span className="key-num">↩</span>
-            <span className="key-label">חזרה לספרייה</span>
+            <span className="key-label">{tx("חזרה לספרייה")}</span>
           </button>
         </div>
       )}
-      {shareMsg && <p className="share-msg share-toast" dir="rtl" role="status">{shareMsg} <button className="mark-btn" onClick={() => setShareMsg("")}>✕</button></p>}
+      {shareMsg && <p className="share-msg share-toast" dir={langDir()} role="status">{shareMsg} <button className="mark-btn" onClick={() => setShareMsg("")}>✕</button></p>}
 
       {view === "mirror" && book && (
         <div className="deck">
@@ -5978,6 +5984,8 @@ const css = `
 }
 .opening button,.opening input{font-family:inherit}
 .opening :focus-visible{outline:2px solid var(--gold);outline-offset:3px;border-radius:3px}
+.lang-pick{font-family:inherit;font-size:.8rem;padding:0 4px;max-width:92px}
+.op-lang{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));inset-inline-end:12px;z-index:3;background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:8px;height:30px}
 .op-brand{display:flex;align-items:center;justify-content:center;gap:12px;padding:34px 20px 0}
 .op-lamed{position:relative;width:56px;height:56px;flex:none}
 .op-lamed .row{position:absolute;bottom:10px;right:0;left:0;text-align:center;font-family:'Frank Ruhl Libre',serif;font-size:19px;color:var(--dim);opacity:.45;letter-spacing:2px;white-space:nowrap;overflow:hidden}
