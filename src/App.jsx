@@ -297,6 +297,37 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
   }
 }
  
+/* ─── ▶ שער יוטיוב (צ'אט 25) ───
+   האפליקציה אינה מורידה סרטונים (תנאי יוטיוב, הנחיה 5.2.3 של אפל). המשתמש מדביק את הקישור
+   ואת התמליל שהעתיק מיוטיוב ("הצג תמליל"); התמליל מנוקה מחותמות זמן והופך לספר, והסרטון
+   מתנגן לצד הטקסט בנגן הרשמי של יוטיוב. הקישור נשמר ב-book.flex.yt. */
+function ytId(url) {
+  const m = String(url || "").match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+  return m ? m[1] : null;
+}
+function cleanTranscript(raw) {
+  const lines = String(raw || "").split(/\r?\n/).map((l) => l.replace(/^\s*\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*/, "").trim())
+    .filter((l) => l && !/^\d+\s+(seconds?|minutes?|hours?|שניות|דקות|שעות)/i.test(l));
+  /* תמליל של יוטיוב מגיע בשורות קצרות: מאחדים לפסקאות של כ-600 תווים, ושוברים בסוף משפט כשיש */
+  const paras = []; let cur = "";
+  for (const l of lines) {
+    cur = cur ? cur + " " + l : l;
+    if (cur.length >= 600 && /[.!?׃。]["'״׳)]*$/.test(l) || cur.length >= 900) { paras.push(cur); cur = ""; }
+  }
+  if (cur) paras.push(cur);
+  return paras.join("\n\n");
+}
+function YouTubeBox({ yt }) {
+  const [open, setOpen] = useState(false);
+  if (!yt || !yt.id) return null;
+  return (
+    <div className="yt-box">
+      <button className="mark-btn yt-toggle" onClick={() => setOpen((v) => !v)}>{open ? tx("▾ הסתר את הסרטון") : tx("▶ הצג את הסרטון")}</button>
+      {open && <div className="yt-frame"><iframe src={"https://www.youtube-nocookie.com/embed/" + yt.id + "?playsinline=1&rel=0"} title="YouTube" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen /></div>}
+    </div>
+  );
+}
+
 /* ─── 🌐 ערוץ התרגום (09, צ'אט 25) — הדף הדו-לשוני ───
    הפרק מתורגם משפט מול משפט: משפט 7 במקור הוא משפט 7 בתרגום. זה הבסיס ללימוד משותף
    בין שתי שפות (מרקר על משפט עובר לפי המספר שלו). התוצר נשמר כמו כל ערוץ, במפתח
@@ -3179,6 +3210,7 @@ export default function LearningTV() {
     setLayerOn(next);
   };
   const [zoharArts, setZoharArts] = useState(null); // רשימת המאמרים של הפרשה שנבחרה (מספריא)
+  const [ytForm, setYtForm] = useState({ url: "", title: "", text: "" }); // ▶ שער יוטיוב
   const [zoharForm, setZoharForm] = useState({ p: ZOHAR_DEFAULT_PARASHA, from: "", to: "", name: "" }); // 📜 שער הזוהר
   const dragJustRef = useRef(false);              // מונע שלחיצת-גרירה תיספר כלחיצת-בחירה
   const [flexResult, setFlexResult] = useState(null); // {channel, data}
@@ -3986,7 +4018,7 @@ export default function LearningTV() {
     return { cls: cls + (here ? " peer-here" : ""), color: color || here?.color || note?.color, title, note, here };
   };
  
-  const buildBook = async (text, forcedTitle, stayInLibrary = false, presetChapters = null) => {
+  const buildBook = async (text, forcedTitle, stayInLibrary = false, presetChapters = null, extra = null) => {
     const chapters = presetChapters && presetChapters.length ? presetChapters : splitToChapters(text);
     const title =
       (forcedTitle && forcedTitle.trim()) ||
@@ -3999,6 +4031,7 @@ export default function LearningTV() {
       chapters,
       results: {},
       progress: {},
+      ...(extra || {}),
     };
     await persist(nb, { k: "full" });
     setError(null);
@@ -4007,6 +4040,16 @@ export default function LearningTV() {
       setView("guide");
     }
     return nb;
+  };
+
+  /* ── ▶ שער יוטיוב: קישור + תמליל שהמשתמש הדביק ← ספר, והסרטון לצד הטקסט ── */
+  const importYouTube = async () => {
+    const id = ytId(ytForm.url);
+    if (!id) { setError(tx("הקישור אינו קישור תקין לסרטון יוטיוב.")); return; }
+    const text = cleanTranscript(ytForm.text);
+    if (text.length < 80) { setError(tx("חסר התמליל: ביוטיוב, מתחת לסרטון — \"עוד\" ← \"הצג תמליל\" — להעתיק ולהדביק כאן.")); return; }
+    await buildBook(text, ytForm.title.trim() || tx("סרטון יוטיוב"), false, null, { flex: { yt: { id, url: ytForm.url.trim() } } });
+    setYtForm({ url: "", title: "", text: "" });
   };
 
   /* ── 📜 שער הזוהר: מאמר מספריא לפי פרשה ואותיות — נכנס כפרק לספר של אותה פרשה ── */
@@ -5191,6 +5234,16 @@ export default function LearningTV() {
                       {tx("הארמית והסולם לפי האותיות שבספר · מאמר חדש מצטרף לספר של אותה פרשה")}
                     </span>
                   </div>
+                  <div className="scan-mode-row yt-row">
+                    <span className="scan-mode-title">{tx("▶ סרטון יוטיוב — קישור ותמליל:")}</span>
+                    <input className="zohar-in wide" dir="ltr" placeholder="https://youtu.be/…" value={ytForm.url} onChange={(e) => setYtForm((f) => ({ ...f, url: e.target.value }))} aria-label={tx("קישור לסרטון")} />
+                    <input className="zohar-in wide" dir="auto" placeholder={tx("שם השיעור")} value={ytForm.title} onChange={(e) => setYtForm((f) => ({ ...f, title: e.target.value }))} aria-label={tx("שם השיעור")} />
+                    <textarea className="yt-text" dir="auto" placeholder={tx("הדבק כאן את התמליל שהעתקת מיוטיוב")} value={ytForm.text} onChange={(e) => setYtForm((f) => ({ ...f, text: e.target.value }))} />
+                    <button className="cam-btn" onClick={importYouTube} disabled={!!fileBusy}>{tx("▶ הפוך לספר")}</button>
+                    <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
+                      {tx("ביוטיוב: מתחת לסרטון — \"עוד\" ← \"הצג תמליל\" — לסמן הכול ולהעתיק. האפליקציה אינה מורידה את הסרטון; הוא יתנגן לצד הטקסט.")}
+                    </span>
+                  </div>
                   <div className="scan-mode-row">
                     {!recOn ? (
                       <button className="rec-btn" onClick={startRec} disabled={!!fileBusy}>
@@ -5359,6 +5412,7 @@ export default function LearningTV() {
                   <div className="progressbar">
                     <span className="progress-fill" style={{ width: `${(doneCount(book) / book.chapters.length) * 100}%` }} />
                   </div>
+                  <YouTubeBox yt={book.flex?.yt} />
                   <div className="g-list">
                     {book.chapters.map((c, i) => {
                       const st = chapterStatus(book, i);
@@ -5634,6 +5688,7 @@ export default function LearningTV() {
  
               {view === "tv" && channel === "read" && !loading && cur && (
                 <div className="read" key={key(chIdx, "read")}>
+                  <YouTubeBox yt={book.flex?.yt} />
                   <h2 className="read-title">{cur.title}</h2>
                   <p className="flex-hint read-mark-hint">
                     {selStart !== null && selEnd === null
@@ -6423,6 +6478,11 @@ const css = `
 .concepts{display:flex;flex-direction:column;gap:22px}
 .sec-title{font-size:1.05rem;font-weight:800;color:#7a5410;margin-bottom:10px}
 .sec-title.center{text-align:center}
+.yt-row{background:#fff1f0;border-color:#f0b8b2;color:#63201a}
+.yt-text{flex:1 1 100%;min-height:90px;font-family:inherit;font-size:.95rem;padding:8px 10px;border-radius:8px;border:1.5px solid #f0b8b2;background:#fff;color:#2c2314}
+.yt-box{margin:8px 0 12px}
+.yt-frame{position:relative;width:100%;max-width:720px;aspect-ratio:16/9;margin-top:8px;border-radius:10px;overflow:hidden;background:#000}
+.yt-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .tl{display:flex;flex-direction:column;gap:14px}
 .tl-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .tl-head .mark-btn.on{background:#1b3a6b;color:#fff;border-color:#1b3a6b}
