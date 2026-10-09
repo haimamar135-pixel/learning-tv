@@ -4,6 +4,7 @@ import { Room, RoomEvent, Track } from "livekit-client";
 import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
 import { tx, getLang, setLang, langDir, LANGS } from "./i18n.js";
+import { STARTER } from "./starter.js";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
    המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
@@ -471,6 +472,20 @@ async function saveBookToStorage(book) {
   } catch (e) {
     console.error("saveBook failed", e);
   }
+}
+/* ספר הפתיחה: נכנס לספרייה פעם אחת לכל שפה (עברית / אנגלית לשאר). מי שמחק אותו — לא יקבל אותו שוב.
+   המזהה קבוע (starter-he / starter-en), כך שאותו משתמש בשני מכשירים לא מקבל שני עותקים בענן. */
+async function seedStarter(idx) {
+  const s = STARTER[getLang() === "he" ? "he" : "en"];
+  const flag = "lomedtv-starter-" + s.id;
+  try { if (localStorage.getItem(flag)) return idx; } catch {}
+  if (idx.some((b) => b.id === s.id)) return idx;
+  const nb = { id: s.id, title: s.title, chapters: s.chapters, results: {}, progress: {} };
+  await saveBookToStorage(nb);
+  const next = [{ id: nb.id, title: nb.title, chapters: nb.chapters.length, done: 0, talk: 0, updatedAt: Date.now() }, ...idx];
+  await saveIndex(next);
+  try { localStorage.setItem(flag, "1"); } catch {}
+  return next;
 }
 async function deleteBookFromStorage(id) {
   try {
@@ -3119,7 +3134,10 @@ export default function LearningTV() {
      הצעד הראשון של "השאלות הפתוחות שלי". */
   /* שפת הממשק (צ'אט 25): הבחירה נשמרת ב-lomedtv-lang; ההחלפה מציירת את המסך מחדש */
   const [, setLangTick] = useState(0);
-  const changeLang = (l) => { setLang(l); setLangTick((n) => n + 1); };
+  const changeLang = (l) => {
+    setLang(l); setLangTick((n) => n + 1);
+    (async () => { const idx = await loadIndex(); const next = await seedStarter(idx); if (next !== idx) setIndex(next); })();
+  };
   const [showOpening, setShowOpening] = useState(() => {
     try { return !localStorage.getItem("lomedtv-opened"); } catch { return true; }
   });
@@ -3616,6 +3634,7 @@ export default function LearningTV() {
         idx = await Promise.all(idx.map(async (b) => b.talk === undefined ? { ...b, talk: talkCount(await loadBook(b.id)) } : b));
         await saveIndex(idx);
       }
+      idx = await seedStarter(idx);
       setIndex(idx);
       setView(idx.length ? "library" : "intake");
     })();
