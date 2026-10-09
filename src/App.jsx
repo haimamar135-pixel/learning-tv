@@ -226,17 +226,21 @@ const PROMPTS = {
 /* ─── השער: כל קריאה שעולה כסף נושאת את הטוקן של המשתמש המחובר ───
    הפונקציות בנטליפיי (claude, transcribe) דוחות בקשה בלי טוקן (401) ובקשה
    מעבר למכסה היומית (429). כאן מצרפים את הטוקן ומתרגמים את הדחייה להודעה. */
-const LOGIN_MSG = "כדי להשתמש בערוצי הלימוד יש להיכנס לחשבון — לחץ על ☁ למעלה";
+const loginMsg = () => tx("כדי להשתמש בערוצי הלימוד יש להיכנס לחשבון — לחץ על ☁ למעלה");
+/* שגיאת שער (כניסה/מכסה) מסומנת ב-gate — כך מזהים אותה בכל שפה, ולא לפי מילים בעברית */
+const gateErr = (m) => Object.assign(new Error(m), { gate: true });
 async function authHeaders() {
   let token = null;
   try { token = (await supa.auth.getSession()).data?.session?.access_token || null; } catch {}
-  if (!token) throw new Error(LOGIN_MSG);
+  if (!token) throw gateErr(loginMsg());
   return { "Content-Type": "application/json", Authorization: "Bearer " + token };
 }
-const isGateError = (e) => /להיכנס לחשבון|פג|המכסה/.test(e?.message || "");
+const isGateError = (e) => !!e?.gate || /להיכנס לחשבון|פג|המכסה/.test(e?.message || "");
 function gateError(res, data) {
-  if (res.status === 401 || data?.code === "login") return new Error(data?.error?.message || LOGIN_MSG);
-  if (res.status === 429 || data?.code === "quota") return new Error(data?.error?.message || "המכסה היומית נגמרה — מתחדשת בחצות");
+  /* השרת עונה בעברית; בשפה אחרת מציגים את הנוסח המתורגם לפי סוג הדחייה */
+  const sm = data?.error?.message || "";
+  if (res.status === 401 || data?.code === "login") return gateErr(/פג/.test(sm) ? tx("החיבור לחשבון פג — היכנס שוב דרך ☁") : /כאורח/.test(sm) ? tx("כאורח אפשר ללמוד יחד בדף ובווידאו. לערוצי הלימוד (סיכום, מבחן, קול…) — להיכנס לחשבון במייל דרך ☁ למעלה") : loginMsg());
+  if (res.status === 429 || data?.code === "quota") return gateErr(getLang() === "he" && sm ? sm : tx("המכסה היומית נגמרה — מתחדשת בחצות"));
   return null;
 }
 
@@ -253,7 +257,7 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
     });
   } catch (e) {
     console.log("Network error:", e);
-    throw new Error("בעיית רשת — הבקשה לא הגיעה לשרת");
+    throw new Error(tx("בעיית רשת — הבקשה לא הגיעה לשרת"));
   }
  
   const raw = await res.text();
@@ -262,16 +266,16 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
   try {
     data = JSON.parse(raw);
   } catch {
-    throw new Error(`השרת החזיר תשובה לא תקינה [${res.status}]: ${raw.slice(0, 160)}`);
+    throw new Error(tx("השרת החזיר תשובה לא תקינה [{s}]: ", { s: res.status }) + raw.slice(0, 160));
   }
  
   const ge = gateError(res, data);
   if (ge) throw ge;
   if (data.type === "error" || data.error) {
-    throw new Error(`שגיאת API [${res.status}]: ${data.error?.message || ""}`);
+    throw new Error(tx("שגיאת API [{s}]: ", { s: res.status }) + (data.error?.message || ""));
   }
   if (data.errorMessage) {
-    throw new Error(`שגיאת שרת [${res.status}]: ${data.errorMessage}`);
+    throw new Error(tx("שגיאת שרת [{s}]: ", { s: res.status }) + data.errorMessage);
   }
  
   const text = (data.content || [])
@@ -279,21 +283,21 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
     .map((b) => b.text)
     .join("\n");
  
-  if (!text.trim()) throw new Error(`התקבלה תשובה ריקה [${res.status}]: ${raw.slice(0, 160)}`);
+  if (!text.trim()) throw new Error(tx("התקבלה תשובה ריקה [{s}]: ", { s: res.status }) + raw.slice(0, 160));
 
   if (rawMode) return text.trim(); // מצב טקסט גולמי — בלי חילוץ JSON
 
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start === -1 || end === -1 || end <= start) {
-    throw new Error("התשובה לא הכילה JSON");
+    throw new Error(tx("התשובה לא הכילה JSON"));
   }
   const slice = text.slice(start, end + 1).replace(/```json|```/g, "");
   try {
     return JSON.parse(slice);
   } catch {
     console.log("Raw model output:", text.slice(0, 500));
-    throw new Error("ה-JSON מהמודל פגום — ייתכן שהתשובה נחתכה באמצע");
+    throw new Error(tx("ה-JSON מהמודל פגום — ייתכן שהתשובה נחתכה באמצע"));
   }
 }
  
@@ -1190,7 +1194,7 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
           for (let k = 0; k < ev.results.length; k++) { const r = ev.results[k]; if (r.isFinal) finalText += r[0].transcript + " "; else interim += r[0].transcript; }
           setTxt((v) => { if (base === null) base = v; return (base ? base.replace(/\s+$/, "") + " " : "") + (finalText + interim).trim(); });
         };
-        rec.onerror = (ev) => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { setMsg("אין גישה למיקרופון — אשר הרשאה בדפדפן."); } else if (ev.error !== "aborted" && ev.error !== "no-speech") setMsg("זיהוי הדיבור נכשל (" + ev.error + ") — מנסה הקלטה."); };
+        rec.onerror = (ev) => { if (ev.error === "not-allowed" || ev.error === "service-not-allowed") { setMsg(tx("אין גישה למיקרופון — אשר הרשאה בדפדפן.")); } else if (ev.error !== "aborted" && ev.error !== "no-speech") setMsg(tx("זיהוי הדיבור נכשל ({e}) — מנסה הקלטה.", { e: ev.error })); };
         rec.onend = () => { live.current = null; setMode(null); };
         live.current = { rec };
         rec.start();
@@ -1208,32 +1212,32 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
         if (live.current?.iv) clearInterval(live.current.iv);
         live.current = null;
         const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
-        if (blob.size < 3000) { setMode(null); setMsg("ההקלטה קצרה מדי."); return; }
-        setMode("busy"); setMsg("⏳ מתמלל…");
+        if (blob.size < 3000) { setMode(null); setMsg(tx("ההקלטה קצרה מדי.")); return; }
+        setMode("busy"); setMsg(tx("⏳ מתמלל…"));
         try { const t = await transcribe(blob); if (t) append(t); setMsg(""); }
-        catch (e) { setMsg("התמלול נכשל: " + (e?.message || e)); }
+        catch (e) { setMsg(tx("התמלול נכשל: ") + (e?.message || e)); }
         setMode(null);
       };
       live.current = { mr, iv: setInterval(() => setSec((x) => x + 1), 1000) };
       setSec(0); setMode("rec"); mr.start(1000);
-    } catch { setMsg("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון ונסה שוב."); }
+    } catch { setMsg(tx("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון ונסה שוב.")); }
   };
   const node = (
     <div className="note-ed-back" onMouseDown={(e) => { if (e.target === e.currentTarget) { stopAll(); onCancel(); } }}>
       <div className="note-ed" dir={langDir()} role="dialog">
-        <div className="note-ed-head">📝 הערה על הקטע</div>
+        <div className="note-ed-head">{tx("📝 הערה על הקטע")}</div>
         {src && <div className="note-ed-src">«{src}»</div>}
-        <textarea ref={ta} className="note-ed-ta" rows={4} value={txt} onChange={(e) => setTxt(e.target.value)} placeholder="כתוב כאן — או לחץ על המיקרופון ודבר" />
+        <textarea ref={ta} className="note-ed-ta" rows={4} value={txt} onChange={(e) => setTxt(e.target.value)} placeholder={tx("כתוב כאן — או לחץ על המיקרופון ודבר")} />
         <div className="note-ed-row">
           <button type="button" className={"mark-btn note-mic" + (mode ? " on" : "")} onClick={startMic} disabled={mode === "busy"}>
-            {mode === "listen" ? "⏹ עצור — מקשיב…" : mode === "rec" ? `⏹ עצור (${sec} שנ׳)` : mode === "busy" ? "⏳ מתמלל…" : "🎙 דבר"}
+            {mode === "listen" ? tx("⏹ עצור — מקשיב…") : mode === "rec" ? tx("⏹ עצור ({n} שנ׳)", { n: sec }) : mode === "busy" ? tx("⏳ מתמלל…") : tx("🎙 דבר")}
           </button>
           <span className="note-ed-msg">{msg}</span>
         </div>
         <div className="note-ed-row note-ed-actions">
-          <button type="button" className="ch-key gold note-ed-save" onClick={() => { stopAll(); onSave(txt); }}>שמור</button>
-          {initial ? <button type="button" className="mark-btn" onClick={() => { stopAll(); onSave(""); }}>🗑 מחק הערה</button> : null}
-          <button type="button" className="mark-btn" onClick={() => { stopAll(); onCancel(); }}>ביטול</button>
+          <button type="button" className="ch-key gold note-ed-save" onClick={() => { stopAll(); onSave(txt); }}>{tx("שמור")}</button>
+          {initial ? <button type="button" className="mark-btn" onClick={() => { stopAll(); onSave(""); }}>{tx("🗑 מחק הערה")}</button> : null}
+          <button type="button" className="mark-btn" onClick={() => { stopAll(); onCancel(); }}>{tx("ביטול")}</button>
         </div>
       </div>
     </div>
@@ -1587,15 +1591,15 @@ function renderGlossed(txt, w, base, kara, gloss) {
 function MarkTools({ onMark, onNote, onClear }) {
   return (
     <>
-      <span className="mark-title">✍️ שכבת הלומד:</span>
-      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => onMark({ b: 1 })}>B מודגש</button>
-      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => onMark({ u: 1 })}>U קו תחתון</button>
-      <button className="mark-btn hl-y" onClick={() => onMark({ hl: "y" })}>מרקר</button>
-      <button className="mark-btn hl-g" onClick={() => onMark({ hl: "g" })}>מרקר</button>
-      <button className="mark-btn hl-p" onClick={() => onMark({ hl: "p" })}>מרקר</button>
-      <button className="mark-btn" onClick={onNote}>📝 הערה</button>
-      <button className="mark-btn" onClick={() => onMark(null)}>✕ נקה עיצוב</button>
-      <button className="mark-btn" onClick={onClear}>✕ בטל סימון</button>
+      <span className="mark-title">{tx("✍️ שכבת הלומד:")}</span>
+      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => onMark({ b: 1 })}>{tx("B מודגש")}</button>
+      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => onMark({ u: 1 })}>{tx("U קו תחתון")}</button>
+      <button className="mark-btn hl-y" onClick={() => onMark({ hl: "y" })}>{tx("מרקר")}</button>
+      <button className="mark-btn hl-g" onClick={() => onMark({ hl: "g" })}>{tx("מרקר")}</button>
+      <button className="mark-btn hl-p" onClick={() => onMark({ hl: "p" })}>{tx("מרקר")}</button>
+      <button className="mark-btn" onClick={onNote}>{tx("📝 הערה")}</button>
+      <button className="mark-btn" onClick={() => onMark(null)}>{tx("✕ נקה עיצוב")}</button>
+      <button className="mark-btn" onClick={onClear}>{tx("✕ בטל סימון")}</button>
     </>
   );
 }
@@ -1966,15 +1970,15 @@ function SummaryView({ data, question, layer }) {
   return (
     <div>
       <div className="pill-row">
-        <button className={"pill " + (mode === "long" ? "on" : "")} onClick={() => setMode("long")}>מפורט</button>
-        <button className={"pill " + (mode === "short" ? "on" : "")} onClick={() => setMode("short")}>קצר</button>
+        <button className={"pill " + (mode === "long" ? "on" : "")} onClick={() => setMode("long")}>{tx("מפורט")}</button>
+        <button className={"pill " + (mode === "short" ? "on" : "")} onClick={() => setMode("short")}>{tx("קצר")}</button>
       </div>
       {layer ? L(mode, mode === "long" ? data.long : data.short, { className: "prose" }) : <p className="prose">{mode === "long" ? data.long : data.short}</p>}
       {data.forQuestion && question && (
         <div className="my-q my-q-answer">
           <span className="my-q-ic">❓</span>
           <span className="my-q-body">
-            <small>לשאלה שאתה נושא — «{question}»</small>
+            <small>{tx("לשאלה שאתה נושא —")} «{question}»</small>
             {layer ? L("q", data.forQuestion, { as: "span" }) : data.forQuestion}
           </span>
         </div>
@@ -1987,16 +1991,16 @@ function ConceptsView({ data, onTrace, layer }) {
   const L = (part, text, extra) => layer ? <AiLayer {...layer} base={layer.base + ":" + part} text={text} {...(extra || {})} /> : text;
   return (
     <div className="concepts">
-      {onTrace && <p className="fm-hint">💡 לחיצה על מושג או כלל קופצת למקור בטקסט ומסמנת אותו בירוק.</p>}
+      {onTrace && <p className="fm-hint">{tx("💡 לחיצה על מושג או כלל קופצת למקור בטקסט ומסמנת אותו בירוק.")}</p>}
       {data.concepts?.length > 0 && (
         <section>
-          <h3 className="sec-title">מושגים</h3>
+          <h3 className="sec-title">{tx("מושגים")}</h3>
           {data.concepts.map((c, i) => (
             <div className="term-row" key={i}>
               <span
                 className={"term" + (onTrace ? " traceable" : "")}
                 onClick={onTrace ? () => onTrace(c.term) : undefined}
-                title={onTrace ? "הצג את המקור בטקסט" : undefined}
+                title={onTrace ? tx("הצג את המקור בטקסט") : undefined}
               >{c.term}</span>
               {layer ? L("c" + i, c.definition, { as: "span", className: "def" }) : <span className="def">{c.definition}</span>}
             </div>
@@ -2005,15 +2009,15 @@ function ConceptsView({ data, onTrace, layer }) {
       )}
       {data.rules?.length > 0 && (
         <section>
-          <h3 className="sec-title">כללים ועקרונות</h3>
+          <h3 className="sec-title">{tx("כללים ועקרונות")}</h3>
           <ul className="rules">
             {data.rules.map((r, i) => (
               <li
                 key={i}
                 className={onTrace && !layer ? "traceable" : undefined}
                 onClick={onTrace && !layer ? () => onTrace(r) : undefined}
-                title={onTrace && !layer ? "הצג את המקור בטקסט" : undefined}
-              >{layer ? <>{L("r" + i, r, { as: "span" })}{onTrace && <button className="trace-btn" title="הצג את המקור בטקסט" onClick={() => onTrace(r)}>↪ למקור</button>}</> : r}</li>
+                title={onTrace && !layer ? tx("הצג את המקור בטקסט") : undefined}
+              >{layer ? <>{L("r" + i, r, { as: "span" })}{onTrace && <button className="trace-btn" title={tx("הצג את המקור בטקסט")} onClick={() => onTrace(r)}>{tx("↪ למקור")}</button>}</> : r}</li>
             ))}
           </ul>
         </section>
@@ -2086,7 +2090,7 @@ function MindmapView({ data }) {
 
   return (
     <div className="fm-wrap" ref={wrapRef}>
-      <p className="fm-hint">✋ גרור צמתים · לחיצה על ענף ראשי פותחת/סוגרת · <button className="mini-btn" onClick={() => { setPos(layout); setClosed({}); }}>🔄 סידור מחדש</button></p>
+      <p className="fm-hint">{tx("✋ גרור צמתים · לחיצה על ענף ראשי פותחת/סוגרת ·")} <button className="mini-btn" onClick={() => { setPos(layout); setClosed({}); }}>{tx("🔄 סידור מחדש")}</button></p>
       <div className="fm-canvas" style={{ height: H * scale + 2 }}><div className="fm-sizer" style={{ width: W * scale, height: H * scale }}><div className="fm-scale" style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "100% 0" }} onPointerMove={move} onPointerUp={up} onPointerLeave={up}>
         <svg className="fm-lines" width="100%" height="100%">
           {mains.map((m, i) => (
@@ -2141,11 +2145,11 @@ function QuizView({ data, saved, onComplete }) {
   return (
     <div className="quiz">
       {saved && !finished && (
-        <div className="quiz-prev">ציון קודם בפרק זה: {saved.score}/{saved.total}</div>
+        <div className="quiz-prev">{tx("ציון קודם בפרק זה:")} {saved.score}/{saved.total}</div>
       )}
       {finished && (
         <div className="quiz-score">
-          הציון שלך: {score} מתוך {qs.length} — הפרק סומן כהושלם ✓
+          {tx("הציון שלך: {a} מתוך {b} — הפרק סומן כהושלם ✓", { a: score, b: qs.length })}
         </div>
       )}
       {qs.map((q, i) => {
@@ -2198,17 +2202,17 @@ function CardsView({ data, layer }) {
           </span>
         </button>
       ))}
-      <p className="cards-hint">לחיצה על כרטיסייה הופכת אותה{layer?.on ? " · ✍️ לסימון והערה: פתח כרטיסייה כטקסט" : ""}</p>
+      <p className="cards-hint">{tx("לחיצה על כרטיסייה הופכת אותה")}{layer?.on ? tx(" · ✍️ לסימון והערה: פתח כרטיסייה כטקסט") : ""}</p>
       {layer?.on && (
         <div className="card-open">
-          <select className="scan-mode-select" value={open ?? ""} onChange={(e) => setOpen(e.target.value === "" ? null : +e.target.value)} aria-label="כרטיסייה לסימון">
-            <option value="">✍️ פתח כרטיסייה כטקסט…</option>
+          <select className="scan-mode-select" value={open ?? ""} onChange={(e) => setOpen(e.target.value === "" ? null : +e.target.value)} aria-label={tx("כרטיסייה לסימון")}>
+            <option value="">{tx("✍️ פתח כרטיסייה כטקסט…")}</option>
             {(data.cards || []).map((c, i) => <option key={i} value={i}>{i + 1}. {c.front.slice(0, 60)}</option>)}
           </select>
           {open !== null && data.cards?.[open] && (
             <div className="card-open-body">
-              <div className="card-open-face"><b>שאלה:</b> {L("f" + open, data.cards[open].front)}</div>
-              <div className="card-open-face"><b>תשובה:</b> {L("b" + open, data.cards[open].back)}</div>
+              <div className="card-open-face"><b>{tx("שאלה:")}</b> {L("f" + open, data.cards[open].front)}</div>
+              <div className="card-open-face"><b>{tx("תשובה:")}</b> {L("b" + open, data.cards[open].back)}</div>
             </div>
           )}
         </div>
@@ -2565,9 +2569,9 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
         }
       } catch {}
     }
-    setHqBusy(`🎙 מפיק קול… חלק ${n + 1} מתוך ${chunks.length}`);
+    setHqBusy(tx("🎙 מפיק קול… חלק {a} מתוך {b}", { a: n + 1, b: chunks.length }));
     const data = await postJson("/.netlify/functions/tts", { text: c.text });
-    if (data.error) throw new Error(data.error.message || "שגיאה בהפקת הקול");
+    if (data.error) throw new Error(data.error.message || tx("שגיאה בהפקת הקול"));
     blob = new Blob([b64ToBytes(data.audio)], { type: data.mime || "audio/mpeg" });
     times = data.times || [];
     try { await idbSet(voiceKey(key), blob); await idbSet(voiceKey(key) + ":t", times); } catch {}
@@ -2606,9 +2610,9 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
     const startPart = fromK != null ? c.parts.find((p) => p.k === fromK) : null;
     a.ontimeupdate = () => { const ch = chunkRef.current; if (!ch) return; const p = posFromTime(ch.c, ch.times, a.currentTime); posRef.current = p.k; setPos(p.k); onPos?.({ i: p.i, c: p.c }); };
     a.onended = () => { if (chunkRef.current?.n === n) playChunk(n + 1); };
-    a.onerror = () => { setHqErr("הקובץ לא ניתן לנגינה"); setState("idle"); };
+    a.onerror = () => { setHqErr(tx("הקובץ לא ניתן לנגינה")); setState("idle"); };
     const seekTo = startPart ? (got.times[startPart.off] || 0) : 0;
-    const go = () => { a.currentTime = seekTo; a.play().catch((e) => setHqErr("הדפדפן חסם נגינה: " + e.message)); };
+    const go = () => { a.currentTime = seekTo; a.play().catch((e) => setHqErr(tx("הדפדפן חסם נגינה: ") + e.message)); };
     if (a.readyState >= 1) go(); else a.onloadedmetadata = go;
     /* מפיקים את החתיכה הבאה ברקע, כדי שהמעבר יהיה חלק */
     if (n + 1 < chunks.length) getChunk(n + 1).catch(() => {});
@@ -2676,28 +2680,28 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
   useEffect(() => { if (state !== "idle") stop(); }, [mode]);
   useEffect(() => { if (stateRef.current === "playing" && posRef.current >= 0) play(posRef.current); }, [hq]);
   const step = (d) => { const k = Math.max(0, Math.min(queue.length - 1, (posRef.current < 0 ? 0 : posRef.current) + d)); play(k); };
-  const KARA = [["amber", "ענבר"], ["green", "ירוק"], ["blue", "תכלת"], ["rose", "ורוד"], ["soft", "עדין"]];
+  const KARA = [["amber", tx("ענבר")], ["green", tx("ירוק")], ["blue", tx("תכלת")], ["rose", tx("ורוד")], ["soft", tx("עדין")]];
   /* הנגן יושב בשורת המסך העליונה (ליד הכותרת, מימין לענן): שורה קטנה תמיד; ▾ פותח לוח מתחתיה עם קצב, צבע ומה להקריא */
   const slot = typeof document !== "undefined" ? document.getElementById("reader-slot") : null;
-  const ui = !synth ? <span className="reader-note">הדפדפן הזה לא תומך בהקראה.</span> : (
+  const ui = !synth ? <span className="reader-note">{tx("הדפדפן הזה לא תומך בהקראה.")}</span> : (
     <span className="reader-bar" dir={langDir()}>
       {state === "playing"
-        ? <button className="rb-btn main" onClick={pause} title="השהה">⏸</button>
-        : <button className="rb-btn main" onClick={() => play()} title={state === "paused" ? "המשך" : "הקרא"}>▶</button>}
-      <button className="rb-btn" onClick={() => step(-1)} title="משפט קודם">⏮</button>
-      <button className="rb-btn" onClick={() => step(1)} title="משפט הבא">⏭</button>
+        ? <button className="rb-btn main" onClick={pause} title={tx("השהה")}>⏸</button>
+        : <button className="rb-btn main" onClick={() => play()} title={state === "paused" ? tx("המשך") : tx("הקרא")}>▶</button>}
+      <button className="rb-btn" onClick={() => step(-1)} title={tx("משפט קודם")}>⏮</button>
+      <button className="rb-btn" onClick={() => step(1)} title={tx("משפט הבא")}>⏭</button>
       <span className="rb-pos">{hqBusy ? "🎙…" : (hq ? "🎙 " : "") + (pos >= 0 ? `${pos + 1}/${queue.length}` : queue.length)}</span>
-      <button className={"rb-btn " + (!mini ? "on" : "")} onClick={() => setMini((m) => !m)} title={mini ? "הגדרות ההקראה" : "סגור הגדרות"}>{mini ? "▾" : "▴"}</button>
-      <button className="rb-btn" onClick={() => { stop(); onClose?.(); }} title="סגור את ההקראה">✕</button>
+      <button className={"rb-btn " + (!mini ? "on" : "")} onClick={() => setMini((m) => !m)} title={mini ? tx("הגדרות ההקראה") : tx("סגור הגדרות")}>{mini ? "▾" : "▴"}</button>
+      <button className="rb-btn" onClick={() => { stop(); onClose?.(); }} title={tx("סגור את ההקראה")}>✕</button>
       {!mini && (
         <div className="reader-pop" dir={langDir()}>
           <div className="reader-row">
-            <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
-            <button className="tts-btn ghost sm" onClick={stop} title="עצור וחזור להתחלה">⏹ מההתחלה</button>
+            <label className="tts-rate">{tx("קצב")} <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
+            <button className="tts-btn ghost sm" onClick={stop} title={tx("עצור וחזור להתחלה")}>{tx("⏹ מההתחלה")}</button>
           </div>
           <div className="reader-row">
-            <button className={"pill " + (hq ? "on" : "")} onClick={() => { setHqErr(""); setHq((v) => !v); }} title="קול אנושי מ-ElevenLabs — מופק פעם אחת ונשמר">🎙 קול איכותי {hq ? "· דולק" : ""}</button>
-            <span className="reader-note">{hq ? (uid ? `${chunks.length} חלקים · מופק פעם אחת ונשמר במכשיר ובענן` : "להיכנס לחשבון (☁) כדי להפיק") : "קול הדפדפן (חינם)"}</span>
+            <button className={"pill " + (hq ? "on" : "")} onClick={() => { setHqErr(""); setHq((v) => !v); }} title={tx("קול אנושי מ-ElevenLabs — מופק פעם אחת ונשמר")}>{tx("🎙 קול איכותי")} {hq ? tx("· דולק") : ""}</button>
+            <span className="reader-note">{hq ? (uid ? tx("{n} חלקים · מופק פעם אחת ונשמר במכשיר ובענן", { n: chunks.length }) : tx("להיכנס לחשבון (☁) כדי להפיק")) : tx("קול הדפדפן (חינם)")}</span>
           </div>
           {hqBusy && <div className="reader-note busy-line">{hqBusy}</div>}
           {hqErr && <div className="err">{hqErr}</div>}
@@ -2706,7 +2710,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
             <span className="reader-note">{glossBusy || (glossOn ? "מתחת לכל מילה ארמית — הפירוש בעברית · מוכן פעם אחת ונשמר עם הספר · גם הכפתור 📖 בשורה העליונה" : "כבוי")}</span>
           </div>
           <div className="reader-row pill-row">
-            <span className="reader-note">צבע ההארה:</span>
+            <span className="reader-note">{tx("צבע ההארה:")}</span>
             {KARA.map(([k, l]) => <button key={k} className={"pill kara-pick " + (theme === k ? "on" : "")} data-kara={k} onClick={() => setTheme(k)}><i className="kara-sw" /> {l}</button>)}
           </div>
           {hasSulam && (
@@ -2717,7 +2721,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
               <button className={"pill " + (mode === "sulam" ? "on" : "")} onClick={() => setMode("sulam")}>הסולם בלבד</button>
             </div>
           )}
-          <div className="reader-note">לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות</div>
+          <div className="reader-note">{tx("לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות")}</div>
         </div>
       )}
     </span>
@@ -2727,20 +2731,20 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
     <div className="reader" dir={langDir()}>
       <div className="reader-row">
         {state === "playing"
-          ? <button className="tts-btn" onClick={pause}>⏸ השהה</button>
-          : <button className="tts-btn" onClick={() => play()}>▶ {state === "paused" ? "המשך" : "הקרא"}</button>}
-        <button className="tts-btn ghost" onClick={() => step(-1)} title="משפט קודם">⏮</button>
-        <button className="tts-btn ghost" onClick={() => step(1)} title="משפט הבא">⏭</button>
+          ? <button className="tts-btn" onClick={pause}>{tx("⏸ השהה")}</button>
+          : <button className="tts-btn" onClick={() => play()}>▶ {state === "paused" ? tx("המשך") : tx("הקרא")}</button>}
+        <button className="tts-btn ghost" onClick={() => step(-1)} title={tx("משפט קודם")}>⏮</button>
+        <button className="tts-btn ghost" onClick={() => step(1)} title={tx("משפט הבא")}>⏭</button>
         <button className="tts-btn ghost" onClick={stop}>⏹</button>
-        <span className="reader-pos">{pos >= 0 ? `${pos + 1} / ${queue.length}` : `${queue.length} משפטים`}</span>
-        <label className="tts-rate">קצב <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
-        <button className="tts-btn ghost sm" onClick={() => setShowColors((v) => !v)} title="צבעי ההארה">🎨</button>
-        <button className="tts-btn ghost sm" onClick={() => setMini(true)} title="כווץ את הנגן">▴</button>
-        <button className="tts-btn ghost reader-x" onClick={() => { stop(); onClose?.(); }} title="סגור את הנגן">✕</button>
+        <span className="reader-pos">{pos >= 0 ? `${pos + 1} / ${queue.length}` : tx("{n} משפטים", { n: queue.length })}</span>
+        <label className="tts-rate">{tx("קצב")} <input type="range" min="0.6" max="1.6" step="0.1" value={rate} onChange={(e) => setRate(+e.target.value)} /> {rate.toFixed(1)}×</label>
+        <button className="tts-btn ghost sm" onClick={() => setShowColors((v) => !v)} title={tx("צבעי ההארה")}>🎨</button>
+        <button className="tts-btn ghost sm" onClick={() => setMini(true)} title={tx("כווץ את הנגן")}>▴</button>
+        <button className="tts-btn ghost reader-x" onClick={() => { stop(); onClose?.(); }} title={tx("סגור את הנגן")}>✕</button>
       </div>
       {showColors && (
         <div className="reader-row pill-row">
-          <span className="reader-note">צבע ההארה:</span>
+          <span className="reader-note">{tx("צבע ההארה:")}</span>
           {KARA.map(([k, l]) => <button key={k} className={"pill kara-pick " + (theme === k ? "on" : "")} data-kara={k} onClick={() => setTheme(k)}><i className="kara-sw" /> {l}</button>)}
         </div>
       )}
@@ -2752,7 +2756,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
           <button className={"pill " + (mode === "sulam" ? "on" : "")} onClick={() => setMode("sulam")}>הסולם בלבד</button>
         </div>
       )}
-      <div className="reader-note reader-hint">לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות</div>
+      <div className="reader-note reader-hint">{tx("לחיצה על משפט בדף מתחילה את ההקראה ממנו · המשפט הנקרא מואר, המילים שנקראו מתמלאות")}</div>
     </div>
   );
 }
@@ -2787,11 +2791,11 @@ function TTSView({ text, question }) {
     <div className="tts">
       <div className="tts-controls">
         {!speaking || paused ? (
-          <button className="tts-btn" onClick={play}>▶ {paused ? "המשך" : "הקרא"}</button>
+          <button className="tts-btn" onClick={play}>▶ {paused ? tx("המשך") : tx("הקרא")}</button>
         ) : (
-          <button className="tts-btn" onClick={() => { window.speechSynthesis?.pause(); setPaused(true); }}>⏸ השהה</button>
+          <button className="tts-btn" onClick={() => { window.speechSynthesis?.pause(); setPaused(true); }}>{tx("⏸ השהה")}</button>
         )}
-        <button className="tts-btn ghost" onClick={() => { window.speechSynthesis?.cancel(); setSpeaking(false); setPaused(false); }}>⏹ עצור</button>
+        <button className="tts-btn ghost" onClick={() => { window.speechSynthesis?.cancel(); setSpeaking(false); setPaused(false); }}>{tx("⏹ עצור")}</button>
       </div>
       <label className="tts-rate">
         מהירות
@@ -2802,11 +2806,11 @@ function TTSView({ text, question }) {
         />
         ×{rate.toFixed(1)}
       </label>
-      <p className="tts-note">ההקראה משתמשת בקולות הדפדפן — איכות העברית תלויה במכשיר. מוקרא הפרק הנוכחי בלבד.</p>
+      <p className="tts-note">{tx("ההקראה משתמשת בקולות הדפדפן — איכות העברית תלויה במכשיר. מוקרא הפרק הנוכחי בלבד.")}</p>
       {question && (
         <div className="my-q my-q-answer">
           <span className="my-q-ic">❓</span>
-          <span className="my-q-body"><small>ההקראה פותחת בשאלה שאתה נושא</small>{question}</span>
+          <span className="my-q-body"><small>{tx("ההקראה פותחת בשאלה שאתה נושא")}</small>{question}</span>
         </div>
       )}
       <div className="tts-text">{text}</div>
@@ -2823,13 +2827,13 @@ async function postJson(path, body) {
   const headers = await authHeaders();
   let res;
   try { res = await fetch(API_BASE + path, { method: "POST", headers, body: JSON.stringify(body) }); }
-  catch { throw new Error("בעיית רשת — הבקשה לא הגיעה לשרת"); }
+  catch { throw new Error(tx("בעיית רשת — הבקשה לא הגיעה לשרת")); }
   const raw = await res.text();
   let data;
-  try { data = JSON.parse(raw); } catch { throw new Error(`השרת החזיר תשובה לא תקינה [${res.status}]: ${raw.slice(0, 160)}`); }
+  try { data = JSON.parse(raw); } catch { throw new Error(tx("השרת החזיר תשובה לא תקינה [{s}]: ", { s: res.status }) + raw.slice(0, 160)); }
   const ge = gateError(res, data);
   if (ge) throw ge;
-  if (!res.ok || data.error) throw new Error(data.error?.message || `שגיאה [${res.status}]`);
+  if (!res.ok || data.error) throw new Error(data.error?.message || tx("שגיאה [{s}]", { s: res.status }));
   return data;
 }
 function MirrorView({ book, question, cloudUser, onSave }) {
@@ -3506,7 +3510,7 @@ export default function LearningTV() {
     } catch (e) {
       console.error("sync failed", e);
       setSyncState("err");
-      setSyncErr(e.message || "שגיאת סנכרון");
+      setSyncErr(e.message || tx("שגיאת סנכרון"));
     }
   }
   function queueSync(job) {
@@ -3567,7 +3571,7 @@ export default function LearningTV() {
     const { data: rows, error } = await supa.from("books").select("*").eq("user_id", uid).eq("id", id).limit(1);
     if (error) throw new Error(error.message);
     const b = rows && rows[0];
-    if (!b) throw new Error("הספר לא נמצא בענן");
+    if (!b) throw new Error(tx("הספר לא נמצא בענן"));
     const { data: outs, error: eo } = await supa.from("outputs").select("chapter_idx,channel,data").eq("user_id", uid).eq("book_id", id);
     if (eo) throw new Error(eo.message);
     const { data: nts, error: en } = await supa.from("notes").select("sent_idx,text,src_quote").eq("user_id", uid).eq("book_id", id);
@@ -3630,7 +3634,7 @@ export default function LearningTV() {
       } catch (e) {
         console.error("cloud check failed", e);
         setSyncState("err");
-        setSyncErr(e.message || "בדיקת הענן נכשלה");
+        setSyncErr(e.message || tx("בדיקת הענן נכשלה"));
       }
     })();
   }, [cloudUser, pullChecked]);
@@ -3642,7 +3646,7 @@ export default function LearningTV() {
     try {
       let idx = await loadIndex();
       for (let i = 0; i < list.length; i++) {
-        setPullMsg("מוריד " + (i + 1) + "/" + list.length + ": " + (list[i].title || "") + "...");
+        setPullMsg(tx("מוריד {a}/{b}: {t}...", { a: i + 1, b: list.length, t: list[i].title || "" }));
         const { book: nb, updatedAt } = await pullBook(list[i].id, cloudUser.id);
         const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), talk: talkCount(nb), updatedAt };
         idx = [entry, ...idx.filter((b) => b.id !== nb.id)];
@@ -3650,12 +3654,12 @@ export default function LearningTV() {
       }
       await saveIndex(idx);
       setIndex(idx);
-      setPullMsg("✅ הורדו " + list.length + " ספרים מהענן.");
+      setPullMsg(tx("✅ הורדו {n} ספרים מהענן.", { n: list.length }));
       setPullList(null);
       setSyncState("ok");
       if (view === "intake" && idx.length) setView("library");
     } catch (e) {
-      setPullMsg("שגיאה בהורדה: " + e.message);
+      setPullMsg(tx("שגיאה בהורדה: ") + e.message);
     }
     setPulling(false);
   }
@@ -3815,7 +3819,7 @@ export default function LearningTV() {
       /* אורח: עותק אחד לכל ספר מקור (snap.id), לא עותק לכל קוד — הסימונים וההערות נשארים מפעם לפעם */
       const id = "shared-" + (snap.id || row.code);
       const existing = (await loadBook(id)) || (await loadBook("shared-" + row.code));
-      b = existing || { id, title: snap.title || "לימוד משותף", chapters: snap.chapters || [], results: {}, progress: {}, marks: {}, notes: {}, flex: {} };
+      b = existing || { id, title: snap.title || tx("לימוד משותף"), chapters: snap.chapters || [], results: {}, progress: {}, marks: {}, notes: {}, flex: {} };
       if (!existing) await persist(b, { k: "meta" });
     }
     try { localStorage.setItem("lomedtv-share-active", JSON.stringify({ c: row.code, t: Date.now() })); } catch {}
@@ -4018,7 +4022,7 @@ export default function LearningTV() {
     let cls = "", title = "", color = null, note = null, here = null;
     for (const p of Object.values(peers)) {
       const mk = p.marks?.[i];
-      if (mk && (mk.hl || mk.b || mk.u || (mk.w && mk.w.length))) { cls += " peer-hl"; color = color || p.color; title += (title ? " · " : "") + p.name + " סימן"; }
+      if (mk && (mk.hl || mk.b || mk.u || (mk.w && mk.w.length))) { cls += " peer-hl"; color = color || p.color; title += (title ? " · " : "") + tx("{name} סימן", { name: p.name }); }
       const n = p.notes?.[i]; const nt = typeof n === "string" ? n : n?.t;
       if (nt) { note = { name: p.name, color: p.color, t: nt }; }
       if (p.pos && p.pos.ch === chIdx && p.pos.si === i) here = p;
@@ -4033,7 +4037,7 @@ export default function LearningTV() {
       (forcedTitle && forcedTitle.trim()) ||
       titleRef.current?.value?.trim() ||
       chapters[0].title ||
-      "ספר ללא שם";
+      tx("ספר ללא שם");
     const nb = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
       title,
@@ -4174,7 +4178,7 @@ export default function LearningTV() {
   const createBook = async () => {
     const t = inputRef.current?.value?.trim();
     if (!t || t.length < 40) {
-      setError("הדבק טקסט של לפחות כמה משפטים, או העלה קובץ.");
+      setError(tx("הדבק טקסט של לפחות כמה משפטים, או העלה קובץ."));
       return;
     }
     await buildBook(t);
@@ -4190,16 +4194,16 @@ export default function LearningTV() {
     if (files.length === 1) {
       // קובץ בודד — נכנסים ישר לספר
       const file = files[0];
-      setFileBusy(`קורא את "${file.name}"...`);
+      setFileBusy(tx("קורא את \"{f}\"...", { f: file.name }));
       try {
         const text = await extractFileText(file);
-        if (!text || text.length < 40) throw new Error("לא נמצא מספיק טקסט בקובץ.");
+        if (!text || text.length < 40) throw new Error(tx("לא נמצא מספיק טקסט בקובץ."));
         const base = file.name.replace(/\.[^.]+$/, "");
         setFileBusy(null);
         await buildBook(text, titleRef.current?.value?.trim() || base);
       } catch (err) {
         console.error("file extract failed", err);
-        setError(err.message || "קריאת הקובץ נכשלה.");
+        setError(err.message || tx("קריאת הקובץ נכשלה."));
         setFileBusy(null);
       }
       return;
@@ -4208,10 +4212,10 @@ export default function LearningTV() {
     // כמה קבצים — כל קובץ נהיה ספר בספרייה
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      setFileBusy(`קורא קובץ ${i + 1}/${files.length}: "${file.name}"...`);
+      setFileBusy(tx("קורא קובץ {a}/{b}: \"{f}\"...", { a: i + 1, b: files.length, f: file.name }));
       try {
         const text = await extractFileText(file);
-        if (!text || text.length < 40) throw new Error("אין טקסט");
+        if (!text || text.length < 40) throw new Error(tx("אין טקסט"));
         const base = file.name.replace(/\.[^.]+$/, "");
         await buildBook(text, base, true);
       } catch (err) {
@@ -4221,7 +4225,7 @@ export default function LearningTV() {
     }
     setFileBusy(null);
     if (failed.length) {
-      setError(`נקלטו ${files.length - failed.length} ספרים. נכשלו: ${failed.join(", ")}`);
+      setError(tx("נקלטו {n} ספרים. נכשלו: {f}", { n: files.length - failed.length, f: failed.join(", ") }));
     }
     flick();
     setView("library");
@@ -4234,18 +4238,18 @@ export default function LearningTV() {
     if (photoRef.current) photoRef.current.value = "";
     if (!files.length) return;
     setError(null);
-    setFileBusy("טוען את מנוע ה-OCR (בפעם הראשונה זה לוקח רגע)...");
+    setFileBusy(tx("טוען את מנוע ה-OCR (בפעם הראשונה זה לוקח רגע)..."));
     try {
       const text = await ocrImages(files, (n, total) =>
-        setFileBusy(`מפענח צילום ${n}/${total}... (OCR עברית)`)
+        setFileBusy(tx("מפענח צילום {a}/{b}... (OCR עברית)", { a: n, b: total }))
       );
       const base = files[0].name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
       setFileBusy(null);
-      await buildBook(text, givenTitle || "סריקה — " + base);
+      await buildBook(text, givenTitle || tx("סריקה — ") + base);
     } catch (err) {
       console.error("ocr failed", err);
-      setError(err.message || "פענוח הצילומים נכשל.");
+      setError(err.message || tx("פענוח הצילומים נכשל."));
       setFileBusy(null);
     }
   };
@@ -4259,15 +4263,15 @@ export default function LearningTV() {
     setError(null);
     try {
       const text = await smartScanImages(files, smartMode, (n, total, extra) =>
-        setFileBusy(`📸 המנוע קורא ומארגן את הדף ${n}/${total}${extra || ""}... (עד דקה לעמוד)`)
+        setFileBusy(tx("📸 המנוע קורא ומארגן את הדף {a}/{b}{x}... (עד דקה לעמוד)", { a: n, b: total, x: extra || "" }))
       );
       const base = files[0].name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
       setFileBusy(null);
-      await buildBook(text, givenTitle || "דף חכם — " + base);
+      await buildBook(text, givenTitle || tx("דף חכם — ") + base);
     } catch (err) {
       console.error("smart scan failed", err);
-      setError(err.message || "פענוח הדף נכשל.");
+      setError(err.message || tx("פענוח הדף נכשל."));
       setFileBusy(null);
     }
   };
@@ -4281,21 +4285,21 @@ export default function LearningTV() {
         blob,
         (n, total, extra) =>
           setFileBusy(
-            n === 0 ? extra : `🎬 מתמלל חלק ${n}/${total}${extra || ""}... (עברית · Whisper)`
+            n === 0 ? extra : tx("🎬 מתמלל חלק {a}/{b}{x}... (עברית · Whisper)", { a: n, b: total, x: extra || "" })
           ),
         hint
       );
       let text = text0;
-      if (window.confirm("התמלול מוכן! להעביר אותו ליטוש חכם?\n(תיקון שגיאות שמיעה בלבד, בלי לשנות תוכן — מומלץ לשירים ולהקלטות רועשות)")) {
+      if (window.confirm(tx("התמלול מוכן! להעביר אותו ליטוש חכם?\n(תיקון שגיאות שמיעה בלבד, בלי לשנות תוכן — מומלץ לשירים ולהקלטות רועשות)"))) {
         text = await polishTranscript(text0, (n, total) =>
-          setFileBusy(`✨ מלטש את התמלול ${n}/${total}...`)
+          setFileBusy(tx("✨ מלטש את התמלול {a}/{b}...", { a: n, b: total }))
         );
       }
       setFileBusy(null);
-      await buildBook(text, givenTitle || "תמלול — " + fallbackBase);
+      await buildBook(text, givenTitle || tx("תמלול — ") + fallbackBase);
     } catch (err) {
       console.error("transcribe failed", err);
-      setError(err.message || "התמלול נכשל.");
+      setError(err.message || tx("התמלול נכשל."));
       setFileBusy(null);
     }
   };
@@ -4322,8 +4326,8 @@ export default function LearningTV() {
         recRef.current = null;
         setRecOn(false);
         const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
-        if (blob.size < 4000) { setError("ההקלטה קצרה מדי — נסה שוב."); return; }
-        await processMedia(blob, "הקלטה חיה");
+        if (blob.size < 4000) { setError(tx("ההקלטה קצרה מדי — נסה שוב.")); return; }
+        await processMedia(blob, tx("הקלטה חיה"));
       };
       recRef.current = { mr, iv: setInterval(() => setRecSec((s) => s + 1), 1000) };
       setRecSec(0);
@@ -4331,7 +4335,7 @@ export default function LearningTV() {
       setError(null);
       mr.start(1000);
     } catch {
-      setError("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון בדפדפן ונסה שוב.");
+      setError(tx("אין גישה למיקרופון. אשר לאתר הרשאת מיקרופון בדפדפן ונסה שוב."));
     }
   };
   const stopRec = () => { try { recRef.current?.mr?.stop(); } catch {} };
@@ -4351,7 +4355,7 @@ export default function LearningTV() {
   /* 🎧 שיקוף — נפתח מהספרייה או מלוח השידורים של הספר */
   const openMirror = async (id) => {
     const b = id && (!book || book.id !== id) ? await loadBook(id) : book;
-    if (!b) { setError("הספר לא נמצא באחסון."); return; }
+    if (!b) { setError(tx("הספר לא נמצא באחסון.")); return; }
     setBook(b);
     setChannel(null);
     setError(null);
@@ -4546,7 +4550,7 @@ export default function LearningTV() {
     if (!hits.length && words.length > 1) {
       sentences.forEach((s, i) => { if (sentenceMatches(s, [words[0]])) hits.push(i); });
     }
-    if (!hits.length) { window.alert("לא נמצא מקור מתאים בטקסט 🔍"); return; }
+    if (!hits.length) { window.alert(tx("לא נמצא מקור מתאים בטקסט 🔍")); return; }
     hits = hits.slice(0, 60);
     setFlexResult(null);
     setNotesOpen(false);
@@ -4694,7 +4698,7 @@ export default function LearningTV() {
         true
       );
       const entry = { t: String(data.t || "").trim(), n: String(data.n || "").trim() };
-      if (!entry.t) throw new Error("לא התקבל תרגום");
+      if (!entry.t) throw new Error(tx("לא התקבל תרגום"));
       setTransRes({ q: phrase, ...entry });
       /* נשמר במילון האישי של הספר — פעם הבאה: מיידי, בלי AI */
       await persist({ ...book, flex: { ...(book.flex || {}), dict: { ...dict, [phrase]: entry } } });
@@ -4706,7 +4710,7 @@ export default function LearningTV() {
   const transBubble = (transLoading || transRes) && (
     <div className="trans-bubble" dir={langDir()}>
       {transLoading ? (
-        <span>⏳ מתרגם…</span>
+        <span>{tx("⏳ מתרגם…")}</span>
       ) : transRes.err ? (
         <span>⚠ {transRes.err}</span>
       ) : (
@@ -4756,7 +4760,7 @@ export default function LearningTV() {
       t = t.slice(0, cut > 4500 ? cut + 1 : 9000);
     }
     const action = FLEX_ACTIONS.find((a) => a.id === id);
-    setFlexLoading(action?.label || id);
+    setFlexLoading(action ? tx(action.label) : id);
     setFlexError(null);
     setFlexResult(null);
     try {
@@ -4764,7 +4768,7 @@ export default function LearningTV() {
       const data = id === "quiz" ? await buildQuiz(t, qCount, openQ) : await askClaude(PROMPTS[id](t, openQ), 2000, FAST_IDS.includes(id));
       setFlexResult({ channel: id, data });
     } catch (e) {
-      setFlexError(e.message || "ההפקה נכשלה. נסה שוב.");
+      setFlexError(e.message || tx("ההפקה נכשלה. נסה שוב."));
     } finally {
       setFlexLoading(null);
     }
@@ -4804,7 +4808,7 @@ export default function LearningTV() {
           : await askClaude(PROMPTS[id](book.chapters[ci].text, openQ), 2000, FAST_IDS.includes(id));
       await persist({ ...book, results: { ...book.results, [key(ci, id)]: data } }, { k: "output", ci, ch: id });
     } catch (e) {
-      setError(e.message || "השידור נכשל. נסה שוב.");
+      setError(e.message || tx("השידור נכשל. נסה שוב."));
     } finally {
       setLoading(false);
     }
@@ -5010,7 +5014,7 @@ export default function LearningTV() {
                   <span className="reader-note">{tx("הרקע מסביב לטלוויזיה:")}</span>
                   <div className="bg-swatches">
                     {BG_THEMES.map(([id, label, sw]) => (
-                      <button key={id} className={"bg-sw " + (bgTheme === id ? "on" : "")} style={{ background: sw }} title={label} onClick={() => { setBgTheme(id); setBgOpen(false); }}><span>{label}</span></button>
+                      <button key={id} className={"bg-sw " + (bgTheme === id ? "on" : "")} style={{ background: sw }} title={tx(label)} onClick={() => { setBgTheme(id); setBgOpen(false); }}><span>{tx(label)}</span></button>
                     ))}
                   </div>
                 </div>
@@ -5416,7 +5420,7 @@ export default function LearningTV() {
                 <div className="guide">
                   <div className="guide-head">
                     <h2 className="guide-title">{book.title}</h2>
-                    <span className="guide-meta">{doneCount(book)}/{book.chapters.length} פרקים הושלמו</span>
+                    <span className="guide-meta">{tx("{a}/{b} פרקים הושלמו", { a: doneCount(book), b: book.chapters.length })}</span>
                   </div>
                   <div className="progressbar">
                     <span className="progress-fill" style={{ width: `${(doneCount(book) / book.chapters.length) * 100}%` }} />
@@ -5434,7 +5438,7 @@ export default function LearningTV() {
                             <span className="g-score">{p.score}/{p.total}</span>
                           )}
                           <span className={"chip " + st}>
-                            {st === "done" ? "הושלם ✓" : st === "learning" ? "בלימוד" : "טרם נלמד"}
+                            {st === "done" ? tx("הושלם ✓") : st === "learning" ? tx("בלימוד") : tx("טרם נלמד")}
                           </span>
                         </button>
                       );
@@ -5451,17 +5455,17 @@ export default function LearningTV() {
                       <input
                         className="search-input"
                         type="text"
-                        placeholder="🔍 חיפוש בספר — מילה או כמה מילים (למשל: כוונה עמידה)"
+                        placeholder={tx("🔍 חיפוש בספר — מילה או כמה מילים (למשל: כוונה עמידה)")}
                         value={searchQ}
                         onChange={(e) => setSearchQ(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") runSearch(); }}
                       />
-                      <button className="mini-btn" onClick={runSearch}>חפש</button>
+                      <button className="mini-btn" onClick={runSearch}>{tx("חפש")}</button>
                       <button className="mini-btn" onClick={() => setNotesOpen((o) => !o)}>
                         📝 הערות ({Object.keys(book.notes || {}).length})
                       </button>
                       {searchHits !== null && (
-                        <button className="mini-btn" onClick={closeSearch}>✕ סגור</button>
+                        <button className="mini-btn" onClick={closeSearch}>{tx("✕ סגור")}</button>
                       )}
                     </div>
                   )}
@@ -5469,15 +5473,15 @@ export default function LearningTV() {
                   {searchHits !== null && !flexResult && !flexLoading && (
                     <div className="search-panel">
                       {searchHits.length === 0 ? (
-                        <p className="search-none">לא נמצאו מופעים. נסה מילה אחרת או פחות מילים.</p>
+                        <p className="search-none">{tx("לא נמצאו מופעים. נסה מילה אחרת או פחות מילים.")}</p>
                       ) : (
                         <>
                           <div className="search-bar">
-                            <span className="search-count">{searchHits.length} מופעים{checkedHits.length ? ` · נבחרו ${checkedHits.length}` : ""}</span>
-                            <button className="mini-btn" onClick={() => setCheckedHits([...searchHits])}>סמן הכול</button>
-                            <button className="mini-btn" onClick={() => setCheckedHits([])}>נקה</button>
+                            <span className="search-count">{tx("{n} מופעים", { n: searchHits.length })}{checkedHits.length ? tx(" · נבחרו {n}", { n: checkedHits.length }) : ""}</span>
+                            <button className="mini-btn" onClick={() => setCheckedHits([...searchHits])}>{tx("סמן הכול")}</button>
+                            <button className="mini-btn" onClick={() => setCheckedHits([])}>{tx("נקה")}</button>
                             <button className="mini-btn gold-btn" onClick={useHitsAsSelection}>
-                              ✦ צור קטע מ{checkedHits.length ? "הנבחרים" : "כל התוצאות"}
+                              {checkedHits.length ? tx("✦ צור קטע מהנבחרים") : tx("✦ צור קטע מכל התוצאות")}
                             </button>
                           </div>
                           <div className="search-list">
@@ -5508,7 +5512,7 @@ export default function LearningTV() {
                   {notesOpen && !flexResult && !flexLoading && (
                     <div className="search-panel">
                       {Object.keys(book.notes || {}).length === 0 ? (
-                        <p className="search-none">אין עדיין הערות. סמן קטע ולחץ 📝 הערה.</p>
+                        <p className="search-none">{tx("אין עדיין הערות. סמן קטע ולחץ 📝 הערה.")}</p>
                       ) : (
                         <div className="search-list">
                           {Object.entries(book.notes || {})
@@ -5533,34 +5537,34 @@ export default function LearningTV() {
                   {trace && !flexResult && !flexLoading && (
                     <div className="trace-bar">
                       🟢 מקור: <b>{trace.term.length > 40 ? trace.term.slice(0, 40) + "…" : trace.term}</b>
-                      <span> · {trace.hits.length} מופעים</span>
+                      <span> · {tx("{n} מופעים", { n: trace.hits.length })}</span>
                       <button className="mini-btn" onClick={() => {
                         const cur = trace.hits;
                         const pos = cur.indexOf(trace.at ?? cur[0]);
                         const next = cur[(pos + 1) % cur.length];
                         setTrace({ ...trace, at: next });
                         document.getElementById("para-" + next)?.scrollIntoView({ behavior: "smooth", block: "center" });
-                      }}>⤵ הבא</button>
-                      <button className="mini-btn" onClick={() => setTrace(null)}>✕ נקה</button>
+                      }}>{tx("⤵ הבא")}</button>
+                      <button className="mini-btn" onClick={() => setTrace(null)}>{tx("✕ נקה")}</button>
                     </div>
                   )}
 
                   <p className="flex-hint">
                     {markMode === "bookmark"
-                      ? "📍 לחץ על משפט כדי לקבוע: עד כאן קראתי."
+                      ? tx("📍 לחץ על משפט כדי לקבוע: עד כאן קראתי.")
                       : markMode === "start"
-                      ? "⟢ לחץ על המשפט שבו מתחיל הקטע."
+                      ? tx("⟢ לחץ על המשפט שבו מתחיל הקטע.")
                       : markMode === "end"
-                      ? "⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע."
+                      ? tx("⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע.")
                       : selectedText
-                      ? `✓ סומן קטע (${selectedText.length.toLocaleString()} תווים) — בחר למטה מה להפיק עליו.`
-                      : "גלול וקרא חופשי. סמן קטע בגרירת עכבר, או לחץ ⟢ התחלה ואז בחר משפט התחלה ומשפט סוף."}
+                      ? tx("✓ סומן קטע ({n} תווים) — בחר למטה מה להפיק עליו.", { n: selectedText.length.toLocaleString() })
+                      : tx("גלול וקרא חופשי. סמן קטע בגרירת עכבר, או לחץ ⟢ התחלה ואז בחר משפט התחלה ומשפט סוף.")}
                   </p>
  
                   {/* תוצאה שהופקה על הקטע */}
                   {quizPick === "flex" && !flexLoading && !flexResult && (
                     <div className="flex-panel">
-                      <h3 style={{ margin: "0 0 10px" }}>כמה שאלות במבחן על הקטע?</h3>
+                      <h3 style={{ margin: "0 0 10px" }}>{tx("כמה שאלות במבחן על הקטע?")}</h3>
                       <div className="quiz-size-row">
                         {[5, 10, 15, 20].map((n) => (
                           <button key={n} className="quiz-size-btn" onClick={() => { setQuizPick(null); generateFlex("quiz", n); }}>
@@ -5568,14 +5572,14 @@ export default function LearningTV() {
                           </button>
                         ))}
                       </div>
-                      <button className="mini-btn" onClick={() => setQuizPick(null)}>✕ ביטול</button>
+                      <button className="mini-btn" onClick={() => setQuizPick(null)}>{tx("✕ ביטול")}</button>
                     </div>
                   )}
 
                   {flexLoading && (
                     <div className="flex-panel">
                       <div className="idle-mark spin" style={{ fontSize: "1.6rem" }}>✳</div>
-                      <p>משדרים את {flexLoading} על הקטע שסימנת...</p>
+                      <p>{tx("משדרים את {c} על הקטע שסימנת...", { c: flexLoading })}</p>
                     </div>
                   )}
                   {flexError && (
@@ -5586,8 +5590,8 @@ export default function LearningTV() {
                   {flexResult && !flexLoading && (
                     <div className="flex-panel">
                       <div className="flex-panel-head">
-                        <strong>{FLEX_ACTIONS.find((a) => a.id === flexResult.channel)?.label} · על הקטע שסימנת</strong>
-                        <button className="mini-btn" onClick={() => setFlexResult(null)}>✕ חזרה לטקסט</button>
+                        <strong>{tx(FLEX_ACTIONS.find((a) => a.id === flexResult.channel)?.label || "")} · {tx("על הקטע שסימנת")}</strong>
+                        <button className="mini-btn" onClick={() => setFlexResult(null)}>{tx("✕ חזרה לטקסט")}</button>
                       </div>
                       {flexResult.channel === "summary" && <SummaryView data={flexResult.data} question={openQ} layer={layerFor("flex:summary")} />}
                       {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} layer={layerFor("flex:concepts")} />}
@@ -5641,7 +5645,7 @@ export default function LearningTV() {
                           {book.flex?.upTo !== undefined &&
                             book.flex.upTo >= start &&
                             book.flex.upTo < start + count && (
-                              <div className="bookmark-line">📍 עד כאן קראת</div>
+                              <div className="bookmark-line">{tx("📍 עד כאן קראת")}</div>
                             )}
                         </div>
                       ))}
@@ -5655,21 +5659,21 @@ export default function LearningTV() {
                 <div className="idle open">
                   <div className="chapter-head">
                     <h2 className="guide-title">{cur.title}</h2>
-                    {book.progress?.[chIdx]?.done && <span className="chip done">הושלם ✓</span>}
+                    {book.progress?.[chIdx]?.done && <span className="chip done">{tx("הושלם ✓")}</span>}
                   </div>
                   {prevSummary && (
                     <div className="recap">
-                      <h4>בפרקים הקודמים…</h4>
+                      <h4>{tx("בפרקים הקודמים…")}</h4>
                       <p>{prevSummary.short}</p>
                     </div>
                   )}
-                  <p className="idle-hint">בחר ערוץ למטה. סיום המבחן מסמן את הפרק כהושלם.</p>
+                  <p className="idle-hint">{tx("בחר ערוץ למטה. סיום המבחן מסמן את הפרק כהושלם.")}</p>
                 </div>
               )}
  
               {view === "tv" && channel === "quiz" && quizPick === "tv" && !loading && (
                 <div className="idle open">
-                  <h2 className="guide-title">כמה שאלות במבחן?</h2>
+                  <h2 className="guide-title">{tx("כמה שאלות במבחן?")}</h2>
                   <div className="quiz-size-row">
                     {[5, 10, 15, 20].map((n) => (
                       <button key={n} className="quiz-size-btn" onClick={() => { setQuizPick(null); generate("quiz", chIdx, n); }}>
@@ -5677,21 +5681,21 @@ export default function LearningTV() {
                       </button>
                     ))}
                   </div>
-                  <p className="idle-hint">מבחן ארוך יותר לוקח מעט יותר זמן להפקה.</p>
+                  <p className="idle-hint">{tx("מבחן ארוך יותר לוקח מעט יותר זמן להפקה.")}</p>
                 </div>
               )}
 
               {view === "tv" && channel && loading && (
                 <div className="idle">
                   <div className="idle-mark spin">✳</div>
-                  <p>משדרים את {active.label} — {cur.title}...</p>
+                  <p>{tx("משדרים את {c} — {t}...", { c: tx(active.label), t: cur.title })}</p>
                 </div>
               )}
  
               {view === "tv" && channel && !loading && error && (
                 <div className="idle">
                   <div className="err big">{error}</div>
-                  <button className="broadcast" onClick={() => generate(channel, chIdx)}>נסה שוב</button>
+                  <button className="broadcast" onClick={() => generate(channel, chIdx)}>{tx("נסה שוב")}</button>
                 </div>
               )}
  
@@ -5701,24 +5705,24 @@ export default function LearningTV() {
                   <h2 className="read-title">{cur.title}</h2>
                   <p className="flex-hint read-mark-hint">
                     {selStart !== null && selEnd === null
-                      ? "⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע."
+                      ? tx("⟣ עכשיו לחץ על המשפט שבו מסתיים הקטע.")
                       : wordSel
-                      ? "✓ סומנו מילים — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
+                      ? tx("✓ סומנו מילים — בחר בסרגל: מרקר, הדגשה או 📝 הערה.")
                       : rangeIdx
-                      ? "✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה."
-                      : "קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף."}
+                      ? tx("✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה.")
+                      : tx("קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף.")}
                   </p>
                   {layerOn && (rangeIdx || wordSel) && (
                     <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]} word={!!wordSel}>
-                      <span className="mark-title">✍️ שכבת הלומד:</span>
-                      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
-                      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
-                      <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>מרקר</button>
-                      <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
-                      <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
-                      <button className="mark-btn" onClick={addNote}>📝 הערה</button>
-                      <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
-                      <button className="mark-btn" onClick={clearSelection}>✕ בטל סימון</button>
+                      <span className="mark-title">{tx("✍️ שכבת הלומד:")}</span>
+                      <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>{tx("B מודגש")}</button>
+                      <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>{tx("U קו תחתון")}</button>
+                      <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>{tx("מרקר")}</button>
+                      <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>{tx("מרקר")}</button>
+                      <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>{tx("מרקר")}</button>
+                      <button className="mark-btn" onClick={addNote}>{tx("📝 הערה")}</button>
+                      <button className="mark-btn" onClick={() => applyMark(null)}>{tx("✕ נקה עיצוב")}</button>
+                      <button className="mark-btn" onClick={clearSelection}>{tx("✕ בטל סימון")}</button>
                     </FloatingMarkBar>
                   )}
                   {noteEditor}
@@ -5760,7 +5764,7 @@ export default function LearningTV() {
                                 onClick={() => (readerOn ? setReaderStart({ i, t: Date.now() }) : onReadSentClick(i))}
                                 onMouseEnter={selStart !== null && selEnd === null ? () => setHoverIdx(i) : undefined}
                               >
-                                {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={pl.here.name + " כאן"}>{pl.here.name}</span>}
+                                {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }} title={tx("{name} כאן", { name: pl.here.name })}>{pl.here.name}</span>}
                                 {renderSentText(s, mk, wordSel && wordSel.i === i ? wordSel : null, vocOf(i), readPos && readPos.i === i ? readPos.c : null, glossOf(i))}
                                 {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
                                 {book.notes?.[i] && (
@@ -5777,7 +5781,7 @@ export default function LearningTV() {
                       ));
                     })()}
                   </div>
-                  <p className="read-hint">אחרי שקראת — בחר ערוץ למטה כדי לקבל סיכום, מבחן, כרטיסיות ועוד. הסימונים וההערות נשמרים ומופיעים גם במגילה.</p>
+                  <p className="read-hint">{tx("אחרי שקראת — בחר ערוץ למטה כדי לקבל סיכום, מבחן, כרטיסיות ועוד. הסימונים וההערות נשמרים ומופיעים גם במגילה.")}</p>
                 </div>
               )}
  
@@ -5812,20 +5816,20 @@ export default function LearningTV() {
               /* המגילה: המקשים בתוך המסגרת, בסנטר הטלוויזיה — קטנים, גדלים בנגיעה */
               <span className="chin-keys">
                 {flexResult ? (
-                  <button className="chin-key gold" onClick={() => setFlexResult(null)} title="חזרה לטקסט"><span className="ck-ic">↩</span><span className="ck-l">חזרה לטקסט</span></button>
+                  <button className="chin-key gold" onClick={() => setFlexResult(null)} title={tx("חזרה לטקסט")}><span className="ck-ic">↩</span><span className="ck-l">{tx("חזרה לטקסט")}</span></button>
                 ) : !flexLoading && (
                   <>
-                    <button className={"chin-key" + (markMode === "bookmark" ? " active" : "")} onClick={() => setMarkMode(markMode === "bookmark" ? null : "bookmark")} title="סימנייה"><span className="ck-ic">📍</span><span className="ck-l">סימנייה</span></button>
-                    <button className={"chin-key" + (markMode === "start" ? " active" : "")} onClick={() => setMarkMode(markMode === "start" ? null : "start")} title="התחלה"><span className="ck-ic">⟢</span><span className="ck-l">התחלה</span></button>
-                    <button className={"chin-key" + (markMode === "end" ? " active" : "")} onClick={() => setMarkMode(markMode === "end" ? null : "end")} title="סוף"><span className="ck-ic">⟣</span><span className="ck-l">סוף</span></button>
-                    {(selectedText || rangeIdx) && <button className="chin-key" onClick={clearSelection} title="נקה סימון"><span className="ck-ic">✕</span><span className="ck-l">נקה סימון</span></button>}
+                    <button className={"chin-key" + (markMode === "bookmark" ? " active" : "")} onClick={() => setMarkMode(markMode === "bookmark" ? null : "bookmark")} title={tx("סימנייה")}><span className="ck-ic">📍</span><span className="ck-l">{tx("סימנייה")}</span></button>
+                    <button className={"chin-key" + (markMode === "start" ? " active" : "")} onClick={() => setMarkMode(markMode === "start" ? null : "start")} title={tx("התחלה")}><span className="ck-ic">⟢</span><span className="ck-l">{tx("התחלה")}</span></button>
+                    <button className={"chin-key" + (markMode === "end" ? " active" : "")} onClick={() => setMarkMode(markMode === "end" ? null : "end")} title={tx("סוף")}><span className="ck-ic">⟣</span><span className="ck-l">{tx("סוף")}</span></button>
+                    {(selectedText || rangeIdx) && <button className="chin-key" onClick={clearSelection} title={tx("נקה סימון")}><span className="ck-ic">✕</span><span className="ck-l">{tx("נקה סימון")}</span></button>}
                     {selectedText && <span className="chin-sep" />}
                     {selectedText && FLEX_ACTIONS.map((a) => (
-                      <button key={a.id} className="chin-key gold" onClick={() => generateFlex(a.id)} title={a.label}><span className="ck-ic">✦</span><span className="ck-l">{a.label}</span></button>
+                      <button key={a.id} className="chin-key gold" onClick={() => generateFlex(a.id)} title={tx(a.label)}><span className="ck-ic">✦</span><span className="ck-l">{tx(a.label)}</span></button>
                     ))}
                   </>
                 )}
-                <button className="chin-key" onClick={backToGuide} title="חזרה ללוח השידורים"><span className="ck-ic">↩</span><span className="ck-l">ללוח</span></button>
+                <button className="chin-key" onClick={backToGuide} title={tx("חזרה ללוח השידורים")}><span className="ck-ic">↩</span><span className="ck-l">{tx("ללוח")}</span></button>
               </span>
             )}
             <div className="chin-slot">
@@ -5980,12 +5984,12 @@ export default function LearningTV() {
             {!book.progress?.[chIdx]?.done && (
               <button className="ch-key newtext" onClick={() => markDone(chIdx)} disabled={loading}>
                 <span className="key-num">✓</span>
-                <span className="key-label">סמן כהושלם</span>
+                <span className="key-label">{tx("סמן כהושלם")}</span>
               </button>
             )}
             <button className="ch-key newtext" onClick={backToGuide} disabled={loading}>
               <span className="key-num">↩</span>
-              <span className="key-label">חזרה ללוח השידורים</span>
+              <span className="key-label">{tx("חזרה ללוח השידורים")}</span>
             </button>
           </div>
         </>
@@ -5996,22 +6000,22 @@ export default function LearningTV() {
           {nextUnfinished >= 0 && (
             <button className="ch-key gold" onClick={() => openChapter(nextUnfinished)}>
               <span className="key-num">▸</span>
-              <span className="key-label">המשך לימוד</span>
+              <span className="key-label">{tx("המשך לימוד")}</span>
             </button>
           )}
           <button className="ch-key green" onClick={openScroll}>
             <span className="key-num">📜</span>
-            <span className="key-label">מגילה — לימוד גמיש</span>
+            <span className="key-label">{tx("מגילה — לימוד גמיש")}</span>
           </button>
           {talkCount(book) >= MIRROR_MIN && (
-            <button className="ch-key mirror" onClick={() => openMirror(book.id)} title="שיקוף — השיחה שלך עם הספר, בקול">
+            <button className="ch-key mirror" onClick={() => openMirror(book.id)} title={tx("שיקוף — השיחה שלך עם הספר, בקול")}>
               <span className="key-num">🎧</span>
-              <span className="key-label">שיקוף</span>
+              <span className="key-label">{tx("שיקוף")}</span>
             </button>
           )}
-          <button className="ch-key share" onClick={share ? backToShare : startShare} title="לימוד משותף — אותו דף, שני לומדים, בזמן אמת">
+          <button className="ch-key share" onClick={share ? backToShare : startShare} title={tx("לימוד משותף — אותו דף, שני לומדים, בזמן אמת")}>
             <span className="key-num">🕯</span>
-            <span className="key-label">{share ? "חזרה ללימוד המשותף" : "לימוד משותף"}</span>
+            <span className="key-label">{share ? tx("חזרה ללימוד המשותף") : tx("לימוד משותף")}</span>
           </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
             <span className="key-num">↩</span>
@@ -6025,15 +6029,15 @@ export default function LearningTV() {
         <div className="deck">
           <button className="ch-key" onClick={() => { flick(); setView("guide"); }}>
             <span className="key-num">📖</span>
-            <span className="key-label">לוח השידורים של הספר</span>
+            <span className="key-label">{tx("לוח השידורים של הספר")}</span>
           </button>
           <button className="ch-key green" onClick={openScroll}>
             <span className="key-num">📜</span>
-            <span className="key-label">מגילה — להוסיף הערות</span>
+            <span className="key-label">{tx("מגילה — להוסיף הערות")}</span>
           </button>
           <button className="ch-key newtext" onClick={backToLibrary}>
             <span className="key-num">↩</span>
-            <span className="key-label">חזרה לספרייה</span>
+            <span className="key-label">{tx("חזרה לספרייה")}</span>
           </button>
         </div>
       )}
@@ -6042,15 +6046,15 @@ export default function LearningTV() {
         <>
           {layerOn && selectedText && !flexResult && !flexLoading && ((selStart !== null && selEnd !== null) || wordSel) && (
             <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : Math.max(selStart, selEnd)} word={!!wordSel}>
-              <span className="mark-title">✍️ שכבת הלומד:</span>
-              <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>B מודגש</button>
-              <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>U קו תחתון</button>
-              <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>מרקר</button>
-              <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>מרקר</button>
-              <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>מרקר</button>
-              <button className="mark-btn" onClick={addNote}>📝 הערה</button>
+              <span className="mark-title">{tx("✍️ שכבת הלומד:")}</span>
+              <button className="mark-btn" style={{ fontWeight: 800 }} onClick={() => applyMark({ b: 1 })}>{tx("B מודגש")}</button>
+              <button className="mark-btn" style={{ textDecoration: "underline" }} onClick={() => applyMark({ u: 1 })}>{tx("U קו תחתון")}</button>
+              <button className="mark-btn hl-y" onClick={() => applyMark({ hl: "y" })}>{tx("מרקר")}</button>
+              <button className="mark-btn hl-g" onClick={() => applyMark({ hl: "g" })}>{tx("מרקר")}</button>
+              <button className="mark-btn hl-p" onClick={() => applyMark({ hl: "p" })}>{tx("מרקר")}</button>
+              <button className="mark-btn" onClick={addNote}>{tx("📝 הערה")}</button>
               <button className="mark-btn trans-btn" onClick={translateSel}>א⇄ע תרגם</button>
-              <button className="mark-btn" onClick={() => applyMark(null)}>✕ נקה עיצוב</button>
+              <button className="mark-btn" onClick={() => applyMark(null)}>{tx("✕ נקה עיצוב")}</button>
             </FloatingMarkBar>
           )}
           {transBubble}
