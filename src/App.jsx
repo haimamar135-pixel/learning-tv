@@ -308,11 +308,22 @@ function scriptOf(t) {
   const n = { he: (s.match(/[\u05d0-\u05ea]/g) || []).length, ar: (s.match(/[\u0620-\u064a]/g) || []).length, cy: (s.match(/[\u0400-\u04ff]/g) || []).length, lat: (s.match(/[A-Za-z]/g) || []).length };
   return Object.keys(n).sort((a, b) => n[b] - n[a])[0];
 }
+/* שפת הטקסט: לפי הכתב, ובאותיות לטיניות — לפי מילים שכיחות (אנגלית / צרפתית / ספרדית / גרמנית) */
+const LATIN_WORDS = { en: ["the", "and", "of", "is", "to", "in", "that", "with"], fr: ["le", "la", "les", "des", "et", "est", "une", "dans"], es: ["el", "los", "las", "que", "es", "una", "del", "por"], de: ["der", "die", "das", "und", "ist", "nicht", "ein", "mit"] };
+function textLang(text) {
+  const sc = scriptOf(text);
+  if (sc === "he" || sc === "ar") return sc;
+  if (sc === "cy") return "ru";
+  const words = ((text || "").toLowerCase().match(/[a-zà-ÿß]+/g) || []).slice(0, 500);
+  let best = "en", top = -1;
+  for (const l of Object.keys(LATIN_WORDS)) { const n = words.filter((w) => LATIN_WORDS[l].includes(w)).length; if (n > top) { top = n; best = l; } }
+  return best;
+}
 /* שפת היעד כברירת מחדל: שפת הממשק — אלא אם הטקסט כבר כתוב בה; אז עברית↔אנגלית */
 function defaultTransLang(text) {
-  const sc = scriptOf(text), ui = getLang();
-  if ((LANG_SCRIPT[ui] || "lat") !== sc) return ui;
-  return sc === "he" ? "en" : "he";
+  const tl = textLang(text), ui = getLang();
+  if (ui !== tl) return ui;
+  return tl === "he" ? "en" : "he";
 }
 /* אותה חלוקה למשפטים כמו bookSentences — לפרק אחד */
 function chapterSentences(text) {
@@ -546,16 +557,17 @@ async function saveBookToStorage(book) {
 }
 /* ספר הפתיחה: נכנס לספרייה פעם אחת לכל שפה (עברית / אנגלית לשאר). מי שמחק אותו — לא יקבל אותו שוב.
    המזהה קבוע (starter-he / starter-en), כך שאותו משתמש בשני מכשירים לא מקבל שני עותקים בענן. */
+const starterBook = (id) => { const s = Object.values(STARTER).find((x) => x.id === id); return s ? { id: s.id, title: s.title, chapters: s.chapters, results: {}, progress: {} } : null; };
 async function seedStarter(idx) {
   const s = STARTER[getLang() === "he" ? "he" : "en"];
   const flag = "lomedtv-starter-" + s.id;
-  try { if (localStorage.getItem(flag)) return idx; } catch {}
-  if (idx.some((b) => b.id === s.id)) return idx;
-  const nb = { id: s.id, title: s.title, chapters: s.chapters, results: {}, progress: {} };
+  try { if (localStorage.getItem(flag) === "removed") return idx; } catch {}
+  /* ברשימה אבל חסר באחסון (שמירה שנכשלה) — משלימים בשקט */
+  if (idx.some((b) => b.id === s.id)) { if (!(await loadBook(s.id))) await saveBookToStorage(starterBook(s.id)); return idx; }
+  const nb = starterBook(s.id);
   await saveBookToStorage(nb);
   const next = [{ id: nb.id, title: nb.title, chapters: nb.chapters.length, done: 0, talk: 0, updatedAt: Date.now() }, ...idx];
   await saveIndex(next);
-  try { localStorage.setItem(flag, "1"); } catch {}
   return next;
 }
 async function deleteBookFromStorage(id) {
@@ -4273,8 +4285,10 @@ export default function LearningTV() {
   const stopRec = () => { try { recRef.current?.mr?.stop(); } catch {} };
 
   const openBook = async (id) => {
-    const b = await loadBook(id);
-    if (!b) { setError("הספר לא נמצא באחסון."); return; }
+    let b = await loadBook(id);
+    /* ספר הפתיחה תמיד זמין: אם האחסון במכשיר לא החזיר אותו — נבנה מחדש מהאפליקציה עצמה */
+    if (!b && starterBook(id)) { b = starterBook(id); saveBookToStorage(b); }
+    if (!b) { setError(tx("הספר לא נמצא באחסון.")); return; }
     setBook(b);
     setChannel(null);
     setError(null);
@@ -4300,6 +4314,7 @@ export default function LearningTV() {
     setDeleteArm(null);
     await deleteBookFromStorage(id);
     await saveIndex(nextIdx);
+    if (starterBook(id)) { try { localStorage.setItem("lomedtv-starter-" + id, "removed"); } catch {} } // ספר פתיחה שנמחק — לא חוזר
     clearSyncStamp(id);
     /* מחיקה אמיתית: כשמחוברים לענן, הספר נמחק גם שם — אחרת הוא יוצע להורדה מיד. */
     const uid = cloudRef.current?.id;
