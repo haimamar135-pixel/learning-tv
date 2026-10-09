@@ -305,9 +305,18 @@ function ytId(url) {
   const m = String(url || "").match(/(?:youtu\.be\/|[?&]v=|\/shorts\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
   return m ? m[1] : null;
 }
+/* ביוטיוב של היום כל שורה מועתקת כך: "10:0210 דקות, 2 שניותהטקסט" — חותמת הזמן, מיד אחריה
+   תווית נגישות ("10 דקות, 2 שניות") ומיד אחריה הטקסט, בלי רווח. מסירים חותמת+תווית יחד. */
+const YT_UNIT = "(?:שעות|שעה|דקות|דקה|שניות|שנייה|שניה|hours?|minutes?|seconds?|Stunden?|Minuten?|Sekunden?|heures?|secondes?|horas?|minutos?|segundos?|час(?:ов|а)?|минут[аы]?|секунд[аыу]?)";
+const YT_PART = "(?:\\d+\\s*" + YT_UNIT + "|" + YT_UNIT + "\\s+אחת)";
+const YT_LABEL = YT_PART + "(?:\\s*,?\\s*(?:ו-?\\s*)?" + YT_PART + "){0,2}";
+const YT_TS = "\\(?\\d{1,2}:\\d{2}(?::\\d{2})?\\)?";
+const YT_TS_LABEL = new RegExp(YT_TS + "\\s*" + YT_LABEL, "gi");
+const YT_LABEL_LINE = new RegExp("^" + YT_LABEL + "$", "i");
 function cleanTranscript(raw) {
-  const lines = String(raw || "").split(/\r?\n/).map((l) => l.replace(/^\s*\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*/, "").trim())
-    .filter((l) => l && !/^\d+\s+(seconds?|minutes?|hours?|שניות|דקות|שעות)/i.test(l));
+  const lines = String(raw || "").replace(YT_TS_LABEL, "\n").split(/\r?\n/)
+    .map((l) => l.replace(/^\s*\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*/, "").trim())
+    .filter((l) => l && !YT_LABEL_LINE.test(l));
   /* תמליל של יוטיוב מגיע בשורות קצרות: מאחדים לפסקאות של כ-600 תווים, ושוברים בסוף משפט כשיש */
   const paras = []; let cur = "";
   for (const l of lines) {
