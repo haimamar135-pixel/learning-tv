@@ -180,6 +180,7 @@ const CHANNELS = [
   { id: "quiz", num: "05", label: "מבחן" },
   { id: "cards", num: "06", label: "כרטיסיות" },
   { id: "tts", num: "07", label: "הקראה" },
+  { id: "trans", num: "09", label: "תרגום" },
 ];
  
 /* פעולות במצב הגמיש (מגילה) — מופקות על הקטע שסומן */
@@ -296,6 +297,76 @@ async function askClaude(prompt, maxTokens, fast, img, imgType, rawMode) {
   }
 }
  
+/* ─── 🌐 ערוץ התרגום (09, צ'אט 25) — הדף הדו-לשוני ───
+   הפרק מתורגם משפט מול משפט: משפט 7 במקור הוא משפט 7 בתרגום. זה הבסיס ללימוד משותף
+   בין שתי שפות (מרקר על משפט עובר לפי המספר שלו). התוצר נשמר כמו כל ערוץ, במפתח
+   "פרק:trans:שפה" — תרגום לכל שפת יעד בנפרד. המקור נשאר לצד התרגום: הוא הקובע. */
+const LANG_EN_NAME = { he: "Hebrew", en: "English", ar: "Arabic", fr: "French", es: "Spanish", ru: "Russian", de: "German" };
+const LANG_SCRIPT = { he: "he", ar: "ar", ru: "cy" };
+function scriptOf(t) {
+  const s = (t || "").slice(0, 1500);
+  const n = { he: (s.match(/[\u05d0-\u05ea]/g) || []).length, ar: (s.match(/[\u0620-\u064a]/g) || []).length, cy: (s.match(/[\u0400-\u04ff]/g) || []).length, lat: (s.match(/[A-Za-z]/g) || []).length };
+  return Object.keys(n).sort((a, b) => n[b] - n[a])[0];
+}
+/* שפת היעד כברירת מחדל: שפת הממשק — אלא אם הטקסט כבר כתוב בה; אז עברית↔אנגלית */
+function defaultTransLang(text) {
+  const sc = scriptOf(text), ui = getLang();
+  if ((LANG_SCRIPT[ui] || "lat") !== sc) return ui;
+  return sc === "he" ? "en" : "he";
+}
+/* אותה חלוקה למשפטים כמו bookSentences — לפרק אחד */
+function chapterSentences(text) {
+  const sentences = [], paras = [];
+  for (const p of (text || "").split(/\n{2,}/).map((x) => x.trim()).filter(Boolean)) {
+    const parts = p.match(/[^.!?׃]+[.!?׃]+["'״׳)\]]*\s*|[^.!?׃]+$/g) || [p];
+    const start = sentences.length;
+    for (const x of parts) { const t = x.trim(); if (t) sentences.push(t); }
+    if (sentences.length > start) paras.push([start, sentences.length - start]);
+  }
+  return { sentences, paras };
+}
+async function translateSentences(list, lang) {
+  const out = [];
+  let i = 0;
+  while (i < list.length) {
+    let j = i, chars = 0;
+    while (j < list.length && (j === i || chars + list[j].length <= 1800) && j - i < 30) { chars += list[j].length; j++; }
+    const batch = list.slice(i, j);
+    const prompt = `Translate each numbered sentence below into ${LANG_EN_NAME[lang] || lang}. Return JSON only, in the form {"t":["...","..."]} with exactly ${batch.length} strings, in the same order: one translation per numbered sentence. Never merge, split, skip or reorder sentences. Keep names, numbers and bibliographic references as they are. Translate faithfully, without adding explanations.\n\n` + batch.map((x, k) => `${k + 1}. ${x}`).join("\n");
+    const r = await askClaude(prompt, 4000, false);
+    if (!r || !Array.isArray(r.t) || r.t.length !== batch.length) throw new Error(tx("התרגום חזר לא שלם — נסה שוב."));
+    out.push(...r.t.map((x) => String(x)));
+    i = j;
+  }
+  return out;
+}
+function TransView({ text, data, lang, onLang }) {
+  const { sentences, paras } = chapterSentences(text);
+  const sc = scriptOf(text);
+  const srcDir = sc === "he" || sc === "ar" ? "rtl" : "ltr";
+  const dstDir = lang === "he" || lang === "ar" ? "rtl" : "ltr";
+  const t = (data && data.t) || [];
+  return (
+    <div className="tl">
+      <div className="tl-head">
+        <span className="tl-to">{tx("תרגום ל:")}</span>
+        {LANGS.map(([id, name]) => <button key={id} className={"mark-btn" + (id === lang ? " on" : "")} onClick={() => onLang(id)}>{name}</button>)}
+      </div>
+      {paras.map(([start, count]) => (
+        <div className="tl-para" key={start}>
+          {Array.from({ length: count }, (_, k) => start + k).map((i) => (
+            <div className="tl-row" key={i} data-si={i}>
+              <p className="tl-src" dir={srcDir}>{sentences[i]}</p>
+              <p className="tl-dst" dir={dstDir} lang={lang}>{t[i] || "…"}</p>
+            </div>
+          ))}
+        </div>
+      ))}
+      <p className="tl-foot">{tx("התרגום נוצר במכונה ונשמר עם הספר. המקור הוא הקובע.")}</p>
+    </div>
+  );
+}
+
 /* ─── חלוקה לפרקים ─── */
 const CHAPTER_LIMIT = 4500;
 const CHUNK_TARGET = 3500;
@@ -3134,6 +3205,7 @@ export default function LearningTV() {
      הצעד הראשון של "השאלות הפתוחות שלי". */
   /* שפת הממשק (צ'אט 25): הבחירה נשמרת ב-lomedtv-lang; ההחלפה מציירת את המסך מחדש */
   const [, setLangTick] = useState(0);
+  const [transLang, setTransLang] = useState(null); // שפת היעד של ערוץ התרגום; null = ברירת המחדל לפי הטקסט
   const changeLang = (l) => {
     setLang(l); setLangTick((n) => n + 1);
     (async () => { const idx = await loadIndex(); const next = await seedStarter(idx); if (next !== idx) setIndex(next); })();
@@ -4631,8 +4703,25 @@ export default function LearningTV() {
     }
   };
  
+  /* 🌐 תרגום הפרק לשפת יעד — נשמר במפתח "פרק:trans:שפה" */
+  const generateTrans = async (ci, lang) => {
+    const text = book.chapters[ci].text;
+    const to = lang || transLang || defaultTransLang(text);
+    if (book.results[key(ci, "trans:" + to)]) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const t = await translateSentences(chapterSentences(text).sentences, to);
+      await persist({ ...book, results: { ...book.results, [key(ci, "trans:" + to)]: { lang: to, t } } }, { k: "output", ci, ch: "trans:" + to });
+    } catch (e) {
+      setError(e.message || tx("התרגום נכשל. נסה שוב."));
+    } finally {
+      setLoading(false);
+    }
+  };
   const generate = async (id, ci, qCount) => {
     if (id === "tts" || id === "read") return;
+    if (id === "trans") return generateTrans(ci);
     if (book.results[key(ci, id)]) return;
     if (id === "quiz" && !qCount) {
       setQuizPick("tv"); // קודם בוחרים כמה שאלות
@@ -4702,7 +4791,8 @@ export default function LearningTV() {
  
   const active = CHANNELS.find((c) => c.id === channel);
   const cur = book?.chapters?.[chIdx];
-  const data = channel && book ? book.results[key(chIdx, channel)] : null;
+  const transTo = channel === "trans" && cur ? (transLang || defaultTransLang(cur.text)) : null;
+  const data = channel && book ? book.results[key(chIdx, channel === "trans" ? "trans:" + transTo : channel)] : null;
   const multi = book?.chapters?.length > 1;
   const prevSummary = book && chIdx > 0 ? book.results[key(chIdx - 1, "summary")] : null;
   const nextUnfinished = book
@@ -4710,7 +4800,7 @@ export default function LearningTV() {
     : -1;
  
   const barTitle =
-    view === "tv" && active ? active.label
+    view === "tv" && active ? tx(active.label)
     : view === "tv" ? tx("בחר ערוץ")
     : view === "scroll" ? tx("מגילה · לימוד גמיש")
     : view === "guide" ? tx("לוח שידורים")
@@ -5631,6 +5721,7 @@ export default function LearningTV() {
                     />
                   )}
                   {channel === "cards" && <CardsView key={key(chIdx, channel)} data={data} layer={layerFor(chIdx + ":cards")} />}
+                  {channel === "trans" && <TransView key={key(chIdx, "trans:" + transTo)} text={cur.text} data={data} lang={transTo} onLang={(l) => { if (loading) return; setTransLang(l); generateTrans(chIdx, l); }} />}
                 </>
               )}
             </div>
@@ -5792,7 +5883,7 @@ export default function LearningTV() {
           <div className="deck">
             {CHANNELS.map((c) => {
               const isOn = c.id === "tts" ? (readerOn && channel === "read") : channel === c.id;
-              const cached = (c.id === "tts" || c.id === "read") ? isOn : !!book.results[key(chIdx, c.id)];
+              const cached = (c.id === "tts" || c.id === "read") ? isOn : c.id === "trans" ? Object.keys(book.results || {}).some((k) => k.startsWith(chIdx + ":trans:")) : !!book.results[key(chIdx, c.id)];
               return (
                 <button
                   key={c.id}
@@ -5801,7 +5892,7 @@ export default function LearningTV() {
                   onClick={() => tune(c.id)}
                 >
                   <span className="key-num">{c.num}</span>
-                  <span className="key-label">{c.label}</span>
+                  <span className="key-label">{tx(c.label)}</span>
                 </button>
               );
             })}
@@ -6317,6 +6408,17 @@ const css = `
 .concepts{display:flex;flex-direction:column;gap:22px}
 .sec-title{font-size:1.05rem;font-weight:800;color:#7a5410;margin-bottom:10px}
 .sec-title.center{text-align:center}
+.tl{display:flex;flex-direction:column;gap:14px}
+.tl-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tl-head .mark-btn.on{background:#1b3a6b;color:#fff;border-color:#1b3a6b}
+.tl-to{font-weight:800;color:#7a5410;margin-inline-end:4px}
+.tl-para{display:flex;flex-direction:column;gap:6px;padding-bottom:10px;border-bottom:1px dashed #e0d2ae}
+.tl-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+.tl-row p{margin:0;line-height:1.8}
+.tl-src{color:#2c2314}
+.tl-dst{color:#1b3a6b;background:#f3f7ff;border-radius:8px;padding:2px 8px}
+.tl-foot{font-size:.8rem;opacity:.65}
+@media(max-width:640px){.tl-row{grid-template-columns:1fr;gap:2px}.tl-dst{margin-bottom:8px}}
 .term-row{display:flex;gap:12px;padding:9px 0;border-bottom:1px dashed #d9d2bd;line-height:1.6}
 .term{font-weight:800;min-width:120px}
 .def{color:#3f3b2e}

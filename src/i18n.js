@@ -253,6 +253,20 @@ const T = [
   ["צילומים OCR", "Photos (OCR)", "صور (OCR)", "Photos (OCR)", "Fotos (OCR)", "Фото (OCR)", "Fotos (OCR)"],
   ["דף חכם AI", "Smart page (AI)", "صفحة ذكية (AI)", "Page intelligente (IA)", "Página inteligente (IA)", "Умная страница (ИИ)", "Intelligente Seite (KI)"],
   ["שיעור מוקלט", "Recorded lesson", "درس مسجّل", "Cours enregistré", "Clase grabada", "Записанный урок", "Aufgezeichnete Lektion"],
+  /* ── הערוצים וערוץ התרגום ── */
+  ["טקסט הפרק", "Chapter text", "نص الفصل", "Texte du chapitre", "Texto del capítulo", "Текст главы", "Kapiteltext"],
+  ["סיכום", "Summary", "ملخّص", "Résumé", "Resumen", "Конспект", "Zusammenfassung"],
+  ["מושגים וכללים", "Concepts and rules", "مفاهيم وقواعد", "Concepts et règles", "Conceptos y reglas", "Понятия и правила", "Begriffe und Regeln"],
+  ["מפת חשיבה", "Mind map", "خريطة ذهنية", "Carte mentale", "Mapa mental", "Карта мыслей", "Mindmap"],
+  ["תרשים זרימה", "Flow chart", "مخطط انسيابي", "Diagramme de flux", "Diagrama de flujo", "Блок-схема", "Flussdiagramm"],
+  ["מבחן", "Quiz", "اختبار", "Quiz", "Examen", "Тест", "Quiz"],
+  ["כרטיסיות", "Flashcards", "بطاقات", "Cartes mémoire", "Tarjetas", "Карточки", "Karteikarten"],
+  ["הקראה", "Read aloud", "قراءة بصوت", "Lecture à voix haute", "Lectura en voz alta", "Чтение вслух", "Vorlesen"],
+  ["תרגום", "Translation", "ترجمة", "Traduction", "Traducción", "Перевод", "Übersetzung"],
+  ["תרגום ל:", "Translate into:", "ترجم إلى:", "Traduire en :", "Traducir a:", "Перевести на:", "Übersetzen in:"],
+  ["התרגום נוצר במכונה ונשמר עם הספר. המקור הוא הקובע.", "This translation was made by a machine and is saved with the book. The original is the authoritative text.", "هذه الترجمة آلية ومحفوظة مع الكتاب. النص الأصلي هو المرجع.", "Cette traduction est automatique et enregistrée avec le livre. L'original fait foi.", "Esta traducción es automática y se guarda con el libro. El original es el texto de referencia.", "Перевод выполнен машиной и сохранён вместе с книгой. Определяющим остаётся оригинал.", "Diese Übersetzung wurde maschinell erstellt und mit dem Buch gespeichert. Maßgeblich ist das Original."],
+  ["התרגום חזר לא שלם — נסה שוב.", "The translation came back incomplete — please try again.", "عادت الترجمة ناقصة — حاول مجددًا.", "La traduction est revenue incomplète — réessayez.", "La traducción llegó incompleta — inténtalo de nuevo.", "Перевод вернулся неполным — попробуйте ещё раз.", "Die Übersetzung kam unvollständig zurück — bitte erneut versuchen."],
+  ["התרגום נכשל. נסה שוב.", "The translation failed. Please try again.", "فشلت الترجمة. حاول مجددًا.", "La traduction a échoué. Réessayez.", "La traducción falló. Inténtalo de nuevo.", "Не удалось перевести. Попробуйте ещё раз.", "Die Übersetzung ist fehlgeschlagen. Bitte erneut versuchen."],
 ];
 
 const STR = {};
