@@ -306,9 +306,9 @@ function ytId(url) {
   return m ? m[1] : null;
 }
 /* ביוטיוב של היום כל שורה מועתקת כך: "10:0210 דקות, 2 שניותהטקסט" — חותמת הזמן, מיד אחריה
-   תווית נגישות ("10 דקות, 2 שניות") ומיד אחריה הטקסט, בלי רווח. מסירים חותמת+תווית יחד. */
+   תווית נגישות ("10 דקות, 54 שניות", "10 דקות, שתי שניות", "דקה אחת") ומיד אחריה הטקסט, בלי רווח. מסירים חותמת+תווית יחד. */
 const YT_UNIT = "(?:שעות|שעה|דקות|דקה|שניות|שנייה|שניה|hours?|minutes?|seconds?|Stunden?|Minuten?|Sekunden?|heures?|secondes?|horas?|minutos?|segundos?|час(?:ов|а)?|минут[аы]?|секунд[аыу]?)";
-const YT_PART = "(?:\\d+\\s*" + YT_UNIT + "|" + YT_UNIT + "\\s+אחת)";
+const YT_PART = "(?:(?:\\d+|שתי|שני)\\s*" + YT_UNIT + "|" + YT_UNIT + "\\s+אחת|שעתיים)";
 const YT_LABEL = YT_PART + "(?:\\s*,?\\s*(?:ו-?\\s*)?" + YT_PART + "){0,2}";
 const YT_TS = "\\(?\\d{1,2}:\\d{2}(?::\\d{2})?\\)?";
 const YT_TS_LABEL = new RegExp(YT_TS + "\\s*" + YT_LABEL, "gi");
