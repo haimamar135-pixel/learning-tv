@@ -3142,6 +3142,8 @@ export default function LearningTV() {
   const [isFull, setIsFull] = useState(false);
   /* 📖 מסך קריאה (צ'אט 25): רק התוכן, על כל המסך — בלי מסגרת הטלוויזיה, בלי הסרגל ובלי השלט. Esc או הכפתור הצף מחזירים. */
   const [focus, setFocus] = useState(false);
+  /* 📱 טלפון (צ'אט 27): מקשי הערוצים 00–09 מקופלים למקש אחד; ▴ פורש אותם מעל הטקסט. במק אין שינוי. */
+  const [keysOpen, setKeysOpen] = useState(false);
   useEffect(() => {
     if (!focus) return;
     const onKey = (e) => { if (e.key === "Escape") setFocus(false); };
@@ -6041,7 +6043,7 @@ export default function LearningTV() {
                 <button className="chin-key" onClick={backToGuide} title={tx("חזרה ללוח השידורים")}><span className="ck-ic">↩</span><span className="ck-l">{tx("ללוח")}</span></button>
               </span>
             )}
-            <div className="chin-slot">
+            <div className={"chin-slot" + (view === "tv" && book ? " tvkeys" : "")}>
       {/* לוח מקשים — משתנה לפי ההקשר */}
       {/* ── שערי המציאות: קלטים גלובליים — המצלמה והמיקרופון זמינים מכל מסך ── */}
       <input
@@ -6172,7 +6174,8 @@ export default function LearningTV() {
  
       {view === "tv" && book && (
         <>
-          <div className="deck">
+          {keysOpen && <div className="keys-shade" onClick={() => setKeysOpen(false)} />}
+          <div className={"deck ch-deck" + (keysOpen ? " open" : "")}>
             {CHANNELS.map((c) => {
               const isOn = c.id === "tts" ? (readerOn && channel === "read") : channel === c.id;
               const cached = (c.id === "tts" || c.id === "read") ? isOn : c.id === "trans" ? Object.keys(book.results || {}).some((k) => k.startsWith(chIdx + ":trans:")) : !!book.results[key(chIdx, c.id)];
@@ -6181,24 +6184,39 @@ export default function LearningTV() {
                   key={c.id}
                   className={"ch-key " + (isOn ? "active " : "") + (cached ? "cached " : "")}
                   disabled={loading}
-                  onClick={() => tune(c.id)}
+                  onClick={() => { setKeysOpen(false); tune(c.id); }}
                 >
                   <span className="key-num">{c.num}</span>
                   <span className="key-label">{tx(c.label)}</span>
                 </button>
               );
             })}
-          </div>
-          <div className="deck">
             {!book.progress?.[chIdx]?.done && (
-              <button className="ch-key newtext" onClick={() => markDone(chIdx)} disabled={loading}>
+              <button className="ch-key newtext sheet-only" onClick={() => { setKeysOpen(false); markDone(chIdx); }} disabled={loading}>
+                <span className="key-num">✓</span>
+                <span className="key-label">{tx("סמן כהושלם")}</span>
+              </button>
+            )}
+            <button className="ch-key newtext sheet-only" onClick={() => setKeysOpen(false)} aria-label={tx("סגור")}>
+              <span className="key-num">▾</span>
+              <span className="key-label">{tx("סגור")}</span>
+            </button>
+          </div>
+          <div className="deck nav-deck">
+            <button className="ch-key newtext keys-toggle" onClick={() => setKeysOpen(true)} aria-expanded={keysOpen} aria-label="00–09">
+              <span className="key-num">▴</span>
+              <span className="key-label" dir="ltr">00–09</span>
+            </button>
+            {!book.progress?.[chIdx]?.done && (
+              <button className="ch-key newtext wide-only" onClick={() => markDone(chIdx)} disabled={loading}>
                 <span className="key-num">✓</span>
                 <span className="key-label">{tx("סמן כהושלם")}</span>
               </button>
             )}
             <button className="ch-key newtext" onClick={backToGuide} disabled={loading}>
               <span className="key-num">↩</span>
-              <span className="key-label">{tx("חזרה ללוח השידורים")}</span>
+              <span className="key-label lbl-long">{tx("חזרה ללוח השידורים")}</span>
+              <span className="key-label lbl-short">{tx("ללוח")}</span>
             </button>
           </div>
         </>
@@ -7200,6 +7218,34 @@ const css = `
   .ch-key{min-width:88px;padding:10px}
   .term{min-width:90px}
   .g-title{white-space:normal}
+}
+/* ── 📱 טלפון (צ'אט 27): להגדיל את אזור התוכן. המסגרת דקה, הסרגל העליון בשורה אחת, ומקשי הערוצים מקופלים למקש אחד שנפרש ב-▴. במק (מעל 640px) אין שינוי. ── */
+.keys-toggle,.sheet-only,.lbl-short,.keys-shade{display:none}
+@media (max-width:640px){
+  .studio{padding:4px 4px 2px;padding-top:calc(4px + env(safe-area-inset-top,0px));padding-bottom:calc(2px + env(safe-area-inset-bottom,0px))}
+  .studio .bezel{padding:5px;border-radius:14px}
+  .studio .screen-bar{padding:5px 8px;gap:6px;row-gap:4px}
+  .studio .screen-bar .ch-num{font-size:.7rem;flex:none}
+  .studio .screen-bar .ch-name{font-size:.82rem;flex:1 1 0;min-width:0}
+  .studio .screen-bar .font-btns{flex:0 1 56%;min-width:0;flex-wrap:nowrap;overflow-x:auto;justify-content:flex-start;margin:0;gap:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;-webkit-mask-image:linear-gradient(to left,#000 86%,transparent);mask-image:linear-gradient(to left,#000 86%,transparent)}
+  .studio .screen-bar .font-btns:dir(ltr){-webkit-mask-image:linear-gradient(to right,#000 86%,transparent);mask-image:linear-gradient(to right,#000 86%,transparent)}
+  .studio .screen-bar .font-btns::-webkit-scrollbar{display:none}
+  .studio .screen-bar .font-btns>*{flex:none}
+  .studio .screen-bar .lang-pick{max-width:78px}
+  .studio .reader-slot:empty{display:none}
+  .studio .reader-slot{flex-basis:100%}
+  .studio .chapter-strip{padding:3px 8px}
+  .studio .chapter-tab{flex:none;max-width:160px;padding:4px 12px}
+  .studio>.tv .tv-chin.with-keys{padding:5px 4px 3px}
+  .chin-slot.tvkeys{flex-direction:row;flex-wrap:wrap;justify-content:center;align-items:center;gap:5px}
+  .chin-slot.tvkeys .wide-only,.chin-slot.tvkeys .lbl-long{display:none}
+  .chin-slot.tvkeys .keys-toggle{display:flex}
+  .chin-slot.tvkeys .lbl-short{display:inline}
+  .chin-slot.tvkeys .ch-deck:not(.open) .ch-key:not(.active){display:none}
+  .chin-slot.tvkeys .ch-deck.open{position:fixed;left:0;right:0;bottom:0;z-index:81;margin:0;padding:14px 10px calc(14px + env(safe-area-inset-bottom,0px));gap:8px;background:linear-gradient(180deg,#1c2342,#141a34);border-top:1px solid #323b68;border-radius:18px 18px 0 0;box-shadow:0 -12px 34px rgba(0,0,0,.55)}
+  .chin-slot.tvkeys .ch-deck.open .sheet-only{display:flex}
+  .chin-slot.tvkeys .ch-deck.open .ch-key{padding:10px 14px;min-height:42px}
+  .keys-shade{display:block;position:fixed;inset:0;z-index:80;background:rgba(5,8,20,.5)}
 }
 `;
   
