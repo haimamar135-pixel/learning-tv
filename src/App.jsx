@@ -3079,6 +3079,14 @@ export default function LearningTV() {
   const [bgOpen, setBgOpen] = useState(false);
   useEffect(() => { document.documentElement.setAttribute("data-bg", bgTheme); try { localStorage.setItem("lomedtv-bg", bgTheme); } catch {} }, [bgTheme]);
   const [isFull, setIsFull] = useState(false);
+  /* 📖 מסך קריאה (צ'אט 25): רק התוכן, על כל המסך — בלי מסגרת הטלוויזיה, בלי הסרגל ובלי השלט. Esc או הכפתור הצף מחזירים. */
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e) => { if (e.key === "Escape") setFocus(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focus]);
   useEffect(() => { const f = () => setIsFull(!!document.fullscreenElement); document.addEventListener("fullscreenchange", f); return () => document.removeEventListener("fullscreenchange", f); }, []);
   const toggleFull = () => { try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); } catch {} };
   const [index, setIndex] = useState([]);
@@ -4879,10 +4887,18 @@ export default function LearningTV() {
     : view === "mirror" ? tx("שיקוף · אור חוזר")
     : view === "shelf" ? tx("ארון הספרים · ייבוא ללימוד")
     : tx("קליטת טקסט");
+  const focusOn = focus && (view === "tv" || view === "scroll") && !!book && !helpOn;
   const barNum = view === "tv" && active ? `CH ${active.num}` : view === "scroll" ? "CH ∞" : view === "mirror" ? "CH 08" : "CH 00";
  
   return (
-    <div className="studio" dir={langDir()} lang={getLang()}>
+    <div className={"studio" + (focusOn ? " focus" : "")} dir={langDir()} lang={getLang()}>
+      {focusOn && (
+        <div className="focus-tools">
+          <button className="focus-btn" onClick={() => setFocus(false)} title={tx("חזרה למסך הרגיל")} aria-label={tx("חזרה למסך הרגיל")}>⤡</button>
+          <button className="focus-btn" onClick={() => bumpFont(-0.1)} title={tx("הקטנת טקסט")} aria-label={tx("הקטנת טקסט")}>{tx("אַ−")}</button>
+          <button className="focus-btn" onClick={() => bumpFont(0.1)} title={tx("הגדלת טקסט")} aria-label={tx("הגדלת טקסט")}>{tx("אַ+")}</button>
+        </div>
+      )}
       <style>{css}</style>
 
       {/* ── הפנים: מסך הפתיחה ── */}
@@ -4980,6 +4996,7 @@ export default function LearningTV() {
               <span id="reader-slot" className="reader-slot" />
               <span className="font-btns">
                 <select className="font-btn lang-pick" value={getLang()} onChange={(e) => changeLang(e.target.value)} aria-label="Language · שפה" title="Language · שפה">{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
+                {(view === "tv" || view === "scroll") && book && <button className="font-btn focus-in" onClick={() => setFocus(true)} title={tx("מסך קריאה — רק התוכן, על כל המסך")} aria-label={tx("מסך קריאה")}>⤢</button>}
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title={tx("הקטנת טקסט")} aria-label={tx("הקטנת טקסט")}>{tx("אַ−")}</button>
                 <button className="font-btn" onClick={() => bumpFont(0.1)} title={tx("הגדלת טקסט")} aria-label={tx("הגדלת טקסט")}>{tx("אַ+")}</button>
                 {typeof document !== "undefined" && document.fullscreenEnabled && <button className={"font-btn" + (isFull ? " on" : "")} onClick={toggleFull} title={isFull ? tx("יציאה ממסך מלא") : tx("מסך מלא — הטלוויזיה על כל המסך")} aria-label={tx("מסך מלא")}>⛶</button>}
@@ -6496,6 +6513,18 @@ const css = `
 .yt-box{margin:8px 0 12px}
 .yt-frame{position:relative;width:100%;max-width:720px;aspect-ratio:16/9;margin-top:8px;border-radius:10px;overflow:hidden;background:#000}
 .yt-frame iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.font-btn.focus-in{border-color:var(--amber);color:var(--amber)}
+.studio.focus{padding:0}
+.studio.focus>.tv{aspect-ratio:auto;max-width:none;width:100%}
+.studio.focus .bezel{padding:0;border-radius:0;box-shadow:none}
+.studio.focus .screen{border-radius:0;box-shadow:none}
+.studio.focus .screen-bar,.studio.focus .chapter-strip,.studio.focus .tv-chin,.studio.focus .tv-stand,.studio.focus .tv-foot{display:none}
+.studio.focus .screen-body{padding-top:calc(env(safe-area-inset-top,0px) + 46px);padding-bottom:calc(env(safe-area-inset-bottom,0px) + 30px)}
+.studio.focus .screen-body>*{max-width:900px;margin-inline:auto}
+.focus-tools{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);inset-inline-end:10px;z-index:550;display:flex;gap:6px;opacity:.5;transition:opacity .2s}
+.focus-tools:hover,.focus-tools:focus-within{opacity:1}
+.focus-btn{min-width:38px;height:32px;border-radius:9px;border:1px solid #3a4a72;background:#1b2a4a;color:#e9ecf8;font-size:.95rem;line-height:1;cursor:pointer;font-family:inherit}
+@media(hover:none){.focus-tools{opacity:.7}}
 .tl{display:flex;flex-direction:column;gap:14px}
 .tl-head{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .tl-head .mark-btn.on{background:#1b3a6b;color:#fff;border-color:#1b3a6b}

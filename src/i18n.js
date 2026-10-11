@@ -475,6 +475,10 @@ const T = [
   ["קרם", "Cream", "كريمي", "Crème", "Crema", "Кремовый", "Creme"],
   ["ירוק מרווה", "Sage green", "أخضر مريمي", "Vert sauge", "Verde salvia", "Шалфейный зелёный", "Salbeigrün"],
   ["גרפיט", "Graphite", "غرافيت", "Graphite", "Grafito", "Графит", "Graphit"],
+  /* ── מסך קריאה ── */
+  ["מסך קריאה — רק התוכן, על כל המסך", "Reading screen — only the content, on the whole screen", "شاشة القراءة — المحتوى فقط، على كامل الشاشة", "Écran de lecture — seulement le contenu, sur tout l'écran", "Pantalla de lectura — solo el contenido, en toda la pantalla", "Экран чтения — только содержание, на весь экран", "Lesebildschirm — nur der Inhalt, auf dem ganzen Bildschirm"],
+  ["מסך קריאה", "Reading screen", "شاشة القراءة", "Écran de lecture", "Pantalla de lectura", "Экран чтения", "Lesebildschirm"],
+  ["חזרה למסך הרגיל", "Back to the regular screen", "العودة إلى الشاشة العادية", "Retour à l'écran normal", "Volver a la pantalla normal", "Назад к обычному экрану", "Zurück zum normalen Bildschirm"],
 ];
 
 const STR = {};
