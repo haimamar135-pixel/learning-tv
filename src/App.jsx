@@ -1194,7 +1194,7 @@ function NoteEditor({ initial, src, onSave, onCancel, transcribe }) {
     if (SpeechRec) {
       try {
         const rec = new SpeechRec();
-        rec.lang = "he-IL"; rec.continuous = true; rec.interimResults = true;
+        rec.lang = voiceLocale(getLang()); rec.continuous = true; rec.interimResults = true;
         let finalText = "", base = null;
         rec.onstart = () => { base = null; setMode("listen"); };
         rec.onresult = (ev) => {
@@ -2508,6 +2508,21 @@ function speakable(src) {
   map.push(src.length);
   return { text: out.replace(/\s+/g, " ").trim() ? out : "", map };
 }
+/* שלב 2: ההקראה בקול של שפת הטקסט */
+const VOICE_LOCALE = { he: "he-IL", en: "en-US", ar: "ar-SA", fr: "fr-FR", es: "es-ES", ru: "ru-RU", de: "de-DE" };
+const voiceLocale = (l) => VOICE_LOCALE[l] || "he-IL";
+function pickVoice(synth, l) {
+  if (!l || l === "he") return pickHebrewVoice(synth);
+  const want = voiceLocale(l).toLowerCase();
+  const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith(l));
+  const score = (v) => (/premium/i.test(v.voiceURI + v.name) ? 6 : /enhanced/i.test(v.voiceURI + v.name) ? 4 : /compact/i.test(v.voiceURI) ? 0 : 2) + (v.lang.toLowerCase().replace("_", "-") === want ? 1 : 0);
+  return vs.sort((a, b) => score(b) - score(a))[0] || null;
+}
+/* השאלה שהלומד נושא נאמרת בשפה שבה נכתבה; המסגרת העברית ("השאלה שאתה נושא…") רק כשגם הטקסט עברי */
+function spokenQuestion(question, lang) {
+  const ql = textLang(question);
+  return lang === "he" && ql === "he" ? { text: `השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת.`, lang: "he" } : { text: question + ".", lang: ql };
+}
 function pickHebrewVoice(synth) {
   const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && v.lang.toLowerCase().startsWith("he"));
   const score = (v) => (/premium/i.test(v.voiceURI + v.name) ? 3 : /enhanced/i.test(v.voiceURI + v.name) ? 2 : /compact/i.test(v.voiceURI) ? 0 : 1);
@@ -2529,7 +2544,7 @@ function buildChunks(queue) {
   }
   return chunks;
 }
-function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta, glossOn, onGloss, glossBusy }) {
+function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta, glossOn, onGloss, glossBusy, lang = "he" }) {
   /* items: [{i, kind, text}] — המשפטים של הפרק בסדר הדף; kind = "zohar" | "sulam" | "" */
   const hasSulam = items.some((x) => x.kind === "sulam");
   const [mode, setMode] = useState("all");
@@ -2640,8 +2655,8 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
     if (!text.trim()) { speakAt(k + 1); return; }
     onPos?.({ i: item.i, c: 0 });
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "he-IL"; u.rate = rateRef.current;
-    const v = pickHebrewVoice(synth); if (v) u.voice = v;
+    u.lang = voiceLocale(lang); u.rate = rateRef.current;
+    const v = pickVoice(synth, lang); if (v) u.voice = v;
     const t0 = Date.now(); let lastB = 0;
     const cps = 13 * rateRef.current; // הערכה כשהדפדפן לא מדווח על גבולות מילים
     u.onboundary = (ev) => { if (typeof ev.charIndex === "number") { lastB = ev.charIndex; onPos?.({ i: item.i, c: map[Math.min(ev.charIndex, map.length - 1)] }); } };
@@ -2672,8 +2687,9 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
     const k = from != null ? from : Math.max(0, posRef.current);
     if (question && !askedQ.current && k === 0) {
       askedQ.current = true;
-      const uq = new SpeechSynthesisUtterance(`השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת.`);
-      uq.lang = "he-IL"; uq.rate = rateRef.current; const v = pickHebrewVoice(synth); if (v) uq.voice = v;
+      const sq = spokenQuestion(question, lang);
+      const uq = new SpeechSynthesisUtterance(sq.text);
+      uq.lang = voiceLocale(sq.lang); uq.rate = rateRef.current; const v = pickVoice(synth, sq.lang); if (v) uq.voice = v;
       uq.onend = () => speakAt(k); uq.onerror = () => speakAt(k); uRef.current = uq; synth.speak(uq);
     } else speakAt(k);
   };
@@ -2713,7 +2729,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
           </div>
           {hqBusy && <div className="reader-note busy-line">{hqBusy}</div>}
           {hqErr && <div className="err">{hqErr}</div>}
-          <div className="reader-row">
+          <div className="reader-row" style={lang === "he" ? undefined : { display: "none" }}>
             <button className={"pill " + (glossOn ? "on" : "")} onClick={() => onGloss?.(!glossOn)} title="פירוש עברי קצר מתחת לכל מילה ארמית בזמן ההקראה">📖 מילון ארמי {glossOn ? "· דולק" : ""}</button>
             <span className="reader-note">{glossBusy || (glossOn ? "מתחת לכל מילה ארמית — הפירוש בעברית · מוכן פעם אחת ונשמר עם הספר · גם הכפתור 📖 בשורה העליונה" : "כבוי")}</span>
           </div>
@@ -2770,6 +2786,7 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
 }
 
 function TTSView({ text, question }) {
+  const tLang = textLang(text);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
   const [rate, setRate] = useState(1);
@@ -2777,7 +2794,7 @@ function TTSView({ text, question }) {
   useEffect(() => () => window.speechSynthesis?.cancel(), [text]);
 
   /* ההקראה פותחת בשאלה שהלומד נושא — כדי שיקשיב לפרק מתוכה */
-  const spoken = question ? `השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת. ... ${text}` : text;
+  const spoken = question && tLang === "he" && textLang(question) === "he" ? `השאלה שאתה נושא איתך: ${question}. הקשב לפרק מתוך השאלה הזאת. ... ${text}` : text;
 
   const play = () => {
     const synth = window.speechSynthesis;
@@ -2785,9 +2802,9 @@ function TTSView({ text, question }) {
     if (paused) { synth.resume(); setPaused(false); return; }
     synth.cancel();
     const u = new SpeechSynthesisUtterance(spoken);
-    u.lang = "he-IL";
+    u.lang = voiceLocale(tLang);
     u.rate = rate;
-    const heVoice = synth.getVoices().find((v) => v.lang && v.lang.startsWith("he"));
+    const heVoice = pickVoice(synth, tLang);
     if (heVoice) u.voice = heVoice;
     u.onend = () => { setSpeaking(false); setPaused(false); };
     u.onerror = () => { setSpeaking(false); setPaused(false); };
@@ -3700,6 +3717,10 @@ export default function LearningTV() {
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
      גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
   const { sentences, paraGroups, chapterRanges } = useMemo(() => bookSentences(book), [book?.id, book?.chapters?.length]);
+  /* שלב 2: שפת הספר קובעת את כיוון הטקסט, את קול ההקראה, ואם ניקוד ומילון ארמי רלוונטיים */
+  const bookLang = useMemo(() => textLang(sentences.slice(0, 40).join(" ")), [sentences]);
+  const textDir = bookLang === "he" || bookLang === "ar" ? "rtl" : "ltr";
+  const textIsHe = !book || bookLang === "he";
 
   /* נִ ניקוד: הנוסח המנוקד של משפט, אם הניקוד מוצג ויש נוסח תקף (אותן אותיות בדיוק) */
   const vocOf = (i) => {
@@ -5013,8 +5034,8 @@ export default function LearningTV() {
                 <button className="font-btn" onClick={downloadBackup} title={tx("גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ")} aria-label={tx("גיבוי")}>⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title={tx("שחזור מקובץ גיבוי")} aria-label={tx("שחזור")}>⬆</button>
                 <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? tx("חזרה ללימוד") : tx("המדריך: איך משתמשים")} aria-label={tx("המדריך")}>❔</button>
-                <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? tx("המילון הארמי מוצג — לחץ להסתיר") : tx("מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית"))} aria-label={tx("מילון ארמי")} aria-pressed={glossOn}>📖</button>
-                <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? tx("הניקוד מוצג — לחץ להסתיר") : tx("הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)")} aria-label={tx("ניקוד")} aria-pressed={nikudOn}>{tx("בְּ")}</button>
+                {textIsHe && <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? tx("המילון הארמי מוצג — לחץ להסתיר") : tx("מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית"))} aria-label={tx("מילון ארמי")} aria-pressed={glossOn}>📖</button>}
+                {textIsHe && <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? tx("הניקוד מוצג — לחץ להסתיר") : tx("הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)")} aria-label={tx("ניקוד")} aria-pressed={nikudOn}>{tx("בְּ")}</button>}
                 <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? tx("שכבת הלומד מוצגת — לחץ להסתיר") : tx("שכבת הלומד מוסתרת — לחץ להציג")} aria-label={tx("שכבת הלומד")}>✍️</button>
                 <button
                   className={"font-btn" + (cloudUser ? (syncState === "err" ? " cloud-err" : " cloud-on") : "")}
@@ -5171,7 +5192,7 @@ export default function LearningTV() {
                   {book.chapters.map((c, i) => (
                     <button
                       key={i}
-                      className={"chapter-tab " + (i === chIdx ? "on " : "") + (book.progress?.[i]?.done ? "ok" : "")}
+                      dir={textDir} className={"chapter-tab " + (i === chIdx ? "on " : "") + (book.progress?.[i]?.done ? "ok" : "")}
                       onClick={() => gotoChapter(i)}
                       title={c.title}
                     >
@@ -5618,18 +5639,20 @@ export default function LearningTV() {
                         <strong>{tx(FLEX_ACTIONS.find((a) => a.id === flexResult.channel)?.label || "")} · {tx("על הקטע שסימנת")}</strong>
                         <button className="mini-btn" onClick={() => setFlexResult(null)}>{tx("✕ חזרה לטקסט")}</button>
                       </div>
+                      <div dir={textDir}>
                       {flexResult.channel === "summary" && <SummaryView data={flexResult.data} question={openQ} layer={layerFor("flex:summary")} />}
                       {flexResult.channel === "concepts" && <ConceptsView data={flexResult.data} onTrace={traceToSource} layer={layerFor("flex:concepts")} />}
                       {flexResult.channel === "mindmap" && <MindmapView data={flexResult.data} />}
                       {flexResult.channel === "flow" && <FlowView data={flexResult.data} />}
                       {flexResult.channel === "quiz" && <QuizView data={flexResult.data} saved={null} onComplete={() => {}} />}
                       {flexResult.channel === "cards" && <CardsView data={flexResult.data} layer={layerFor("flex:cards")} />}
+                      </div>
                     </div>
                   )}
  
                   {/* המגילה עצמה */}
                   {!flexResult && !flexLoading && (
-                    <div className="scroll-text" ref={scrollBodyRef} onMouseUp={onScrollMouseUp}>
+                    <div className="scroll-text" dir={textDir} ref={scrollBodyRef} onMouseUp={onScrollMouseUp}>
                       {paraGroups.map(([start, count], pi) => (
                         <div key={pi}>
                           <p className={"scroll-para" + paraKind(sentences, paraGroups, pi)}>
@@ -5756,11 +5779,11 @@ export default function LearningTV() {
                     const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
                     const items = [];
                     chParas.forEach(([start, count], pi) => { const kind = paraKind(sentences, chParas, pi).trim(); for (let i = start; i < start + count; i++) items.push({ i, kind, text: sentences[i] }); });
-                    return <Reader key={key(chIdx, "reader")} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }}
+                    return <Reader key={key(chIdx, "reader")} lang={bookLang} items={items} question={openQ} startAt={readerStart} onPos={setReadPos} onClose={() => { setReaderOn(false); setReadPos(null); }}
                       glossOn={glossOn} onGloss={setGlossOn} glossBusy={glossBusy}
                       store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
-                  <div className="read-body read-sents" onMouseUp={onReadMouseUp}>
+                  <div className="read-body read-sents" dir={textDir} onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
                       const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
@@ -5815,7 +5838,7 @@ export default function LearningTV() {
               )}
  
               {view === "tv" && channel && channel !== "tts" && channel !== "read" && !loading && !error && data && (
-                <>
+                <div dir={textDir}>
                   {channel === "summary" && <SummaryView key={key(chIdx, channel)} data={data} question={openQ} layer={layerFor(chIdx + ":summary")} />}
                   {channel === "concepts" && <ConceptsView data={data} onTrace={traceToSource} layer={layerFor(chIdx + ":concepts")} />}
                   {channel === "mindmap" && <MindmapView data={data} />}
@@ -5830,7 +5853,7 @@ export default function LearningTV() {
                   )}
                   {channel === "cards" && <CardsView key={key(chIdx, channel)} data={data} layer={layerFor(chIdx + ":cards")} />}
                   {channel === "trans" && <TransView key={key(chIdx, "trans:" + transTo)} text={cur.text} data={data} lang={transTo} onLang={(l) => { if (loading) return; setTransLang(l); generateTrans(chIdx, l); }} />}
-                </>
+                </div>
               )}
             </div>
  
