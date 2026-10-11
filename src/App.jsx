@@ -1799,7 +1799,10 @@ const ZOHAR_PARSHIOT = [
   ["Beha'alotcha", "בהעלותך"], ["Sh'lach", "שלח לך"], ["Korach", "קרח"], ["Chukat", "חקת"], ["Balak", "בלק"],
   ["Pinchas", "פנחס"], ["Matot", "מטות"], ["Vaetchanan", "ואתחנן"], ["Eikev", "עקב"], ["Shoftim", "שופטים"],
   ["Ki Teitzei", "כי תצא"], ["Vayeilech", "וילך"], ["Ha'Azinu", "האזינו"], ["Idra Zuta", "אדרא זוטא"],
+  /* השמטות (צ'אט 27): בספריא הן "תוספות" של ספר הזוהר — לשון הזוהר המנוקדת בלבד; "הסולם על הזוהר" אינו כולל אותן */
+  ["Addenda, Volume I", "השמטות · כרך א (בלי סולם)"], ["Addenda, Volume II", "השמטות · כרך ב (בלי סולם)"], ["Addenda, Volume III", "השמטות · כרך ג (בלי סולם)"],
 ];
+const isZoharAddenda = (en) => /^Addenda/.test(en || "");
 const ZOHAR_DEFAULT_PARASHA = 13; // ויחי
 /* אות → מספר (קמג → 143). מקבל גם ספרות, גרשיים וגרש. 0 = לא תקין */
 function gematria(s) {
@@ -1843,6 +1846,29 @@ async function fetchZoharArticle(en, he, from, to, name, onProgress) {
     if (!r.ok) throw new Error(`ספריא השיבה ${r.status}`);
     return r.json();
   };
+  if (isZoharAddenda(en)) {
+    /* השמטות: האות היא המספר הרץ של הקטעים בכרך (סימן א = אות א, סימן ב = אותיות ב–ה…). אין סולם — רק לשון הזוהר. */
+    onProgress?.("📜 מושך את לשון הזוהר…");
+    const sh = await j(`${SEFARIA}/shape/Zohar,_${enc}`);
+    const lens = (Array.isArray(sh) ? sh[0] : sh)?.chapters || [];
+    const pos = [];
+    lens.forEach((len, si) => { for (let k = 0; k < len; k++) pos.push([si + 1, k]); });
+    if (!pos.length) throw new Error("לא נמצאה חלוקת ההשמטות בספריא");
+    if (to > pos.length) throw new Error(`בכרך הזה יש ${pos.length} אותיות בלבד`);
+    const need = [...new Set(pos.slice(from - 1, to).map(([si]) => si))];
+    const secs = {};
+    await Promise.all(need.map(async (si) => {
+      const r = await j(`${SEFARIA}/v3/texts/Zohar,_${enc}.${si}?version=hebrew`);
+      const t = r?.versions?.[0]?.text;
+      secs[si] = Array.isArray(t) ? t.flat(3) : [t];
+    }));
+    const parts = [];
+    for (let n = from; n <= to; n++) {
+      const [si, k] = pos[n - 1];
+      parts.push(`${hebNum(n)}) ${stripTags(secs[si]?.[k]) || "(לשון הזוהר לאות הזאת לא נמצאה בספריא)"}`);
+    }
+    return `${name}\nזוהר ${he.replace(/ \(.*\)$/, "")} · אותיות ${hebNum(from)}–${hebNum(to)} · מספריא\n\n${parts.join("\n\n")}`;
+  }
   onProgress?.("📜 מושך את הסולם מספריא…");
   const sul = await j(`${SEFARIA}/v3/texts/Sulam_on_Zohar,_${enc}.${from}${to > from ? "-" + to : ""}`);
   let st = sul?.versions?.[0]?.text;
@@ -4242,7 +4268,7 @@ export default function LearningTV() {
     setFileBusy("📜 פונה לספריא…");
     try {
       const text = await fetchZoharArticle(en, he, from, to, name, setFileBusy);
-      const title = `זוהר ${he} עם הסולם`;
+      const title = isZoharAddenda(en) ? `זוהר ${he.replace(/ \(.*\)$/, "")}` : `זוהר ${he} עם הסולם`;
       const chapter = { title: name, text };
       const existing = index.find((b) => b.title === title);
       const prev = existing ? await loadBook(existing.id) : null;
