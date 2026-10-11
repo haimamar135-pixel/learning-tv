@@ -2515,8 +2515,9 @@ const voiceLocale = (l) => VOICE_LOCALE[l] || "he-IL";
    מעדיפים קול קריינות מוכר, אחריו כל קול רגיל, ורק בלית ברירה קול מהרשימה הפסולה. */
 const VOICE_GOOD = { en: ["samantha", "ava", "allison", "susan", "alex", "tom", "daniel", "karen", "moira", "google us english", "google uk english", "microsoft"], fr: ["thomas", "amélie", "amelie", "audrey", "aurélie", "google", "microsoft"], es: ["mónica", "monica", "paulina", "jorge", "marisol", "google", "microsoft"], de: ["anna", "petra", "markus", "google", "microsoft"], ru: ["milena", "yuri", "katya", "google", "microsoft"], ar: ["maged", "majed", "laila", "tarik", "google", "microsoft"] };
 const VOICE_BAD = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|pipe organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|princess|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b/i;
-function pickVoice(synth, l) {
-  if (!l || l === "he") return pickHebrewVoice(synth);
+/* כל הקולות של שפה, מהמתאים ביותר; הלומד יכול לבחור קול בחלונית ההקראה, והבחירה נשמרת לכל שפה */
+function rankVoices(synth, l) {
+  l = l || "he";
   const want = voiceLocale(l).toLowerCase();
   const norm = (v) => v.lang.toLowerCase().replace("_", "-");
   const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && norm(v).startsWith(l));
@@ -2526,7 +2527,12 @@ function pickVoice(synth, l) {
     const gi = good.findIndex((g) => name.includes(g));
     return (VOICE_BAD.test(name) ? -100 : 0) + (gi >= 0 ? 40 - gi : 0) + (/premium/i.test(id) ? 12 : /enhanced/i.test(id) ? 8 : /compact/i.test(v.voiceURI) ? -2 : 0) + (norm(v) === want ? 4 : 0) + (v.localService ? 1 : 0);
   };
-  return vs.sort((x, y) => score(y) - score(x))[0] || null;
+  return vs.sort((x, y) => score(y) - score(x));
+}
+const savedVoice = (l) => { try { return localStorage.getItem("lomedtv-voice-" + (l || "he")) || ""; } catch { return ""; } };
+function pickVoice(synth, l) {
+  const vs = rankVoices(synth, l), sv = savedVoice(l);
+  return (sv && vs.find((v) => v.voiceURI === sv)) || vs[0] || null;
 }
 /* השאלה שהלומד נושא נאמרת בשפה שבה נכתבה; המסגרת העברית ("השאלה שאתה נושא…") רק כשגם הטקסט עברי */
 function spokenQuestion(question, lang) {
@@ -2557,6 +2563,15 @@ function buildChunks(queue) {
 function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta, onTtsMeta, glossOn, onGloss, glossBusy, lang = "he" }) {
   /* items: [{i, kind, text}] — המשפטים של הפרק בסדר הדף; kind = "zohar" | "sulam" | "" */
   const hasSulam = items.some((x) => x.kind === "sulam");
+  /* בחירת קול הדפדפן: הרשימה מתמלאת כשהדפדפן מסיים לטעון קולות (voiceschanged) */
+  const [voices, setVoices] = useState([]);
+  const [voiceUri, setVoiceUri] = useState(() => savedVoice(lang));
+  useEffect(() => {
+    const synth = window.speechSynthesis; if (!synth) return;
+    const load = () => setVoices(rankVoices(synth, lang).map((v) => ({ uri: v.voiceURI, name: v.name, loc: v.lang })));
+    load(); synth.addEventListener?.("voiceschanged", load);
+    return () => synth.removeEventListener?.("voiceschanged", load);
+  }, [lang]);
   const [mode, setMode] = useState("all");
   const [rate, setRate] = useState(() => { try { return +localStorage.getItem("lomedtv-tts-rate") || 1; } catch { return 1; } });
   const [state, setState] = useState("idle"); // idle | playing | paused
@@ -2737,6 +2752,14 @@ function Reader({ items, question, startAt, onPos, onClose, store, uid, ttsMeta,
             <button className={"pill " + (hq ? "on" : "")} onClick={() => { setHqErr(""); setHq((v) => !v); }} title={tx("קול אנושי מ-ElevenLabs — מופק פעם אחת ונשמר")}>{tx("🎙 קול איכותי")} {hq ? tx("· דולק") : ""}</button>
             <span className="reader-note">{hq ? (uid ? tx("{n} חלקים · מופק פעם אחת ונשמר במכשיר ובענן", { n: chunks.length }) : tx("להיכנס לחשבון (☁) כדי להפיק")) : tx("קול הדפדפן (חינם)")}</span>
           </div>
+          {!hq && voices.length > 1 && (
+            <div className="reader-row">
+              <label className="reader-note">{tx("קול:")} <select className="scan-mode-select" value={voices.some((v) => v.uri === voiceUri) ? voiceUri : voices[0].uri} aria-label={tx("קול:")}
+                onChange={(e) => { const u = e.target.value; setVoiceUri(u); try { localStorage.setItem("lomedtv-voice-" + lang, u); } catch {} if (stateRef.current === "playing") { uRef.current = null; clearInterval(timerRef.current); try { window.speechSynthesis.cancel(); } catch {} setTimeout(() => speakAt(Math.max(0, posRef.current)), 120); } }}>
+                {voices.map((v) => <option key={v.uri} value={v.uri}>{v.name} · {v.loc}</option>)}
+              </select></label>
+            </div>
+          )}
           {hqBusy && <div className="reader-note busy-line">{hqBusy}</div>}
           {hqErr && <div className="err">{hqErr}</div>}
           <div className="reader-row" style={lang === "he" ? undefined : { display: "none" }}>
