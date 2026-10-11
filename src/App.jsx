@@ -2514,7 +2514,7 @@ const voiceLocale = (l) => VOICE_LOCALE[l] || "he-IL";
 /* במק יש עשרות קולות לכל שפה, ובהם קולות "בדיחה" (Albert, Bells, Zarvox…) וקולות חלשים (Eddy, Flo…):
    מעדיפים קול קריינות מוכר, אחריו כל קול רגיל, ורק בלית ברירה קול מהרשימה הפסולה. */
 const VOICE_GOOD = { en: ["samantha", "ava", "allison", "susan", "alex", "tom", "daniel", "karen", "moira", "google us english", "google uk english", "microsoft"], fr: ["thomas", "amélie", "amelie", "audrey", "aurélie", "google", "microsoft"], es: ["mónica", "monica", "paulina", "jorge", "marisol", "google", "microsoft"], de: ["anna", "petra", "markus", "google", "microsoft"], ru: ["milena", "yuri", "katya", "google", "microsoft"], ar: ["maged", "majed", "laila", "tarik", "google", "microsoft"] };
-const VOICE_BAD = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|pipe organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|princess|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b/i;
+const VOICE_BAD = /(?:^|[^a-z])(albert|bad news|badnews|goodnews|pipeorgan|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|pipe organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|princess|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)(?![a-z])/i;
 /* כל הקולות של שפה, מהמתאים ביותר; הלומד יכול לבחור קול בחלונית ההקראה, והבחירה נשמרת לכל שפה */
 function rankVoices(synth, l) {
   l = l || "he";
@@ -2523,7 +2523,8 @@ function rankVoices(synth, l) {
   const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && norm(v).startsWith(l));
   const good = VOICE_GOOD[l] || [];
   const score = (v) => {
-    const name = (v.name || "").toLowerCase(), id = v.voiceURI + " " + v.name;
+    /* במכשיר שהמערכת שלו לא באנגלית שמות הקולות מתורגמים ("סמנתה", "אלברט") — לכן בודקים גם את המזהה (voiceURI), שנשאר באנגלית */
+    const id = v.voiceURI + " " + v.name, name = id.toLowerCase();
     const gi = good.findIndex((g) => name.includes(g));
     return (VOICE_BAD.test(name) ? -100 : 0) + (gi >= 0 ? 40 - gi : 0) + (/premium/i.test(id) ? 12 : /enhanced/i.test(id) ? 8 : /compact/i.test(v.voiceURI) ? -2 : 0) + (norm(v) === want ? 4 : 0) + (v.localService ? 1 : 0);
   };
