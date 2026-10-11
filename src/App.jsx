@@ -222,6 +222,14 @@ const PROMPTS = {
   cards: (t) =>
     `קרא את הטקסט הבא וצור כרטיסיות זיכרון. החזר JSON בלבד במבנה: {"cards":[{"front":"שאלה או מושג","back":"תשובה או הגדרה"}]}. בין 6 ל-10 כרטיסיות. הטקסט:\n${t}`,
 };
+/* שלב 2 (צ'אט 26): הכלים עונים בשפת הטקסט. הפרומפטים כתובים בעברית; כשהטקסט אינו עברי
+   מוסיפים בראשם הוראה לכתוב את כל התוכן בשפת הטקסט, בלי לגעת במבנה ה-JSON. */
+const TEXT_LANG_NAMES = { en: "English", ar: "Arabic", fr: "French", es: "Spanish", ru: "Russian", de: "German" };
+function langNote(t) {
+  const n = TEXT_LANG_NAMES[textLang(t)];
+  return n ? `IMPORTANT: the text below is written in ${n}. Write ALL the content of your answer (summaries, concepts, definitions, rules, labels, questions, answer options, explanations, cards) in ${n} — not in Hebrew — even though these instructions are in Hebrew. Keep the JSON structure and the key names exactly as specified.\n\n` : "";
+}
+for (const k of Object.keys(PROMPTS)) { const f = PROMPTS[k]; PROMPTS[k] = (t, ...rest) => langNote(t) + f(t, ...rest); }
  
 /* ─── השער: כל קריאה שעולה כסף נושאת את הטוקן של המשתמש המחובר ───
    הפונקציות בנטליפיי (claude, transcribe) דוחות בקשה בלי טוקן (401) ובקשה
