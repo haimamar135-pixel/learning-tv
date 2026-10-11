@@ -2511,12 +2511,22 @@ function speakable(src) {
 /* שלב 2: ההקראה בקול של שפת הטקסט */
 const VOICE_LOCALE = { he: "he-IL", en: "en-US", ar: "ar-SA", fr: "fr-FR", es: "es-ES", ru: "ru-RU", de: "de-DE" };
 const voiceLocale = (l) => VOICE_LOCALE[l] || "he-IL";
+/* במק יש עשרות קולות לכל שפה, ובהם קולות "בדיחה" (Albert, Bells, Zarvox…) וקולות חלשים (Eddy, Flo…):
+   מעדיפים קול קריינות מוכר, אחריו כל קול רגיל, ורק בלית ברירה קול מהרשימה הפסולה. */
+const VOICE_GOOD = { en: ["samantha", "ava", "allison", "susan", "alex", "tom", "daniel", "karen", "moira", "google us english", "google uk english", "microsoft"], fr: ["thomas", "amélie", "amelie", "audrey", "aurélie", "google", "microsoft"], es: ["mónica", "monica", "paulina", "jorge", "marisol", "google", "microsoft"], de: ["anna", "petra", "markus", "google", "microsoft"], ru: ["milena", "yuri", "katya", "google", "microsoft"], ar: ["maged", "majed", "laila", "tarik", "google", "microsoft"] };
+const VOICE_BAD = /\b(albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|good news|hysterical|jester|organ|pipe organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|kathy|ralph|princess|eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley)\b/i;
 function pickVoice(synth, l) {
   if (!l || l === "he") return pickHebrewVoice(synth);
   const want = voiceLocale(l).toLowerCase();
-  const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith(l));
-  const score = (v) => (/premium/i.test(v.voiceURI + v.name) ? 6 : /enhanced/i.test(v.voiceURI + v.name) ? 4 : /compact/i.test(v.voiceURI) ? 0 : 2) + (v.lang.toLowerCase().replace("_", "-") === want ? 1 : 0);
-  return vs.sort((a, b) => score(b) - score(a))[0] || null;
+  const norm = (v) => v.lang.toLowerCase().replace("_", "-");
+  const vs = (synth?.getVoices?.() || []).filter((v) => v.lang && norm(v).startsWith(l));
+  const good = VOICE_GOOD[l] || [];
+  const score = (v) => {
+    const name = (v.name || "").toLowerCase(), id = v.voiceURI + " " + v.name;
+    const gi = good.findIndex((g) => name.includes(g));
+    return (VOICE_BAD.test(name) ? -100 : 0) + (gi >= 0 ? 40 - gi : 0) + (/premium/i.test(id) ? 12 : /enhanced/i.test(id) ? 8 : /compact/i.test(v.voiceURI) ? -2 : 0) + (norm(v) === want ? 4 : 0) + (v.localService ? 1 : 0);
+  };
+  return vs.sort((x, y) => score(y) - score(x))[0] || null;
 }
 /* השאלה שהלומד נושא נאמרת בשפה שבה נכתבה; המסגרת העברית ("השאלה שאתה נושא…") רק כשגם הטקסט עברי */
 function spokenQuestion(question, lang) {
