@@ -353,6 +353,8 @@ function YouTubeBox({ yt }) {
    הפרק מתורגם משפט מול משפט: משפט 7 במקור הוא משפט 7 בתרגום. זה הבסיס ללימוד משותף
    בין שתי שפות (מרקר על משפט עובר לפי המספר שלו). התוצר נשמר כמו כל ערוץ, במפתח
    "פרק:trans:שפה" — תרגום לכל שפת יעד בנפרד. המקור נשאר לצד התרגום: הוא הקובע. */
+const PAY_MODES = ["host", "each", "guest"];
+const savedPay = () => { try { const v = localStorage.getItem("lomedtv-share-pay"); return PAY_MODES.includes(v) ? v : "host"; } catch { return "host"; } };
 const LANG_EN_NAME = { he: "Hebrew", en: "English", ar: "Arabic", fr: "French", es: "Spanish", ru: "Russian", de: "German" };
 const LANG_SCRIPT = { he: "he", ar: "ar", ru: "cy" };
 function scriptOf(t) {
@@ -3896,7 +3898,7 @@ export default function LearningTV() {
     try { localStorage.setItem("lomedtv-share-active", JSON.stringify({ c: row.code, t: Date.now() })); } catch {}
     setShareLost(false); setShowOpening(false); setShowCloud(false); setGuestAsk(false);
     if (!isHost) { setShareWatch(true); setShareVideo(true); }
-    setShare({ id: row.id, code: row.code, hostId: row.host, hostName: row.host_name || "", holder: row.holder || row.host, follow: !isHost, bookId: b.id });
+    setShare({ id: row.id, code: row.code, hostId: row.host, hostName: row.host_name || "", holder: row.holder || row.host, follow: !isHost, bookId: b.id, pay: isHost ? savedPay() : "host" });
     setPeers({});
     setBook(b);
     setChIdx(0);
@@ -4038,7 +4040,11 @@ export default function LearningTV() {
       }
     });
     ch.on("broadcast", { event: "holder" }, ({ payload }) => setShare((sh) => sh ? { ...sh, holder: payload.uid, follow: payload.uid !== myUid } : sh));
-    ch.on("broadcast", { event: "hello" }, () => { const b = bookRef.current; shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} }); });
+    ch.on("broadcast", { event: "hello" }, () => { const b = bookRef.current; shareSend("layer", { marks: b?.marks || {}, notes: b?.notes || {} }); const sh = shareRef.current; if (sh && sh.hostId === myUid) shareSend("pay", { mode: sh.pay || "host" }); });
+    /* 🌐 הדף הדו-לשוני: מי משלם על התרגום (קובע היוזם בלבד), בקשת תרגום, והתרגום עצמו בחלקים */
+    ch.on("broadcast", { event: "pay" }, ({ payload }) => setShare((sh) => sh && payload.from === sh.hostId && PAY_MODES.includes(payload.mode) ? { ...sh, pay: payload.mode } : sh));
+    ch.on("broadcast", { event: "tr-req" }, ({ payload }) => biRef.current.onReq?.(payload));
+    ch.on("broadcast", { event: "tr" }, ({ payload }) => biRef.current.onTr?.(payload));
     ch.on("broadcast", { event: "closed" }, () => { try { localStorage.removeItem("lomedtv-share-active"); } catch {} setShare(null); setPeers({}); setShareVideo(false); setShareWatch(false); setShareMsg(tx("המארח סיים את הלימוד המשותף.")); });
     let gone = false;
     ch.subscribe(async (status) => {
@@ -4062,6 +4068,91 @@ export default function LearningTV() {
   }, [share?.id, myUid, shareEpoch]);
   const bookRef = useRef(null); useEffect(() => { bookRef.current = book; }, [book]);
   const chIdxRef = useRef(0); useEffect(() => { chIdxRef.current = chIdx; }, [chIdx]);
+
+  /* ── 🌐 הדף הדו-לשוני (מדרגה 1ב, צ'אט 26) ──
+     כל לומד רואה את הפרק גם בשפתו: מתחת לכל פסקת מקור — הפסקה המתורגמת, משפט מול משפט.
+     הסימונים, ההערות והמיקום נשארים על משפטי המקור (אותו מספר משפט אצל כולם), ולכן עוברים בין שפות בלי שינוי.
+     התרגום הוא אותו תוצר של ערוץ 09 (results["פרק:trans:שפה"]) — מופק פעם אחת ונשמר.
+     שתי מערכות נפרדות: מחזיק הדף (share.holder, עובר ב"מסור את הדף") — ומי משלם על התרגום (share.pay, רק היוזם קובע):
+       host — היוזם מפיק לכולם · each — כל אחד מפיק לעצמו · guest — המתארח מפיק.
+     תרגום שכבר קיים אצל היוזם נשלח לכל מבקש בלי עלות. */
+  const [biMode, setBiMode] = useState(() => { try { const v = localStorage.getItem("lomedtv-bi"); return v === "both" || v === "only" ? v : "off"; } catch { return "off"; } });
+  /* שפת הדף שלי: כל עוד הלומד לא בחר אחרת — שפת הממשק */
+  const [biSel, setBiLang] = useState(() => { try { const v = localStorage.getItem("lomedtv-bi-lang"); return LANGS.some(([id]) => id === v) ? v : null; } catch { return null; } });
+  const biLang = biSel || getLang();
+  const [biMsg, setBiMsg] = useState("");
+  const biBusy = useRef({}), biBuf = useRef({}), biRef = useRef({});
+  useEffect(() => { try { localStorage.setItem("lomedtv-bi", biMode); if (biSel) localStorage.setItem("lomedtv-bi-lang", biSel); } catch {} }, [biMode, biSel]);
+  const setPay = (mode) => { if (!share || share.hostId !== myUid || !PAY_MODES.includes(mode)) return; try { localStorage.setItem("lomedtv-share-pay", mode); } catch {} setShare((sh) => sh ? { ...sh, pay: mode } : sh); shareSend("pay", { mode }); };
+  const isAnonMe = () => !cloudRef.current || !!cloudRef.current.is_anonymous;
+  const produceTrans = async (ci, lang) => {
+    const k = ci + ":" + lang;
+    if (biBusy.current[k]) return null;
+    biBusy.current[k] = Date.now();
+    const b0 = bookRef.current;
+    try {
+      if (!b0?.chapters?.[ci]) return null;
+      setBiMsg(tx("🌐 מתרגם את הפרק…"));
+      const t = await translateSentences(chapterSentences(b0.chapters[ci].text).sentences, lang);
+      const b = bookRef.current;
+      if (b && b.id === b0.id && !b.results?.[key(ci, "trans:" + lang)]) await persist({ ...b, results: { ...b.results, [key(ci, "trans:" + lang)]: { lang, t } } }, { k: "output", ci, ch: "trans:" + lang });
+      setBiMsg("");
+      return t;
+    } catch (e) { setBiMsg("🌐 " + (e?.message || tx("התרגום נכשל. נסה שוב."))); return null; }
+    finally { delete biBusy.current[k]; }
+  };
+  const sendTrans = async (ci, lang, t) => {
+    for (let at = 0; at < t.length; at += 20) { shareSend("tr", { ci, lang, n: t.length, at, t: t.slice(at, at + 20) }); await new Promise((r) => setTimeout(r, 150)); }
+  };
+  const acquireTrans = (ci, lang) => {
+    const k = ci + ":" + lang;
+    if (biBusy.current[k]) return;
+    const sh = shareRef.current, anon = isAnonMe(), mode = sh?.pay || "host";
+    const mine = !sh || (mode === "host" ? sh.hostId === myUid : mode === "each" ? true : sh.hostId !== myUid);
+    if (mine && !anon) { produceTrans(ci, lang); return; }
+    if (!sh) { setBiMsg("🌐 " + loginMsg()); return; }
+    biBusy.current[k] = Date.now();
+    setBiMsg(tx("🌐 מבקש את התרגום…"));
+    shareSend("tr-req", { ci, lang });
+    setTimeout(() => {
+      if (!biBusy.current[k]) return;
+      delete biBusy.current[k]; delete biBuf.current[k];
+      if (bookRef.current?.results?.[key(ci, "trans:" + lang)]) return;
+      setBiMsg(anon && mode !== "host" ? tx("🌐 בלימוד הזה כל משתתף מתרגם על חשבונו — להיכנס לחשבון (☁) כדי לתרגם.") : tx("🌐 התרגום לא הגיע — מי שמפיק אותו צריך להיות מחובר ללימוד."));
+    }, 45000);
+  };
+  biRef.current.onReq = async ({ ci, lang }) => {
+    const sh = shareRef.current, b = bookRef.current;
+    if (!sh || !b || b.id !== sh.bookId || !Number.isInteger(ci) || !LANGS.some(([id]) => id === lang)) return;
+    const isHost = sh.hostId === myUid, anon = isAnonMe(), mode = sh.pay || "host";
+    const cached = b.results?.[key(ci, "trans:" + lang)]?.t;
+    if (cached) { if (isHost) sendTrans(ci, lang, cached); return; }
+    const producer = !anon && (mode === "host" ? isHost : mode === "guest" ? !isHost : false);
+    if (!producer) return;
+    const t = await produceTrans(ci, lang);
+    if (t) sendTrans(ci, lang, t);
+  };
+  biRef.current.onTr = async ({ ci, lang, n, at, t }) => {
+    const sh = shareRef.current, b = bookRef.current;
+    if (!sh || !b || b.id !== sh.bookId || !Array.isArray(t) || !(n > 0) || n > 5000) return;
+    const k = ci + ":" + lang, kk = key(ci, "trans:" + lang);
+    if (b.results?.[kk]) return;
+    const buf = biBuf.current[k] && biBuf.current[k].n === n ? biBuf.current[k] : (biBuf.current[k] = { n, arr: new Array(n).fill(null) });
+    t.forEach((x, j) => { if (at + j < n) buf.arr[at + j] = String(x); });
+    if (buf.arr.some((x) => x === null)) return;
+    delete biBuf.current[k]; delete biBusy.current[k];
+    if (chapterSentences(b.chapters?.[ci]?.text || "").sentences.length !== n) { setBiMsg(tx("🌐 התרגום שהגיע לא תואם לנוסח הפרק שאצלך.")); return; }
+    await persist({ ...b, results: { ...b.results, [kk]: { lang, t: buf.arr } } }, { k: "output", ci, ch: "trans:" + lang });
+    setBiMsg("");
+  };
+  const biWanted = biMode !== "off" && !!book && view === "tv" && channel === "read" && biLang !== bookLang;
+  const biHave = !!book?.results?.[key(chIdx, "trans:" + biLang)];
+  useEffect(() => {
+    if (!biWanted || biHave) return;
+    const t = setTimeout(() => acquireTrans(chIdx, biLang), 700);
+    return () => clearTimeout(t);
+  }, [biWanted, biHave, book?.id, chIdx, biLang, share?.id, share?.pay]);
+  useEffect(() => { setBiMsg(""); }, [chIdx, biLang, book?.id, biMode]);
   /* הסימונים וההערות שלי יוצאים לחבר בכל שינוי (עם השהיה קצרה) */
   useEffect(() => {
     if (!share || !book || book.id !== share.bookId) return;
@@ -5817,12 +5908,28 @@ export default function LearningTV() {
                       glossOn={glossOn} onGloss={setGlossOn} glossBusy={glossBusy}
                       store={`${book.id}:${chIdx}`} uid={cloudUser?.id} ttsMeta={book.flex?.tts || {}} onTtsMeta={(k, m) => { const b = bookRef.current; if (b) persist({ ...b, flex: { ...(b.flex || {}), tts: { ...(b.flex?.tts || {}), [k]: m } } }); }} />;
                   })()}
-                  <div className="read-body read-sents" dir={textDir} onMouseUp={onReadMouseUp}>
+                  {(biMode !== "off" || biLang !== bookLang || share) && (
+                    <div className="bi-row" dir={langDir()}>
+                      <span className="bi-lbl">{tx("🌐 הדף בשפה שלי:")}</span>
+                      <select className="scan-mode-select" value={biLang} onChange={(e) => setBiLang(e.target.value)} aria-label={tx("🌐 הדף בשפה שלי:")}>{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
+                      {[["off", "כבוי"], ["both", "לצד המקור"], ["only", "רק התרגום"]].map(([id, label]) => <button key={id} className={"mark-btn" + (biMode === id ? " on" : "")} onClick={() => setBiMode(id)}>{tx(label)}</button>)}
+                      {share && (share.hostId === myUid
+                        ? <label className="bi-pay">{tx("התרגום על חשבון:")} <select className="scan-mode-select" value={share.pay || "host"} onChange={(e) => setPay(e.target.value)}>
+                            <option value="host">{tx("שלי (היוזם)")}</option><option value="each">{tx("כל אחד לעצמו")}</option><option value="guest">{tx("המתארח")}</option>
+                          </select></label>
+                        : <span className="bi-pay">{tx("התרגום על חשבון:")} <b>{tx((share.pay || "host") === "host" ? "היוזם" : share.pay === "each" ? "כל אחד לעצמו" : "המתארח")}</b></span>)}
+                      {biMode !== "off" && biLang === bookLang && <span className="bi-msg">{tx("הספר כבר כתוב בשפה הזאת.")}</span>}
+                      {biMsg && biWanted && !biHave && <span className="bi-msg">{biMsg}</span>}
+                    </div>
+                  )}
+                  <div className={"read-body read-sents" + (biWanted && biHave && biMode === "only" ? " bi-only" : "")} dir={textDir} onMouseUp={onReadMouseUp}>
                     {(() => {
                       const [rs, re] = chapterRanges[chIdx] || [0, 0];
                       const chParas = paraGroups.filter(([start]) => start >= rs && start < re);
                       if (!chParas.length) return cur.text; // ביטחון: אם אין משפטים — הטקסט כמו שהוא
-                      return chParas.map(([start, count], pi) => (
+                      const biT = biWanted ? book.results?.[key(chIdx, "trans:" + biLang)]?.t : null;
+                      const biOk = Array.isArray(biT) && biT.length === re - rs;
+                      return chParas.map(([start, count], pi) => [
                         <p className={"scroll-para" + paraKind(sentences, chParas, pi)} key={pi}>
                           {sentences.slice(start, start + count).map((s, j) => {
                             const i = start + j;
@@ -5859,8 +5966,28 @@ export default function LearningTV() {
                               </span>
                             );
                           })}
-                        </p>
-                      ));
+                        </p>,
+                        biOk && (
+                          <p className="scroll-para bi-para" key={"t" + pi} dir={biLang === "he" || biLang === "ar" ? "rtl" : "ltr"} lang={biLang}>
+                            {Array.from({ length: count }, (_, j) => start + j).map((i) => {
+                              const mk = book.marks?.[i], pl = peerLayer(i);
+                              const inRange = rangeIdx && i >= rangeIdx[0] && i <= rangeIdx[1];
+                              const mine = mk && (mk.hl || mk.b || mk.u || (mk.w && mk.w.length));
+                              return (
+                                <span key={i} data-tsi={i}
+                                  className={"bi-sent " + selCls(i, inRange) + (mine ? "bi-mine " + (mk.hl ? "hl-" + mk.hl + " " : "") : "") + (book.notes?.[i] ? "has-note " : "") + (readPos && readPos.i === i ? "kara-now " : "") + (pl ? pl.cls : "")}
+                                  style={pl ? { "--peer": pl.color } : undefined} title={pl?.title || undefined}
+                                  onClick={() => (readerOn ? setReaderStart({ i, t: Date.now() }) : onReadSentClick(i))}>
+                                  {pl?.here && <span className="peer-cursor" style={{ background: pl.here.color }}>{pl.here.name}</span>}
+                                  {biT[i - rs]}
+                                  {pl?.note && <sup className="note-pin peer-note" style={{ color: pl.note.color }} title={pl.note.name + ": " + pl.note.t}>💬</sup>}
+                                  {book.notes?.[i] && <sup className="note-pin" title={noteVal(book.notes[i])} onClick={(e) => { e.stopPropagation(); editNote(i); }}>[{noteNum(i)}]</sup>}{" "}
+                                </span>
+                              );
+                            })}
+                          </p>
+                        ),
+                      ]);
                     })()}
                   </div>
                   <p className="read-hint">{tx("אחרי שקראת — בחר ערוץ למטה כדי לקבל סיכום, מבחן, כרטיסיות ועוד. הסימונים וההערות נשמרים ומופיעים גם במגילה.")}</p>
@@ -6880,6 +7007,20 @@ const css = `
 .trans-x{margin-inline-start:auto;border:none;background:none;cursor:pointer;color:#4a6a95;font-size:1rem}
 .read-title{font-size:1.25rem;font-weight:800;color:#232323;border-bottom:2px solid var(--amber);padding-bottom:10px}
 .read-body{line-height:2.05;font-size:1.08rem;white-space:pre-wrap;color:#232323}
+.bi-row{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:4px 0 10px;padding:8px 10px;border:1px dashed #d9d2bd;border-radius:10px;font-size:.85rem;color:#6b6450}
+.bi-row .mark-btn.on{background:#1b3a6b;color:#fff;border-color:#1b3a6b}
+.bi-lbl{font-weight:700}
+.bi-pay{margin-inline-start:auto;display:inline-flex;gap:6px;align-items:center}
+.bi-msg{flex-basis:100%;color:#8a5a12}
+.read-sents .scroll-para.bi-para{margin:-8px 0 16px;padding:6px 10px;background:#eef2f9;border-inline-start:3px solid #7d93bd;color:#26324a;font-size:1em}
+.bi-sent{cursor:pointer;border-radius:4px}
+.bi-sent.bi-mine{background:#fff3b0}
+.bi-sent.bi-mine.hl-g{background:#cdeccd}.bi-sent.bi-mine.hl-p{background:#f6d3e3}
+.bi-sent.peer-hl{box-shadow:inset 0 -2px 0 var(--peer,#4aa3ff)}
+.bi-sent.peer-here{outline:2px dashed var(--peer,#4aa3ff);outline-offset:2px}
+.bi-sent.kara-now{background:#ffe9a8}
+.read-sents.bi-only .scroll-para:not(.bi-para){height:0;overflow:hidden;padding:0;margin:0;opacity:0}
+.read-sents.bi-only .scroll-para.bi-para{margin:0 0 14px;background:none;border:0;padding:0;color:#232323}
 .read-hint{margin-top:8px;color:#8a8467;font-size:.9rem;line-height:1.6;border-top:1px dashed #d9d2bd;padding-top:14px}
  
 /* הקראה */
