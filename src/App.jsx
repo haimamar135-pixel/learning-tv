@@ -817,6 +817,13 @@ function imgToJpegBase64(img, maxSide = 1400, crop) {
 }
 
 const SCAN_MODES = {
+  /* צ'אט 27: מאמר זוהר מכמה צילומים — כל עמוד נקרא בשכבות מתויגות, והקוד (לא המנוע) מרכיב: אות ← ארמית ← הפירוש שלה */
+  zohar: {
+    label: "מאמר זוהר — כל אות ומתחתיה הפירוש (כמה עמודים יחד)",
+    assemble: true,
+    prompt:
+      "לפניך צילום של חלק מעמוד זוהר עם פירוש. מבנה העמוד: למעלה גוף הזוהר בארמית מנוקדת, באותיות גדולות, מחולק לאותיות מסומנות — א) ב) ג) וכן הלאה. מתחתיו לפעמים הערות קטנות ('מסורת הזהר', 'חלופי גרסאות'). למטה הפירוש העברי ('הסולם' או 'מעלות הסולם') בשני טורים: קוראים קודם את הטור הימני כולו, ואחריו את השמאלי. תמלל מילה במילה — בלי להוסיף, בלי לקצר ובלי לתקן — במבנה הזה בדיוק:\n[מקור]\nגוף הזוהר בארמית, עם הניקוד. כל אות (למשל 'ג)') פותחת שורה חדשה, והטקסט שלה נכתב ברצף בשורה אחת. טקסט ארמי שמופיע לפני סימון האות הראשון הוא המשך של אות קודמת — כתוב אותו בשורה הראשונה, בלי סימון.\n[פירוש ימין]\nהטור הימני של הפירוש, מלמעלה למטה. כל פסקה בשורה אחת רצופה, בלי שבירות שורה בתוכה. פסקה שנפתחת בסימון אות (למשל 'ג) וההוא טהירו וכו'':') — הסימון נשאר בראש השורה.\n[פירוש שמאל]\nהטור השמאלי של הפירוש, באותו אופן.\nשכבה שאינה נראית בתמונה — השמט את הכותרת שלה. אם הפירוש בטור אחד — כתוב אותו תחת [פירוש ימין]. דלג על: כותרת העמוד ומספר העמוד, שמות המאמרים שבאמצע השורה, 'מסורת הזהר', 'חלופי גרסאות', כותרת הפירוש, ההפניה הקטנה שבסוגריים בתחתית הטור (כגון דפו\"י), והמילה הבודדת שבתחתית העמוד (שומר הדף). התעלם מסימוני מרקר וכתב יד. אם מילה אינה ברורה — כתוב אותה כפי שהיא נראית.",
+  },
   merged: {
     label: "משולב — מקור ומתחתיו פירושו",
     prompt:
@@ -841,8 +848,113 @@ async function scanPiece(spec, b64, note, mt) {
   return String(text || "").trim();
 }
 
+/* ── הרכבת מאמר זוהר מקטעי סריקה (צ'אט 27) ── */
+const ZS_TAGS = { "מקור": "src", "פירוש ימין": "right", "פירוש שמאל": "left", "פירוש": "right" };
+function parseZoharPiece(t) {
+  const out = { src: "", right: "", left: "" };
+  let cur = null;
+  for (const raw of String(t || "").split("\n")) {
+    const line = raw.trim();
+    const m = line.match(/^\[\s*(מקור|פירוש ימין|פירוש שמאל|פירוש)\s*\]\s*(.*)$/);
+    if (m) { cur = ZS_TAGS[m[1]]; if (m[2]) out[cur] += m[2] + "\n"; continue; }
+    if (!line) continue;
+    if (cur === null) cur = "right";
+    out[cur] += line + "\n";
+  }
+  for (const k of Object.keys(out)) out[k] = out[k].trim();
+  return out;
+}
+const zsNorm = (w) => w.replace(/[\u0591-\u05C7]/g, "").replace(/[^\u05D0-\u05EA]/g, "");
+const zsOtLine = (t) => /^[א-ת]{1,4}['׳]?\)/.test((t || "").trim());
+/* חיבור שני קטעים חופפים: השורות שבפס החפיפה נקראו פעמיים — מוצאים את החפיפה (בסובלנות לשגיאת קריאה) ומסירים אותה מהקטע השני */
+function joinOverlap(a, b) {
+  a = (a || "").trim(); b = (b || "").trim();
+  if (!a) return b;
+  if (!b) return a;
+  const an = a.split(/\s+/).map(zsNorm);
+  const bw = b.split(/\s+/), bn = bw.map(zsNorm);
+  const cut = (n) => { let idx = 0, c = 0, m; const re = /\S+/g; while (c < n && (m = re.exec(b))) { c++; idx = re.lastIndex; } return b.slice(idx); };
+  /* ta: עד 3 מילים בסוף הקטע הראשון שנקראו אחרת בשני (קצה שורה) — העוגן נסוג מעט, והן נחשבות חלק מהחפיפה */
+  for (let ta = 0; ta <= 3; ta++) {
+    const end = an.length - ta;
+    const maxK = Math.min(70, end, bn.length);
+    for (let k = maxK; k >= 4; k--) {
+      for (let o = 0; o <= Math.min(10, bn.length - k); o++) {
+        if (an[end - k] !== bn[o] || an[end - 1] !== bn[o + k - 1]) continue;
+        let miss = 0;
+        for (let i = 1; i < k - 1 && miss <= k / 6; i++) if (an[end - k + i] !== bn[o + i]) miss++;
+        if (miss <= Math.floor(k / 6)) return a + cut(Math.min(bn.length, o + k + ta));
+      }
+    }
+  }
+  return a + (zsOtLine(b) ? "\n" : " ") + b;
+}
+const zsFlow = (a, b) => (!a ? b : !b ? a : a + (zsOtLine(b) ? "\n" : " ") + b);
+function zsSplitByOt(text) {
+  const segs = [];
+  let cur = { n: 0, label: "", body: [] }, last = 0;
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^([א-ת]{1,4})['׳]?\)\s*(.*)$/);
+    const g = m ? gematria(m[1]) : 0;
+    if (m && g && g === last) { if (m[2]) cur.body.push(m[2]); continue; } // אותה אות פעמיים (חפיפה) — המשך
+    if (m && g && (last === 0 || g === last + 1)) { segs.push(cur); cur = { n: g, label: m[1], body: m[2] ? [m[2]] : [] }; last = g; continue; }
+    cur.body.push(line);
+  }
+  segs.push(cur);
+  return segs.filter((x) => x.n || x.body.length);
+}
+/* pieces: לכל עמוד — מערך הקטעים שלו מלמעלה למטה. מחזיר טקסט במבנה של דף הזוהר: "אות) ארמית" ואחריה פסקאות "הסולם: …" */
+function assembleZohar(pages) {
+  let src = "", com = "";
+  for (const pieces of pages) {
+    const P = pieces.map(parseZoharPiece);
+    const lay = (k) => P.reduce((acc, x) => joinOverlap(acc, x[k]), "");
+    src = zsFlow(src, lay("src"));
+    com = zsFlow(zsFlow(com, lay("right")), lay("left"));
+  }
+  const S = zsSplitByOt(src), C = zsSplitByOt(com);
+  const ns = [...new Set([...S, ...C].map((x) => x.n))].sort((x, y) => x - y);
+  const out = [];
+  for (const n of ns) {
+    const sg = S.filter((x) => x.n === n), cg = C.filter((x) => x.n === n);
+    const ar = sg.map((x) => x.body.join(" ")).join(" ").trim();
+    const label = (sg[0] || cg[0])?.label || "";
+    if (n === 0) { if (ar) out.push(ar); }
+    else out.push(`${label}) ${ar}`.trim());
+    for (const c of cg) for (const para of c.body) out.push("הסולם: " + para);
+  }
+  return out.join("\n\n");
+}
+
 async function smartScanImages(files, mode, onProgress) {
   const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
+  if (spec.assemble) {
+    /* שלושה פסים חופפים לעמוד: פחות טקסט בכל קריאה (נגד קיטוע ו-timeout), והחפיפה מאפשרת לתפור בלי לאבד שורה */
+    const BANDS = [[0, 0.37], [0.32, 0.69], [0.64, 1]];
+    const NOTES = [
+      "\nזהו החלק העליון של העמוד בלבד. תמלל כל שורה שנראית במלואה, עד השורה השלמה האחרונה בכל טור.",
+      "\nזהו החלק האמצעי של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד השורה השלמה האחרונה.",
+      "\nזהו החלק התחתון של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד סוף הטור.",
+    ];
+    const pages = [];
+    for (let i = 0; i < files.length; i++) {
+      const img = await loadImageEl(files[i]);
+      const pieces = [];
+      for (let b = 0; b < BANDS.length; b++) {
+        onProgress?.(i + 1, files.length, ` · חלק ${b + 1}/3`);
+        let t;
+        try { t = await scanPiece(spec, imgToJpegBase64(img, 1600, BANDS[b]), NOTES[b], 2400); }
+        catch (e) { if (!isRetryableScanErr(e)) throw e; t = await scanPiece(spec, imgToJpegBase64(img, 1600, BANDS[b]), NOTES[b], 2400); }
+        pieces.push(t);
+      }
+      pages.push(pieces);
+    }
+    const text = assembleZohar(pages);
+    if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
+    return text;
+  }
   let out = "";
   for (let i = 0; i < files.length; i++) {
     onProgress?.(i + 1, files.length, "");
@@ -3205,7 +3317,7 @@ export default function LearningTV() {
   const [wordSel, setWordSel] = useState(null);   // סימון ברמת מילה: {i, s, e} — משפט + טווח תווים
   const [transRes, setTransRes] = useState(null); // "גע ותרגם": {q,t,n?,err?,cached?}
   const [transLoading, setTransLoading] = useState(false);
-  const [smartMode, setSmartMode] = useState("merged"); // תבנית צלם דף חכם
+  const [smartMode, setSmartMode] = useState("zohar"); // תבנית צלם דף חכם
   const [layerOn, setLayerOn] = useState(() => { try { return localStorage.getItem("lomedtv-layer") !== "off"; } catch { return true; } }); // ✍️ שכבת הלומד מוצגת?
   /* 🔊 הקראה כקריוקי: הנגן פתוח מעל טקסט הפרק; readPos = {i, c} המשפט והתו שנקראים עכשיו */
   const [helpOn, setHelpOn] = useState(false); // ❔ המדריך מעל המסך
@@ -5423,6 +5535,12 @@ export default function LearningTV() {
                     <label htmlFor="camera-scan-input" className="cam-btn" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
                       {tx("📷 צלם עכשיו")}
                     </label>
+                    <label htmlFor="smart-scan-input" className="cam-btn" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
+                      {tx("🖼 העלה צילומים — כמה יחד")}
+                    </label>
+                    <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
+                      {tx("כמה צילומים יחד נעשים מאמר אחד, לפי סדר שמות הקבצים (סדר הצילום).")}
+                    </span>
                   </div>
 
                   <div className="scan-mode-row zohar-row">
