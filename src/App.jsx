@@ -821,8 +821,9 @@ const SCAN_MODES = {
   zohar: {
     label: "מאמר זוהר — כל אות ומתחתיה הפירוש (כמה עמודים יחד)",
     assemble: true,
+    strong: true, // המודל המהיר ניחש מילים בארמית מנוקדת ובאותיות הקטנות של הפירוש — כאן קורא המודל החזק, בקטעים קטנים
     prompt:
-      "לפניך צילום של חלק מעמוד זוהר עם פירוש. מבנה העמוד: למעלה גוף הזוהר בארמית מנוקדת, באותיות גדולות, מחולק לאותיות מסומנות — א) ב) ג) וכן הלאה. מתחתיו לפעמים הערות קטנות ('מסורת הזהר', 'חלופי גרסאות'). למטה הפירוש העברי ('הסולם' או 'מעלות הסולם') בשני טורים: קוראים קודם את הטור הימני כולו, ואחריו את השמאלי. תמלל מילה במילה — בלי להוסיף, בלי לקצר ובלי לתקן — במבנה הזה בדיוק:\n[מקור]\nגוף הזוהר בארמית, עם הניקוד. כל אות (למשל 'ג)') פותחת שורה חדשה, והטקסט שלה נכתב ברצף בשורה אחת. טקסט ארמי שמופיע לפני סימון האות הראשון הוא המשך של אות קודמת — כתוב אותו בשורה הראשונה, בלי סימון.\n[פירוש ימין]\nהטור הימני של הפירוש, מלמעלה למטה. כל פסקה בשורה אחת רצופה, בלי שבירות שורה בתוכה. פסקה שנפתחת בסימון אות (למשל 'ג) וההוא טהירו וכו'':') — הסימון נשאר בראש השורה.\n[פירוש שמאל]\nהטור השמאלי של הפירוש, באותו אופן.\nשכבה שאינה נראית בתמונה — השמט את הכותרת שלה. אם הפירוש בטור אחד — כתוב אותו תחת [פירוש ימין]. דלג על: כותרת העמוד ומספר העמוד, שמות המאמרים שבאמצע השורה, 'מסורת הזהר', 'חלופי גרסאות', כותרת הפירוש, ההפניה הקטנה שבסוגריים בתחתית הטור (כגון דפו\"י), והמילה הבודדת שבתחתית העמוד (שומר הדף). התעלם מסימוני מרקר וכתב יד. אם מילה אינה ברורה — כתוב אותה כפי שהיא נראית.",
+      "לפניך צילום של חלק מעמוד זוהר עם פירוש. מבנה העמוד: למעלה גוף הזוהר בארמית מנוקדת, באותיות גדולות, מחולק לאותיות מסומנות — א) ב) ג) וכן הלאה. מתחתיו לפעמים הערות קטנות ('מסורת הזהר', 'חלופי גרסאות'). למטה הפירוש העברי ('הסולם' או 'מעלות הסולם') בשני טורים: קוראים קודם את הטור הימני כולו, ואחריו את השמאלי. תמלל מילה במילה — בלי להוסיף, בלי לקצר ובלי לתקן — במבנה הזה בדיוק:\n[מקור]\nגוף הזוהר בארמית, עם הניקוד. כל אות (למשל 'ג)') פותחת שורה חדשה, והטקסט שלה נכתב ברצף בשורה אחת. טקסט ארמי שמופיע לפני סימון האות הראשון הוא המשך של אות קודמת — כתוב אותו בשורה הראשונה, בלי סימון.\n[פירוש ימין]\nהטור הימני של הפירוש, מלמעלה למטה. כל פסקה בשורה אחת רצופה, בלי שבירות שורה בתוכה. פסקה שנפתחת בסימון אות (למשל 'ג) וההוא טהירו וכו'':') — הסימון נשאר בראש השורה.\n[פירוש שמאל]\nהטור השמאלי של הפירוש, באותו אופן.\nשכבה שאינה נראית בתמונה — השמט את הכותרת שלה. אם הפירוש בטור אחד — כתוב אותו תחת [פירוש ימין]. דלג על: כותרת העמוד ומספר העמוד, שמות המאמרים שבאמצע השורה, 'מסורת הזהר', 'חלופי גרסאות', כותרת הפירוש, ההפניה הקטנה שבסוגריים בתחתית הטור (כגון דפו\"י), והמילה הבודדת שבתחתית העמוד (שומר הדף). התעלם מסימוני מרקר וכתב יד. חשוב מאוד: זהו תמלול ולא ניסוח — כתוב רק מה שרואים בתמונה, אות באות. אל תשלים מהזיכרון ואל תנחש: מילה שאינה קריאה סמן כך […]. את הארמית כתוב עם הניקוד שבדף; את הפירוש כתוב בלי ניקוד, כפי שהוא מודפס.",
   },
   merged: {
     label: "משולב — מקור ומתחתיו פירושו",
@@ -844,7 +845,7 @@ const SCAN_MODES = {
 const isRetryableScanErr = (e) => /504|Timeout|timeout|פגום|נחתכה|ריקה/.test(String(e?.message || e));
 
 async function scanPiece(spec, b64, note, mt) {
-  const text = await askClaude(spec.prompt + (note || "") + "\n\nהחזר את הטקסט המפוענח בלבד.", mt, true, b64, "image/jpeg", true);
+  const text = await askClaude(spec.prompt + (note || "") + "\n\nהחזר את הטקסט המפוענח בלבד.", mt, !spec.strong, b64, "image/jpeg", true);
   return String(text || "").trim();
 }
 
@@ -862,6 +863,16 @@ function parseZoharPiece(t) {
     out[cur] += line + "\n";
   }
   for (const k of Object.keys(out)) out[k] = out[k].trim();
+  /* גיבוי לתיוג: גוף הזוהר מנוקד והפירוש לא. אם בקטע יש שני הסוגים, שורה מנוקדת שתויגה כפירוש חוזרת למקור, ושורה לא מנוקדת שתויגה כמקור עוברת לפירוש. */
+  const dens = (l) => { const letters = (l.match(/[\u05D0-\u05EA]/g) || []).length; return letters < 12 ? -1 : (l.match(/[\u05B0-\u05BC\u05C1\u05C2\u05C7]/g) || []).length / letters; };
+  const all = [out.src, out.right, out.left].join("\n").split("\n").map(dens).filter((d) => d >= 0);
+  if (all.some((d) => d > 0.55) && all.some((d) => d < 0.12)) {
+    const src = [], right = [], left = [];
+    for (const l of out.src.split("\n")) { if (!l) continue; (dens(l) >= 0 && dens(l) < 0.12 ? right : src).push(l); }
+    const comSrc = [];
+    for (const [k, dst] of [["right", right], ["left", left]]) for (const l of out[k].split("\n")) { if (!l) continue; (dens(l) > 0.55 ? comSrc : dst).push(l); }
+    out.src = [...src, ...comSrc].join("\n"); out.right = right.join("\n"); out.left = left.join("\n");
+  }
   return out;
 }
 const zsNorm = (w) => w.replace(/[\u0591-\u05C7]/g, "").replace(/[^\u05D0-\u05EA]/g, "");
@@ -881,6 +892,9 @@ function joinOverlap(a, b) {
     for (let k = maxK; k >= 4; k--) {
       for (let o = 0; o <= Math.min(10, bn.length - k); o++) {
         if (an[end - k] !== bn[o] || an[end - 1] !== bn[o + k - 1]) continue;
+        /* נגד התאמת שווא (ביטויים שחוזרים בזוהר, כמו "ואפיק חד חילא טמירא"): חפיפה קצרה רק בתחילת הקטע, ולעולם לא מדלגים על סימון אות */
+        if (k < 6 && o > 0) continue;
+        if (bw.slice(0, o).some((w) => /^[א-ת]{1,4}['׳]?\)$/.test(w))) continue;
         let miss = 0;
         for (let i = 1; i < k - 1 && miss <= k / 6; i++) if (an[end - k + i] !== bn[o + i]) miss++;
         if (miss <= Math.floor(k / 6)) return a + cut(Math.min(bn.length, o + k + ta));
@@ -931,25 +945,30 @@ function assembleZohar(pages) {
 async function smartScanImages(files, mode, onProgress) {
   const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
   if (spec.assemble) {
-    /* שלושה פסים חופפים לעמוד: פחות טקסט בכל קריאה (נגד קיטוע ו-timeout), והחפיפה מאפשרת לתפור בלי לאבד שורה */
-    const BANDS = [[0, 0.37], [0.32, 0.69], [0.64, 1]];
-    const NOTES = [
-      "\nזהו החלק העליון של העמוד בלבד. תמלל כל שורה שנראית במלואה, עד השורה השלמה האחרונה בכל טור.",
-      "\nזהו החלק האמצעי של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד השורה השלמה האחרונה.",
-      "\nזהו החלק התחתון של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד סוף הטור.",
-    ];
+    /* ארבעה פסים חופפים לעמוד: מעט טקסט בכל קריאה (המודל החזק איטי יותר — נגד timeout), והחפיפה מאפשרת לתפור בלי לאבד שורה. שני פסים נקראים במקביל. */
+    const BANDS = [[0, 0.295], [0.235, 0.53], [0.47, 0.765], [0.705, 1]];
+    const NOTE_TOP = "\nזהו החלק העליון של העמוד בלבד. תמלל כל שורה שנראית במלואה, עד השורה השלמה האחרונה בכל טור.";
+    const NOTE_MID = "\nזהו פס מאמצע העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד השורה השלמה האחרונה. שורה חתוכה בקצה העליון או התחתון — דלג עליה.";
+    const NOTE_BOT = "\nזהו החלק התחתון של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד סוף הטור.";
+    const NOTES = [NOTE_TOP, NOTE_MID, NOTE_MID, NOTE_BOT];
+    const readBand = async (img, b) => {
+      const go = () => scanPiece(spec, imgToJpegBase64(img, 1568, BANDS[b]), NOTES[b], 2000);
+      /* פס שאין בו טקסט (שוליים, כותרת בלבד) חוזר ריק — זו לא תקלה, ואסור שיפיל את כל הסריקה */
+      const empty = (e) => /ריקה/.test(String(e?.message || e));
+      try { return await go(); }
+      catch (e) {
+        if (!isRetryableScanErr(e)) throw e;
+        try { return await go(); } catch (e2) { if (empty(e2)) return ""; throw e2; }
+      }
+    };
     const pages = [];
     for (let i = 0; i < files.length; i++) {
       const img = await loadImageEl(files[i]);
-      const pieces = [];
-      for (let b = 0; b < BANDS.length; b++) {
-        onProgress?.(i + 1, files.length, ` · חלק ${b + 1}/3`);
-        let t;
-        try { t = await scanPiece(spec, imgToJpegBase64(img, 1600, BANDS[b]), NOTES[b], 2400); }
-        catch (e) { if (!isRetryableScanErr(e)) throw e; t = await scanPiece(spec, imgToJpegBase64(img, 1600, BANDS[b]), NOTES[b], 2400); }
-        pieces.push(t);
-      }
-      pages.push(pieces);
+      onProgress?.(i + 1, files.length, " · חלק 1–2 מתוך 4");
+      const a = await Promise.all([readBand(img, 0), readBand(img, 1)]);
+      onProgress?.(i + 1, files.length, " · חלק 3–4 מתוך 4");
+      const c = await Promise.all([readBand(img, 2), readBand(img, 3)]);
+      pages.push([...a, ...c]);
     }
     const text = assembleZohar(pages);
     if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
@@ -4563,6 +4582,7 @@ export default function LearningTV() {
     e.target.value = ""; // ניקוי הקלט שממנו הגיעו הקבצים (העלאה או מצלמה)
     if (!files.length) return;
     setError(null);
+    setFileBusy(tx("📸 טוען {b} צילומים…", { b: files.length })); // מיד עם הבחירה — שיהיה ברור שהעבודה התחילה
     try {
       const text = await smartScanImages(files, smartMode, (n, total, extra) =>
         setFileBusy(tx("📸 המנוע קורא ומארגן את הדף {a}/{b}{x}... (עד דקה לעמוד)", { a: n, b: total, x: extra || "" }))
@@ -5541,6 +5561,9 @@ export default function LearningTV() {
                     <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
                       {tx("כמה צילומים יחד נעשים מאמר אחד, לפי סדר שמות הקבצים (סדר הצילום).")}
                     </span>
+                    {/* ההתקדמות והשגיאה כאן, ליד הכפתור — בטלפון ההודעות שלמעלה ולמטה מחוץ למסך */}
+                    {fileBusy && <span className="busy-line" role="status">⏳ {fileBusy}</span>}
+                    {error && !fileBusy && <span className="err" role="alert">{error}</span>}
                   </div>
 
                   <div className="scan-mode-row zohar-row">
