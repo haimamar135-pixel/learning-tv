@@ -889,32 +889,36 @@ function zsFuzzyEq(a, b) {
   }
   return diff + (a.length - i) + (b.length - j) <= 1;
 }
-/* חיבור שני קטעים חופפים: השורות שבחפיפה נקראו פעמיים — מוצאים את החפיפה (בסובלנות לשגיאת קריאה) ומסירים אותה מהקטע השני */
+/* חיבור שני קטעים חופפים: השורות שבחפיפה נקראו פעמיים, ולא תמיד באותה צורה (מילה חסרה, מילה שנקראה אחרת).
+   מיישרים את סוף הקטע הראשון מול תחילת השני (יישור מקומי: התאמה +1, אי-התאמה או מילה חסרה −1.5) ומסירים מהשני את החלק שכבר נקרא. */
 function joinOverlap(a, b) {
   a = (a || "").trim(); b = (b || "").trim();
   if (!a) return b;
   if (!b) return a;
-  const an = a.split(/\s+/).map(zsNorm);
-  const bw = b.split(/\s+/), bn = bw.map(zsNorm);
-  const cut = (n) => { let idx = 0, c = 0, m; const re = /\S+/g; while (c < n && (m = re.exec(b))) { c++; idx = re.lastIndex; } return b.slice(idx); };
-  /* ta: עד 3 מילים בסוף הקטע הראשון שנקראו אחרת בשני (קצה שורה) — העוגן נסוג מעט, והן נחשבות חלק מהחפיפה */
-  for (let ta = 0; ta <= 3; ta++) {
-    const end = an.length - ta;
-    const maxK = Math.min(90, end, bn.length);
-    for (let k = maxK; k >= 3; k--) {
-      for (let o = 0; o <= Math.min(10, bn.length - k); o++) {
-        if (!zsFuzzyEq(an[end - k], bn[o]) || !zsFuzzyEq(an[end - 1], bn[o + k - 1])) continue;
-        if (k < 6 && o > 0) continue; // חפיפה קצרה — רק בתחילת הקטע (נגד ביטויים שחוזרים בזוהר)
-        if (k < 5 && ta > 0) continue;
-        if (bw.slice(0, o).some((w) => /^[א-ת]{1,4}['׳]?\)$/.test(w))) continue; // לעולם לא מדלגים על סימון אות
-        const allow = k < 5 ? 0 : Math.floor(k / 5);
-        let miss = 0;
-        for (let i = 1; i < k - 1 && miss <= allow; i++) if (!zsFuzzyEq(an[end - k + i], bn[o + i])) miss++;
-        if (miss <= allow) return a + cut(Math.min(bn.length, o + k + ta));
-      }
+  const aw = a.split(/\s+/), bw = b.split(/\s+/);
+  const A = aw.slice(-140).map(zsNorm), B = bw.slice(0, 140).map(zsNorm);
+  const N = A.length, M = B.length, PEN = 1.5;
+  let prev = new Float32Array(M + 1), cur = new Float32Array(M + 1);
+  for (let y = 0; y <= M; y++) prev[y] = -PEN * y;
+  for (let x = 1; x <= N; x++) {
+    cur[0] = 0; // ההתחלה בקטע הראשון חופשית
+    for (let y = 1; y <= M; y++) {
+      const eq = A[x - 1] && B[y - 1] && zsFuzzyEq(A[x - 1], B[y - 1]);
+      cur[y] = Math.max(prev[y - 1] + (eq ? 1 : -PEN), prev[y] - PEN, cur[y - 1] - PEN);
     }
+    [prev, cur] = [cur, prev];
   }
-  return a + (zsOtLine(b) ? "\n" : " ") + b;
+  let bestY = 0, best = 0;
+  for (let y = 1; y <= M; y++) if (prev[y] > best) { best = prev[y]; bestY = y; }
+  if (best < 3) return a + (zsOtLine(b) ? "\n" : " ") + b;
+  /* לעולם לא מוחקים סימון אות שלא הופיע בסוף הקטע הראשון */
+  const isOt = (w) => /^[א-ת]{1,4}['׳]?\)$/.test(w);
+  const tailOts = new Set(aw.slice(-140).filter(isOt));
+  for (let y = 0; y < bestY; y++) if (isOt(bw[y]) && !tailOts.has(bw[y])) { bestY = y; break; }
+  if (bestY === 0) return a + (zsOtLine(b) ? "\n" : " ") + b;
+  let idx = 0, c = 0, m; const re = /\S+/g;
+  while (c < bestY && (m = re.exec(b))) { c++; idx = re.lastIndex; }
+  return a + b.slice(idx);
 }
 const zsFlow = (a, b) => (!a ? b : !b ? a : a + (zsOtLine(b) ? "\n" : " ") + b);
 /* allowed: קבוצת האותיות שמותר לפתוח בהן קטע (בפירוש — רק אותיות שיש להן ארמית בצילומים). בלי allowed: אות עולה, בקפיצה של עד 3. */
@@ -1076,13 +1080,43 @@ function zsDetectLayout(lum) {
   for (let b = 0; b < b0; b++) if (dens(b) > 0.03) { a0 = b; break; }
   /* מסלול הרווח: x לכל y (אינטרפולציה בין הרצועות) */
   const path = ch.pts.map((p) => [((p.b + 0.5) * BH) / h, p.mid / w]);
-  return { srcTop: Math.max(0, ((a0 - 0.5) * BH) / h), top: (b0 * BH) / h, bottom: Math.min(1, ((b1 + 1) * BH) / h), left: left / w, right: right / w, path, bands: ch.pts.length, gap: ch.pts.reduce((t, q2) => t + q2.len, 0) / ch.pts.length / w, BH: BH / h };
+  return { srcTop: Math.max(0, ((a0 - 0.5) * BH) / h), top: (b0 * BH) / h, bottom: Math.min(1, ((b1 + 1) * BH) / h), left: left / w, right: right / w, ink, w, h, path, bands: ch.pts.length, gap: ch.pts.reduce((t, q2) => t + q2.len, 0) / ch.pts.length / w, BH: BH / h };
 }
 function zsGutterAt(lay, y) {
   const p = lay.path;
   if (y <= p[0][0]) return p[0][1];
   for (let i = 1; i < p.length; i++) if (y <= p[i][0]) { const t = (y - p[i - 1][0]) / (p[i][0] - p[i - 1][0]); return p[i - 1][1] + t * (p[i][1] - p[i - 1][1]); }
   return p[p.length - 1][1];
+}
+
+/* חיתוך תחום גובה לקטעים, כשהחתכים נופלים ברווח הלבן שבין שורות (ולא באמצע שורה).
+   x0,x1,yTop,yBot — שברים. מחזיר [{ y0, y1, clean }] — clean: החתך העליון של הקטע עבר ברווח נקי (אין צורך בחפיפה ובתפירה). */
+function zsCutRows(lay, x0, x1, yTop, yBot, maxH) {
+  const { ink, w, h } = lay;
+  const c0 = Math.max(0, Math.round(x0 * w)), c1 = Math.min(w, Math.round(x1 * w));
+  const row = (r) => { let n = 0; for (let x = c0; x < c1; x++) n += ink[r * w + x]; return n; };
+  const noise = Math.max(1, Math.round((c1 - c0) * 0.004));
+  const out = [];
+  let cur = yTop, clean = true;
+  while (yBot - cur > maxH) {
+    const r0 = Math.round((cur + maxH * 0.55) * h), r1 = Math.round((cur + maxH) * h);
+    let best = r1, bestInk = Infinity;
+    for (let r = r1; r >= r0; r--) { const v = row(r) + (r + 1 < h ? row(r + 1) : 0); if (v < bestInk) { bestInk = v; best = r; if (v === 0) break; } }
+    const isClean = bestInk <= noise;
+    const y = (best + 1) / h;
+    if (isClean) { out.push({ y0: cur, y1: y, clean }); cur = y; clean = true; }
+    else { const ov = 0.02; out.push({ y0: cur, y1: Math.min(yBot, (cur + maxH)) , clean }); cur = cur + maxH - 2 * ov; clean = false; }
+  }
+  out.push({ y0: cur, y1: yBot, clean });
+  return out;
+}
+/* הרווח הלבן הנקי הקרוב ביותר מעל y (עד span למעלה) — לגבול שבין גוף הזוהר לפירוש */
+function zsSnapUp(lay, x0, x1, y, span) {
+  const { ink, w, h } = lay;
+  const c0 = Math.max(0, Math.round(x0 * w)), c1 = Math.min(w, Math.round(x1 * w));
+  let best = Math.round(y * h), bestInk = Infinity;
+  for (let r = Math.round(y * h); r >= Math.max(0, Math.round((y - span) * h)); r--) { let n = 0; for (let x = c0; x < c1; x++) n += ink[r * w + x]; if (n < bestInk) { bestInk = n; best = r; if (n === 0) break; } }
+  return best / h;
 }
 
 const ZS_SRC_PROMPT =
@@ -1175,29 +1209,42 @@ async function smartScanImages(files, mode, onProgress) {
       }
       throw lastErr;
     };
-    /* גוף הזוהר מנוקד; הערות שוליים וכותרות שנקראו בטעות אינן מנוקדות — נשארות רק שורות מנוקדות */
-    const keepVocalized = (t) => String(t || "").split("\n").filter((l) => {
+    /* גוף הזוהר מנוקד; הערות שוליים וכותרות שנקראו בטעות אינן מנוקדות — נשארות רק שורות מנוקדות.
+       יורדות גם כותרות מאמר ("מַאֲמַר …" קצרה), ואותיות-הערה בודדות שבין המילים. */
+    const keepVocalized = (t) => String(t || "").split("\n").map((l) => l.split(/\s+/).filter((wd) => !/^[א-ת]$/.test(wd)).join(" ")).filter((l) => {
       const letters = (l.match(/[א-ת]/g) || []).length;
-      return letters >= 4 && (l.match(/[ְ-ׇּׁׂ]/g) || []).length / letters > 0.4;
+      if (letters < 4 || (l.match(/[ְ-ׇּׁׂ]/g) || []).length / letters <= 0.4) return false;
+      const plain = l.replace(/[֑-ׇ]/g, "").trim();
+      return !(/^מאמר\s/.test(plain) && plain.split(/\s+/).length <= 8);
     }).join("\n");
-    /* המסלול הראשי: מבנה הדף מזוהה בקוד, מתוך הפיקסלים (הרווח בין הטורים, גבולות הפירוש) ← חיתוך שכבה-שכבה וטור-טור. null אם לא נמצאו שני טורים (ואז עוברים לפסים). */
+    /* המסלול הראשי: מבנה הדף מזוהה בקוד, מתוך הפיקסלים (הרווח בין הטורים, גבולות הפירוש), והחיתוך לקטעים נופל ברווח הלבן שבין השורות —
+       כך שורה לא נחתכת ולא נקראת פעמיים. רק כשאין רווח נקי (עמוד עקום) הקטעים חופפים ונתפרים. null אם לא נמצאו שני טורים (ואז עוברים לפסים). */
     const readPageByLayout = async (img, i) => {
       onProgress?.(i + 1, files.length, " · מאתר את מבנה הדף");
       let lay = null;
       try { lay = zsDetectLayout(pageLuma(img)); } catch { lay = null; }
       if (!lay || lay.bottom - lay.top < 0.05 || lay.right - lay.left < 0.3) return null;
-      const jobs = [], kinds = [];
-      if (lay.top - lay.srcTop > 0.03) for (const [y0, y1] of zsSlices(lay.srcTop, Math.min(1, lay.top + 0.012), 0.1, 0.03)) {
-        jobs.push(async () => (await readCrop(img, ZS_SRC_PROMPT, lay.left - 0.03, y0, lay.right + 0.03, y1, 0)).map(keepVocalized)); kinds.push("src");
-      }
-      const sl = zsSlices(Math.max(0, lay.top - 0.006), Math.min(1, lay.bottom + 0.012), 0.15, 0.04);
-      const gs = sl.map(([y0, y1]) => zsGutterAt(lay, (y0 + y1) / 2));
-      sl.forEach(([y0, y1], k) => { jobs.push(() => readCrop(img, ZS_COM_PROMPT, gs[k] + 0.004, y0, lay.right + 0.025, y1, 0)); kinds.push("right"); });
-      sl.forEach(([y0, y1], k) => { jobs.push(() => readCrop(img, ZS_COM_PROMPT, lay.left - 0.025, y0, gs[k] - 0.004, y1, 0)); kinds.push("left"); });
+      const jobs = [], kinds = [], cleans = [];
+      const add = (kind, prompt, x0, x1, cuts, post) => cuts.forEach((c) => {
+        jobs.push(async () => { const r = await readCrop(img, prompt, x0, Math.max(0, c.y0 - 0.003), x1, Math.min(1, c.y1 + 0.003), 0); return post ? r.map(post) : r; });
+        kinds.push(kind); cleans.push(c.clean);
+      });
+      const srcBottom = zsSnapUp(lay, lay.left, lay.right, lay.top, 0.03);
+      if (srcBottom - lay.srcTop > 0.03) add("src", ZS_SRC_PROMPT, lay.left - 0.03, lay.right + 0.03, zsCutRows(lay, lay.left - 0.03, lay.right + 0.03, lay.srcTop, srcBottom, 0.2), keepVocalized);
+      const cTop = Math.max(0, lay.top - 0.004), cBot = Math.min(1, lay.bottom + 0.012);
+      const gm = zsGutterAt(lay, (lay.top + lay.bottom) / 2);
+      /* הרווח בין הטורים נמדד לכל קטע בגובה שלו (עמוד עקום); קצות הטורים זזים יחד איתו */
+      const colCuts = (side) => zsCutRows(lay, side === "right" ? gm + 0.006 : lay.left - 0.02, side === "right" ? lay.right + 0.02 : gm - 0.006, cTop, cBot, 0.16);
+      for (const side of ["right", "left"]) colCuts(side).forEach((c) => {
+        const g = zsGutterAt(lay, (c.y0 + c.y1) / 2), dx = g - gm;
+        const x0 = side === "right" ? g + 0.004 : lay.left + dx - 0.025, x1 = side === "right" ? lay.right + dx + 0.025 : g - 0.004;
+        jobs.push(() => readCrop(img, ZS_COM_PROMPT, x0, Math.max(0, c.y0 - 0.003), x1, Math.min(1, c.y1 + 0.003), 0)); kinds.push(side); cleans.push(c.clean);
+      });
       const res = await pool(jobs, (d, n) => onProgress?.(i + 1, files.length, ` · קטע ${d}/${n}`));
-      const layer = (kind) => res.filter((_, k) => kinds[k] === kind).flat().reduce((acc, x) => joinOverlap(acc, x), "");
+      /* חתך נקי — מחברים כמו שהוא; חתך עם חפיפה — תופרים */
+      const layer = (kind) => { let acc = ""; res.forEach((r, k) => { if (kinds[k] !== kind) return; r.forEach((x, j) => { acc = cleans[k] && j === 0 ? zsFlow(acc, x) : joinOverlap(acc, x); }); }); return acc; };
       const r4 = (v) => +v.toFixed(4);
-      return { src: layer("src"), com: zsFlow(layer("right"), layer("left")), debug: { layout: { srcTop: r4(lay.srcTop), top: r4(lay.top), bottom: r4(lay.bottom), left: r4(lay.left), right: r4(lay.right), gutters: gs.map(r4) }, pieces: res.map((r, k) => [kinds[k], ...r]) } };
+      return { src: layer("src"), com: zsFlow(layer("right"), layer("left")), debug: { layout: { srcTop: r4(lay.srcTop), srcBottom: r4(srcBottom), top: r4(lay.top), bottom: r4(lay.bottom), left: r4(lay.left), right: r4(lay.right), gutter: r4(gm) }, pieces: res.map((r, k) => [kinds[k] + (cleans[k] ? "" : "*"), ...r]) } };
     };
     const readPageByBands = async (img, i) => {
       const res = await pool(BANDS.map((b) => () => readRegion(img, b[0], b[1], 0)), (d, n) => onProgress?.(i + 1, files.length, ` · חלק ${d}/${n}`));
@@ -1216,7 +1263,7 @@ async function smartScanImages(files, mode, onProgress) {
     const text = assembleZoharText(srcAll, comAll);
     if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
     /* debug נשמר עם הספר (book.flex.scan) ונכנס לגיבוי — כדי שאפשר יהיה לראות מה המנוע החזיר לכל קטע */
-    return { text, debug: { v: 4, at: new Date().toISOString(), pages: debug } };
+    return { text, debug: { v: 5, at: new Date().toISOString(), pages: debug } };
   }
   /* דף רגיל (צ'אט 27): כל חצאי העמודים של כל הצילומים נקראים במקביל (עד שישה יחד) — במקום עמוד אחרי עמוד, חצי אחרי חצי */
   const TOP_NOTE = "\nזהו החלק העליון של העמוד בלבד — פענח רק אותו, ועצור במשפט השלם האחרון שנראה במלואו.";
