@@ -877,7 +877,19 @@ function parseZoharPiece(t) {
 }
 const zsNorm = (w) => w.replace(/[\u0591-\u05C7]/g, "").replace(/[^\u05D0-\u05EA]/g, "");
 const zsOtLine = (t) => /^[א-ת]{1,4}['׳]?\)/.test((t || "").trim());
-/* חיבור שני קטעים חופפים: השורות שבפס החפיפה נקראו פעמיים — מוצאים את החפיפה (בסובלנות לשגיאת קריאה) ומסירים אותה מהקטע השני */
+/* שתי מילים "שוות" גם אם נקראו בהבדל של אות אחת (קטורי / קטזרי) */
+function zsFuzzyEq(a, b) {
+  if (a === b) return true;
+  if (a.length < 4 || b.length < 4 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+  }
+  return diff + (a.length - i) + (b.length - j) <= 1;
+}
+/* חיבור שני קטעים חופפים: השורות שבחפיפה נקראו פעמיים — מוצאים את החפיפה (בסובלנות לשגיאת קריאה) ומסירים אותה מהקטע השני */
 function joinOverlap(a, b) {
   a = (a || "").trim(); b = (b || "").trim();
   if (!a) return b;
@@ -888,16 +900,17 @@ function joinOverlap(a, b) {
   /* ta: עד 3 מילים בסוף הקטע הראשון שנקראו אחרת בשני (קצה שורה) — העוגן נסוג מעט, והן נחשבות חלק מהחפיפה */
   for (let ta = 0; ta <= 3; ta++) {
     const end = an.length - ta;
-    const maxK = Math.min(70, end, bn.length);
-    for (let k = maxK; k >= 4; k--) {
+    const maxK = Math.min(90, end, bn.length);
+    for (let k = maxK; k >= 3; k--) {
       for (let o = 0; o <= Math.min(10, bn.length - k); o++) {
-        if (an[end - k] !== bn[o] || an[end - 1] !== bn[o + k - 1]) continue;
-        /* נגד התאמת שווא (ביטויים שחוזרים בזוהר, כמו "ואפיק חד חילא טמירא"): חפיפה קצרה רק בתחילת הקטע, ולעולם לא מדלגים על סימון אות */
-        if (k < 6 && o > 0) continue;
-        if (bw.slice(0, o).some((w) => /^[א-ת]{1,4}['׳]?\)$/.test(w))) continue;
+        if (!zsFuzzyEq(an[end - k], bn[o]) || !zsFuzzyEq(an[end - 1], bn[o + k - 1])) continue;
+        if (k < 6 && o > 0) continue; // חפיפה קצרה — רק בתחילת הקטע (נגד ביטויים שחוזרים בזוהר)
+        if (k < 5 && ta > 0) continue;
+        if (bw.slice(0, o).some((w) => /^[א-ת]{1,4}['׳]?\)$/.test(w))) continue; // לעולם לא מדלגים על סימון אות
+        const allow = k < 5 ? 0 : Math.floor(k / 5);
         let miss = 0;
-        for (let i = 1; i < k - 1 && miss <= k / 6; i++) if (an[end - k + i] !== bn[o + i]) miss++;
-        if (miss <= Math.floor(k / 6)) return a + cut(Math.min(bn.length, o + k + ta));
+        for (let i = 1; i < k - 1 && miss <= allow; i++) if (!zsFuzzyEq(an[end - k + i], bn[o + i])) miss++;
+        if (miss <= allow) return a + cut(Math.min(bn.length, o + k + ta));
       }
     }
   }
@@ -975,51 +988,107 @@ function pageLuma(img, w = 800) {
   for (let i = 0, j = 0; i < d.length; i += 4, j++) L[j] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
   return { L, w, h };
 }
-/* מדייק את ה-x של הרווח בין הטורים בתחום גובה נתון: מחפש סביב ההערכה את רצועת העמודות הריקה ביותר מדיו. מחזיר שבר (0–1), או את ההערכה אם אין רווח ברור. */
-function snapGutter(lum, gx, y0, y1, span = 0.06) {
+/* ── איתור מבנה דף זוהר מתוך הפיקסלים ──
+   lum = { L: Uint8Array, w, h } (מפת בהירות מוקטנת). מחזיר null אם לא נמצאו שני טורים. */
+function zsInkMap(lum) {
   const { L, w, h } = lum;
-  const r0 = Math.max(0, Math.floor(y0 * h)), r1 = Math.min(h, Math.ceil(y1 * h));
-  const c0 = Math.max(0, Math.floor((gx - span) * w)), c1 = Math.min(w - 1, Math.ceil((gx + span) * w));
-  if (r1 - r0 < 4 || c1 - c0 < 4) return gx;
-  /* סף דיו: יחסית לבהירות הנייר באזור (אחוזון 85) */
-  const sample = [];
-  for (let y = r0; y < r1; y += 2) for (let x = c0; x <= c1; x += 2) sample.push(L[y * w + x]);
-  sample.sort((p, q) => p - q);
-  const paper = sample[Math.floor(sample.length * 0.85)] || 200;
-  const thr = paper * 0.68;
-  const ink = [];
-  for (let x = c0; x <= c1; x++) { let n = 0; for (let y = r0; y < r1; y++) if (L[y * w + x] < thr) n++; ink.push(n); }
-  const min = Math.min(...ink), lim = min + Math.max(1, (r1 - r0) * 0.03);
-  let best = null;
-  for (let i = 0; i < ink.length; ) {
-    if (ink[i] > lim) { i++; continue; }
-    let j = i; while (j + 1 < ink.length && ink[j + 1] <= lim) j++;
-    const mid = (i + j) / 2, len = j - i + 1, dist = Math.abs(c0 + mid - gx * w);
-    const score = len - dist * 0.15; // רצועה רחבה, עם העדפה קלה לקרבה להערכה
-    if (!best || score > best.score) best = { score, mid, len };
-    i = j + 1;
+  /* רקע מקומי: ממוצע בחלון גדול (integral image). דיו = כהה משמעותית מהרקע המקומי; רקע כהה = לא נייר. */
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += L[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + row; } }
+  const R = Math.max(8, Math.round(w / 40));
+  const ink = new Uint8Array(w * h), paper = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - R), y1 = Math.min(h, y + R + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - R), x1 = Math.min(w, x + R + 1);
+      const m = (I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0]) / ((y1 - y0) * (x1 - x0));
+      const p = m > 95;
+      paper[y * w + x] = p ? 1 : 0;
+      ink[y * w + x] = p && L[y * w + x] < m * 0.72 ? 1 : 0;
+    }
   }
-  if (!best || best.len < 2) return gx;
-  return (c0 + best.mid) / w;
+  return { ink, paper, w, h };
 }
-const ZS_LAYOUT_PROMPT =
-  'לפניך צילום של עמוד מספר הזוהר עם פירוש. אל תתמלל. החזר אובייקט JSON אחד בלבד, שמתאר איפה כל חלק נמצא בתמונה. כל המספרים הם שברים עשרוניים בין 0 ל-1: x נמדד מהקצה השמאלי של התמונה (0) לימני (1), y מהקצה העליון (0) לתחתון (1). המבנה: {"aramaic": {"top": y, "bottom": y, "left": x, "right": x}, "commentary": {"top": y, "bottom": y, "left": x, "right": x}, "columns": 1 או 2, "gutter": x}. ' +
-  '"aramaic" — המלבן שמקיף את כל גוף הזוהר: הטקסט הארמי המנוקד באותיות הגדולות, כולל שורות בראש העמוד שהן המשך מהעמוד הקודם. בלי כותרת העמוד ובלי ההערות הקטנות שמתחתיו ("מסורת הזהר", "חלופי גרסאות"). אם אין ארמית בעמוד: null. ' +
-  '"commentary" — המלבן שמקיף את הפירוש העברי באותיות הקטנות ("הסולם" / "מעלות הסולם"), מהשורה הראשונה שמתחת לכותרת הפירוש ועד השורה האחרונה בעמוד. אם אין פירוש בעמוד: null. ' +
-  '"columns" — בכמה טורים מודפס הפירוש. "gutter" — ה-x של אמצע הרווח הלבן שבין שני הטורים (אם columns הוא 2). ' +
-  'התייחס רק לעמוד הראשי שבמרכז הצילום, ולא לעמוד שכן שנראה בשוליים.';
+function zsDetectLayout(lum) {
+  const { ink, paper, w, h } = zsInkMap(lum);
+  const BH = Math.max(6, Math.round(h * 0.022)); // גובה רצועה ≈ שתי שורות פירוש
+  const nb = Math.floor(h / BH);
+  const minGap = Math.max(3, Math.round(w * 0.008)), maxGap = Math.round(w * 0.06), side = Math.round(w * 0.16);
+  /* לכל רצועה: פרופיל דיו לעמודות, והרווחים הלבנים שיש טקסט משני צדיהם */
+  const bands = [];
+  for (let b = 0; b < nb; b++) {
+    const col = new Uint16Array(w), pap = new Uint16Array(w);
+    for (let y = b * BH; y < (b + 1) * BH; y++) for (let x = 0; x < w; x++) { col[x] += ink[y * w + x]; pap[x] += paper[y * w + x]; }
+    const pre = new Uint32Array(w + 1);
+    for (let x = 0; x < w; x++) pre[x + 1] = pre[x] + col[x];
+    const gaps = [];
+    for (let x = 0; x < w; ) {
+      if (col[x] > 0 || pap[x] < BH * 0.8) { x++; continue; }
+      let e = x; while (e + 1 < w && col[e + 1] === 0 && pap[e + 1] >= BH * 0.8) e++;
+      const len = e - x + 1;
+      if (len >= minGap && len <= maxGap && x - side >= 0 && e + 1 + side <= w) {
+        const dl = (pre[x] - pre[x - side]) / (side * BH), dr = (pre[e + 1 + side] - pre[e + 1]) / (side * BH);
+        if (dl > 0.07 && dr > 0.07) gaps.push({ x0: x, x1: e, mid: (x + e) / 2, len });
+      }
+      x = e + 1;
+    }
+    bands.push({ col, pre, gaps });
+  }
+  /* שרשראות: רווח שנמשך מרצועה לרצועה בתזוזה קטנה. מותר לדלג על רצועה אחת (שורת סיום פסקה / כותרת טור). */
+  const tol = Math.max(4, Math.round(w * 0.014));
+  let chains = [];
+  for (let b = 0; b < nb; b++) for (const g of bands[b].gaps) {
+    let best = null;
+    for (const c of chains) {
+      const last = c.pts[c.pts.length - 1];
+      if (last.b === b || b - last.b > 2) continue;
+      const d = Math.abs(last.mid - g.mid);
+      if (d <= tol * (b - last.b) && (!best || d < best.d)) best = { c, d };
+    }
+    if (best) best.c.pts.push({ b, ...g }); else chains.push({ pts: [{ b, ...g }] });
+  }
+  chains = chains.filter((c) => c.pts.length >= 3);
+  if (!chains.length) return null;
+  /* הפירוש הוא הבלוק הדו-טורי הארוך, והרווח שלו רחב מרווח בין מילים: הציון = סכום רוחבי הרווח לאורך השרשרת */
+  const score = (c) => c.pts.reduce((a, p) => a + p.len, 0);
+  chains.sort((p, q) => score(q) - score(p));
+  const ch = chains[0];
+  /* ראש השרשרת: רצועה בודדת שמנותקת מההמשך (הערות שוליים, כותרת) אינה חלק מהפירוש */
+  while (ch.pts.length > 3 && ch.pts[1].b - ch.pts[0].b > 1) ch.pts.shift();
+  const b0 = ch.pts[0].b;
+  let b1 = ch.pts[ch.pts.length - 1].b;
+  /* קצות הטורים: מהרווח החוצה, עד שוליים לבנים רחבים */
+  const margin = Math.round(w * 0.035);
+  const lefts = [], rights = [];
+  for (const p of ch.pts) {
+    const col = bands[p.b].col;
+    let run = 0, L = p.x0 - 1; for (let x = p.x0 - 1; x >= 0; x--) { if (col[x] === 0) { if (++run >= margin) break; } else { run = 0; L = x; } }
+    run = 0; let Rr = p.x1 + 1; for (let x = p.x1 + 1; x < w; x++) { if (col[x] === 0) { if (++run >= margin) break; } else { run = 0; Rr = x; } }
+    lefts.push(L); rights.push(Rr);
+  }
+  const q = (a, f) => a.slice().sort((x, y) => x - y)[Math.min(a.length - 1, Math.floor(a.length * f))];
+  const left = q(lefts, 0.15), right = q(rights, 0.85);
+  /* סוף הפירוש: ממשיכים למטה כל עוד יש טקסט בתחום הטורים (השורות האחרונות אינן תמיד משני צדי הרווח) */
+  const dens = (b) => (bands[b].pre[Math.min(w, right + 1)] - bands[b].pre[Math.max(0, left)]) / ((right - left + 1) * BH);
+  for (let b = b1 + 1, empty = 0; b < nb && empty < 2; b++) { if (dens(b) > 0.02) { b1 = b; empty = 0; } else empty++; }
+  /* ראש גוף הזוהר: הרצועה הראשונה מלמעלה שיש בה טקסט בתחום הטורים */
+  let a0 = b0;
+  for (let b = 0; b < b0; b++) if (dens(b) > 0.03) { a0 = b; break; }
+  /* מסלול הרווח: x לכל y (אינטרפולציה בין הרצועות) */
+  const path = ch.pts.map((p) => [((p.b + 0.5) * BH) / h, p.mid / w]);
+  return { srcTop: Math.max(0, ((a0 - 0.5) * BH) / h), top: (b0 * BH) / h, bottom: Math.min(1, ((b1 + 1) * BH) / h), left: left / w, right: right / w, path, bands: ch.pts.length, BH: BH / h };
+}
+function zsGutterAt(lay, y) {
+  const p = lay.path;
+  if (y <= p[0][0]) return p[0][1];
+  for (let i = 1; i < p.length; i++) if (y <= p[i][0]) { const t = (y - p[i - 1][0]) / (p[i][0] - p[i - 1][0]); return p[i - 1][1] + t * (p[i][1] - p[i - 1][1]); }
+  return p[p.length - 1][1];
+}
+
 const ZS_SRC_PROMPT =
   "לפניך קטע מגוף ספר הזוהר: ארמית מנוקדת באותיות גדולות. תמלל אותו מילה במילה עם הניקוד, בדיוק כפי שהוא מודפס — בלי להשלים מהזיכרון ובלי לתקן. כל אות מסומנת (כמו א) ב) ג)) פותחת שורה חדשה, והטקסט שלה נכתב ברצף בשורה אחת. טקסט שלפני הסימון הראשון נכתב בשורה ראשונה בלי סימון. דלג על: כותרות ממורכזות (שם המאמר, שם הפרשה, כותרת העמוד), אותיות-הערה קטנות וכוכביות שבין המילים, והערות באותיות קטנות. שורה שחתוכה בקצה העליון או התחתון של התמונה — דלג עליה. מילה שאינה קריאה סמן […]. אם אין בתמונה טקסט ארמי כזה — החזר רק את המילה: ריק";
 const ZS_COM_PROMPT =
   "לפניך קטע מטור אחד של פירוש עברי: אותיות קטנות, בלי ניקוד, והציטוטים מהזוהר מודגשים. תמלל אותו מילה במילה, בלי ניקוד, בלי לתקן ובלי להשלים מהזיכרון. כתוב כל פסקה כשורה אחת רצופה; שורה שמתחילה בהזחה פותחת פסקה חדשה, בשורה חדשה. פסקה שנפתחת בסימון אות — למשל: ג) וההוא טהירו וכו': — הסימון נשאר בראש השורה. דלג על: כותרת ממורכזת, שורת ההפניה הקטנה שבסוגריים בתחתית הטור (כגון דפו\"י), מילה בודדת בתחתית העמוד, הערות \"מסורת הזהר\" ו\"חלופי גרסאות\", ואותיות חתוכות מטור שכן שנראות בקצה. שורה שחתוכה בקצה העליון או התחתון של התמונה — דלג עליה. מילה שאינה קריאה סמן […]. אם אין בתמונה טקסט — החזר רק את המילה: ריק";
-const zsNum = (v) => (typeof v === "number" && isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && isFinite(+v) ? +v : NaN);
-function zsBox(b) {
-  if (!b || typeof b !== "object") return null;
-  const t = zsNum(b.top), bo = zsNum(b.bottom), l = zsNum(b.left), r = zsNum(b.right);
-  if ([t, bo, l, r].some((v) => isNaN(v) || v < -0.02 || v > 1.02)) return null;
-  if (bo - t < 0.02 || r - l < 0.15) return null;
-  return { top: Math.max(0, t), bottom: Math.min(1, bo), left: Math.max(0, l), right: Math.min(1, r) };
-}
 /* מחלק תחום גובה לקטעים חופפים */
 function zsSlices(top, bottom, maxH, ov) {
   const h = bottom - top;
@@ -1093,37 +1162,29 @@ async function smartScanImages(files, mode, onProgress) {
       }
       throw lastErr;
     };
-    /* המסלול הראשי: מבנה הדף ← חיתוך שכבה-שכבה וטור-טור. מחזיר null אם המבנה לא זוהה (ואז עוברים לפסים). */
+    /* גוף הזוהר מנוקד; הערות שוליים וכותרות שנקראו בטעות אינן מנוקדות — נשארות רק שורות מנוקדות */
+    const keepVocalized = (t) => String(t || "").split("\n").filter((l) => {
+      const letters = (l.match(/[א-ת]/g) || []).length;
+      return letters >= 4 && (l.match(/[ְ-ׇּׁׂ]/g) || []).length / letters > 0.4;
+    }).join("\n");
+    /* המסלול הראשי: מבנה הדף מזוהה בקוד, מתוך הפיקסלים (הרווח בין הטורים, גבולות הפירוש) ← חיתוך שכבה-שכבה וטור-טור. null אם לא נמצאו שני טורים (ואז עוברים לפסים). */
     const readPageByLayout = async (img, i) => {
       onProgress?.(i + 1, files.length, " · מאתר את מבנה הדף");
-      let lay;
-      try { lay = await askClaude(ZS_LAYOUT_PROMPT, 500, false, imgToJpegBase64(img, 1400), "image/jpeg", false); }
-      catch (e) { if (/login|quota|מכסה|להיכנס|החיבור/.test(String(e?.message || e))) throw e; return null; }
-      const A = zsBox(lay?.aramaic), C = zsBox(lay?.commentary);
-      if (!A && !C) return null;
-      const two = C && +lay.columns !== 1;
-      let g = two ? zsNum(lay.gutter) : NaN;
-      if (two && (isNaN(g) || g <= C.left + 0.08 || g >= C.right - 0.08)) g = (C.left + C.right) / 2;
-      const lum = two ? pageLuma(img) : null;
+      let lay = null;
+      try { lay = zsDetectLayout(pageLuma(img)); } catch { lay = null; }
+      if (!lay || lay.bottom - lay.top < 0.05 || lay.right - lay.left < 0.3) return null;
       const jobs = [], kinds = [];
-      if (A) for (const [y0, y1] of zsSlices(Math.max(0, A.top - 0.012), Math.min(1, A.bottom + 0.012), 0.085, 0.03)) {
-        jobs.push(() => readCrop(img, ZS_SRC_PROMPT, A.left - 0.025, y0, A.right + 0.025, y1, 0)); kinds.push("src");
+      if (lay.top - lay.srcTop > 0.03) for (const [y0, y1] of zsSlices(lay.srcTop, Math.min(1, lay.top + 0.012), 0.1, 0.03)) {
+        jobs.push(async () => (await readCrop(img, ZS_SRC_PROMPT, lay.left - 0.03, y0, lay.right + 0.03, y1, 0)).map(keepVocalized)); kinds.push("src");
       }
-      const gutters = [];
-      if (C) {
-        const sl = zsSlices(Math.max(0, C.top - 0.008), Math.min(1, C.bottom + 0.012), 0.115, 0.03);
-        if (two) {
-          /* הרווח נמדד בכל קטע לחוד — כך גם צילום עקום נחתך נכון; קצות הטורים זזים יחד איתו */
-          const gs = sl.map(([y0, y1]) => snapGutter(lum, g, y0, y1));
-          const gm = gs.slice().sort((p, q) => p - q)[Math.floor(gs.length / 2)];
-          gutters.push(...gs.map((v) => +v.toFixed(4)));
-          sl.forEach(([y0, y1], k) => { const dx = gs[k] - gm; jobs.push(() => readCrop(img, ZS_COM_PROMPT, gs[k] + 0.004, y0, C.right + dx + 0.022, y1, 0)); kinds.push("right"); });
-          sl.forEach(([y0, y1], k) => { const dx = gs[k] - gm; jobs.push(() => readCrop(img, ZS_COM_PROMPT, C.left + dx - 0.022, y0, gs[k] - 0.004, y1, 0)); kinds.push("left"); });
-        } else for (const [y0, y1] of sl) { jobs.push(() => readCrop(img, ZS_COM_PROMPT, C.left - 0.022, y0, C.right + 0.022, y1, 0)); kinds.push("right"); }
-      }
+      const sl = zsSlices(Math.max(0, lay.top - 0.006), Math.min(1, lay.bottom + 0.012), 0.15, 0.04);
+      const gs = sl.map(([y0, y1]) => zsGutterAt(lay, (y0 + y1) / 2));
+      sl.forEach(([y0, y1], k) => { jobs.push(() => readCrop(img, ZS_COM_PROMPT, gs[k] + 0.004, y0, lay.right + 0.025, y1, 0)); kinds.push("right"); });
+      sl.forEach(([y0, y1], k) => { jobs.push(() => readCrop(img, ZS_COM_PROMPT, lay.left - 0.025, y0, gs[k] - 0.004, y1, 0)); kinds.push("left"); });
       const res = await pool(jobs, (d, n) => onProgress?.(i + 1, files.length, ` · קטע ${d}/${n}`));
       const layer = (kind) => res.filter((_, k) => kinds[k] === kind).flat().reduce((acc, x) => joinOverlap(acc, x), "");
-      return { src: layer("src"), com: zsFlow(layer("right"), layer("left")), debug: { layout: lay, gutters, pieces: res.map((r, k) => [kinds[k], ...r]) } };
+      const r4 = (v) => +v.toFixed(4);
+      return { src: layer("src"), com: zsFlow(layer("right"), layer("left")), debug: { layout: { srcTop: r4(lay.srcTop), top: r4(lay.top), bottom: r4(lay.bottom), left: r4(lay.left), right: r4(lay.right), gutters: gs.map(r4) }, pieces: res.map((r, k) => [kinds[k], ...r]) } };
     };
     const readPageByBands = async (img, i) => {
       const res = await pool(BANDS.map((b) => () => readRegion(img, b[0], b[1], 0)), (d, n) => onProgress?.(i + 1, files.length, ` · חלק ${d}/${n}`));
@@ -1142,7 +1203,7 @@ async function smartScanImages(files, mode, onProgress) {
     const text = assembleZoharText(srcAll, comAll);
     if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
     /* debug נשמר עם הספר (book.flex.scan) ונכנס לגיבוי — כדי שאפשר יהיה לראות מה המנוע החזיר לכל קטע */
-    return { text, debug: { v: 3, at: new Date().toISOString(), pages: debug } };
+    return { text, debug: { v: 4, at: new Date().toISOString(), pages: debug } };
   }
   let out = "";
   for (let i = 0; i < files.length; i++) {
