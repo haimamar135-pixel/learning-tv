@@ -1076,7 +1076,7 @@ function zsDetectLayout(lum) {
   for (let b = 0; b < b0; b++) if (dens(b) > 0.03) { a0 = b; break; }
   /* מסלול הרווח: x לכל y (אינטרפולציה בין הרצועות) */
   const path = ch.pts.map((p) => [((p.b + 0.5) * BH) / h, p.mid / w]);
-  return { srcTop: Math.max(0, ((a0 - 0.5) * BH) / h), top: (b0 * BH) / h, bottom: Math.min(1, ((b1 + 1) * BH) / h), left: left / w, right: right / w, path, bands: ch.pts.length, BH: BH / h };
+  return { srcTop: Math.max(0, ((a0 - 0.5) * BH) / h), top: (b0 * BH) / h, bottom: Math.min(1, ((b1 + 1) * BH) / h), left: left / w, right: right / w, path, bands: ch.pts.length, gap: ch.pts.reduce((t, q2) => t + q2.len, 0) / ch.pts.length / w, BH: BH / h };
 }
 function zsGutterAt(lay, y) {
   const p = lay.path;
@@ -1097,8 +1097,21 @@ function zsSlices(top, bottom, maxH, ov) {
   return Array.from({ length: n }, (_, k) => [top + k * step, top + k * step + maxH]);
 }
 
+/* דף זוהר עם פירוש מזוהה לבד (צ'אט 27): שני טורים ברורים, ומעליהם טקסט לכל רוחב העמוד. כך אין צורך לבחור תבנית ביד. */
+async function looksLikeZoharPage(file) {
+  try {
+    const lay = zsDetectLayout(pageLuma(await loadImageEl(file)));
+    return !!lay && lay.bands >= 6 && lay.gap >= 0.014 && lay.right - lay.left >= 0.3 && lay.bottom - lay.top >= 0.12 && lay.top - lay.srcTop >= 0.04;
+  } catch { return false; }
+}
 async function smartScanImages(files, mode, onProgress) {
-  const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
+  let spec = SCAN_MODES[mode] || SCAN_MODES.merged;
+  if (!spec.assemble && files.length) {
+    /* בודקים עד שלושה צילומים; מספיק שאחד נראה כדף זוהר */
+    let hit = false;
+    for (const f of files.slice(0, 3)) if (await looksLikeZoharPage(f)) { hit = true; break; }
+    if (hit) { spec = SCAN_MODES.zohar; onProgress?.(1, files.length, " · זוהה דף זוהר עם פירוש"); }
+  }
   if (spec.assemble) {
     /* שמונה פסים דקים וחופפים לעמוד (צ'אט 27): השרת קוטע קריאה שנמשכת יותר מכחצי דקה (504 Inactivity Timeout), והמודל החזק איטי —
        לכן כל קריאה קטנה: כ-6–9 שורות. החפיפה (כ-5% מגובה העמוד = שורה מלאה לפחות) מאפשרת לתפור בלי לאבד שורה.
@@ -4847,7 +4860,8 @@ export default function LearningTV() {
       const base = files[0].name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
       setFileBusy(null);
-      await buildBook(text, givenTitle || tx("דף חכם — ") + base, false, null, scanExtra);
+      /* צילומים שהועלו יחד הם מאמר אחד — פרק אחד, בלי חלוקה לפי אורך (חיים, צ'אט 27) */
+      await buildBook(text, givenTitle || tx("דף חכם — ") + base, false, [{ title: givenTitle || tx("המאמר"), text }], scanExtra);
     } catch (err) {
       console.error("smart scan failed", err);
       setError(err.message || tx("פענוח הדף נכשל."));
