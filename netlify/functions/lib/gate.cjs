@@ -8,7 +8,9 @@
    3. מנהלים (ADMIN_EMAILS בנטליפיי, מופרדים בפסיק) — בלי מכסה.
 
    מכסות ברירת מחדל (ניתנות לשינוי במשתני סביבה בנטליפיי):
-     DAILY_LIMIT_CLAUDE     = 60   קריאות ביום (סיכום, מבחן, כרטיסיות, OCR...)
+     DAILY_LIMIT_CLAUDE     = ללא מכסה (צ'אט 27, החלטת חיים 12.10.2026: המכסה הוסרה עד הפרסום).
+                              כדי להחזיר מכסה: להגדיר את המשתנה למספר (למשל 60). השימוש ממשיך להירשם ב-usage_log.
+                              ⚠ לפני פרסום האפליקציה: תמחור לפי דפים, ואז להחזיר מכסה/חיוב — ראו מפת הדרך, שלב 5.
      DAILY_LIMIT_TRANSCRIBE = 120  נתחי תמלול ביום (נתח ≈ 110 שניות → ~3.5 שעות)
      DAILY_LIMIT_VOICE      = 30   חתיכות קול של "שיקוף" ביום (חתיכה ≈ 700 תווים ≈ 1.3 דקות → ~40 דקות)
    הטבלה נמצאת ב-supabase/usage_log.sql. */
@@ -17,7 +19,7 @@ const SUPA_URL = process.env.SUPABASE_URL || "https://hghlesijwzpfdhmlvgiv.supab
 const SUPA_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_JsWZApJRwuzZId7iUPwUkA_EGlZfNNe";
 
 const LIMITS = {
-  claude: parseInt(process.env.DAILY_LIMIT_CLAUDE, 10) || 60,
+  claude: parseInt(process.env.DAILY_LIMIT_CLAUDE, 10) || 0, // 0 = ללא מכסה
   transcribe: parseInt(process.env.DAILY_LIMIT_TRANSCRIBE, 10) || 120,
   voice: parseInt(process.env.DAILY_LIMIT_VOICE, 10) || 30, // חתיכות "שיקוף" ביום (חתיכה ≈ 700 תווים ≈ 1.3 דקות שמע)
 };
@@ -115,10 +117,11 @@ async function gate(event, fn, units = 1) {
   }
   if (ADMINS.includes(user.email)) return { user, admin: true };
 
-  const limit = LIMITS[fn] || 60;
+  const limit = fn in LIMITS ? LIMITS[fn] : 60;
   try {
-    const used = await usedToday(token, user.id, fn);
-    if (used + units > limit) {
+    /* limit 0 = ללא מכסה: לא בודקים, אבל ממשיכים לרשום את השימוש — זה הבסיס לתמחור העתידי */
+    const used = limit > 0 ? await usedToday(token, user.id, fn) : 0;
+    if (limit > 0 && used + units > limit) {
       return {
         reject: json(429, {
           code: "quota",
