@@ -945,26 +945,35 @@ function assembleZohar(pages) {
 async function smartScanImages(files, mode, onProgress) {
   const spec = SCAN_MODES[mode] || SCAN_MODES.merged;
   if (spec.assemble) {
-    /* ארבעה פסים חופפים לעמוד: מעט טקסט בכל קריאה (המודל החזק איטי יותר — נגד timeout), והחפיפה מאפשרת לתפור בלי לאבד שורה. שני פסים נקראים במקביל. */
-    const BANDS = [[0, 0.295], [0.235, 0.53], [0.47, 0.765], [0.705, 1]];
+    /* שמונה פסים דקים וחופפים לעמוד (צ'אט 27): השרת קוטע קריאה שנמשכת יותר מכחצי דקה (504 Inactivity Timeout), והמודל החזק איטי —
+       לכן כל קריאה קטנה: כ-6–9 שורות. החפיפה (כ-5% מגובה העמוד = שורה מלאה לפחות) מאפשרת לתפור בלי לאבד שורה.
+       פס שבכל זאת נקטע בזמן מתפצל לשניים ונקרא שוב. שלוש קריאות רצות במקביל. */
+    const N_BANDS = 8, BAND_H = 0.17, STEP = (1 - BAND_H) / (N_BANDS - 1);
+    const BANDS = Array.from({ length: N_BANDS }, (_, k) => [k === 0 ? 0 : +(k * STEP).toFixed(4), k === N_BANDS - 1 ? 1 : +(k * STEP + BAND_H).toFixed(4)]);
     const NOTE_TOP = "\nזהו החלק העליון של העמוד בלבד. תמלל כל שורה שנראית במלואה, עד השורה השלמה האחרונה בכל טור.";
-    const NOTE_MID = "\nזהו פס מאמצע העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד השורה השלמה האחרונה. שורה חתוכה בקצה העליון או התחתון — דלג עליה.";
+    const NOTE_MID = "\nזהו פס צר מאמצע העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד השורה השלמה האחרונה. שורה חתוכה בקצה העליון או התחתון — דלג עליה. אם רואים רק חלק מהשכבות — כתוב רק אותן.";
     const NOTE_BOT = "\nזהו החלק התחתון של העמוד בלבד. בכל טור התחל מהשורה הראשונה שנראית במלואה (גם אם היא אמצע משפט), והמשך עד סוף הטור.";
-    const NOTES = [NOTE_TOP, NOTE_MID, NOTE_MID, NOTE_BOT];
-    const readBand = async (img, b) => {
-      const go = () => scanPiece(spec, imgToJpegBase64(img, 1568, BANDS[b]), NOTES[b], 2000);
-      /* עד 4 ניסיונות לכל פס, עם המתנה ביניהם: תקלת רשת רגעית (מסך שנרדם, ניתוק) או timeout לא מפילים סריקה של כמה דקות.
-         פס שאין בו טקסט (שוליים, כותרת בלבד) חוזר ריק — זו לא תקלה. */
-      const empty = (e) => /ריקה/.test(String(e?.message || e));
-      const retryable = (e) => isRetryableScanErr(e) || /רשת|network|Load failed|Failed to fetch|502|503|529/i.test(String(e?.message || e));
+    const noteFor = (y0, y1) => (y0 <= 0 ? NOTE_TOP : y1 >= 1 ? NOTE_BOT : NOTE_MID);
+    const isEmptyErr = (e) => /ריקה/.test(String(e?.message || e));
+    const isTimeoutErr = (e) => /504|Timeout|timeout/.test(String(e?.message || e));
+    const isNetErr = (e) => /רשת|network|Load failed|Failed to fetch|502|503|529/i.test(String(e?.message || e));
+    /* מחזיר מערך קטעים לפי הסדר (בדרך כלל אחד; שניים או ארבעה אם הפס פוצל) */
+    const readRegion = async (img, y0, y1, depth) => {
+      const go = () => scanPiece(spec, imgToJpegBase64(img, 1568, [y0, y1]), noteFor(y0, y1), 1500);
       let lastErr;
       for (let at = 0; at < 4; at++) {
-        if (at) await new Promise((r) => setTimeout(r, at * 4000));
-        try { return await go(); }
+        if (at) await new Promise((r) => setTimeout(r, at * 3000));
+        try { return [await go()]; }
         catch (e) {
           lastErr = e;
-          if (empty(e) && at >= 1) return "";
-          if (!retryable(e)) throw e;
+          if (isEmptyErr(e)) { if (at >= 1) return [""]; continue; }
+          if (isTimeoutErr(e)) {
+            if (depth >= 2) continue; // כבר פוצל פעמיים — מנסים שוב כמו שהוא
+            const mid = (y0 + y1) / 2, ov = Math.min(0.03, (y1 - y0) / 4);
+            const [p1, p2] = await Promise.all([readRegion(img, y0, mid + ov, depth + 1), readRegion(img, mid - ov, y1, depth + 1)]);
+            return [...p1, ...p2];
+          }
+          if (!isNetErr(e) && !isRetryableScanErr(e)) throw e;
         }
       }
       throw lastErr;
@@ -972,11 +981,18 @@ async function smartScanImages(files, mode, onProgress) {
     const pages = [];
     for (let i = 0; i < files.length; i++) {
       const img = await loadImageEl(files[i]);
-      onProgress?.(i + 1, files.length, " · חלק 1–2 מתוך 4");
-      const a = await Promise.all([readBand(img, 0), readBand(img, 1)]);
-      onProgress?.(i + 1, files.length, " · חלק 3–4 מתוך 4");
-      const c = await Promise.all([readBand(img, 2), readBand(img, 3)]);
-      pages.push([...a, ...c]);
+      const res = new Array(N_BANDS);
+      let next = 0, done = 0;
+      onProgress?.(i + 1, files.length, ` · חלק 0/${N_BANDS}`);
+      const worker = async () => {
+        while (next < N_BANDS) {
+          const k = next++;
+          res[k] = await readRegion(img, BANDS[k][0], BANDS[k][1], 0);
+          onProgress?.(i + 1, files.length, ` · חלק ${++done}/${N_BANDS}`);
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      pages.push(res.flat());
     }
     const text = assembleZohar(pages);
     if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
