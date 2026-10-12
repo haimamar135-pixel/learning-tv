@@ -1974,7 +1974,8 @@ function renderMarked(txt, mk, pend, kara, gloss) {
   /* סוגריים (מראי מקום, הפניות) מקבלים מחלקה "pr" — מוצגים קטנים ובהירים רק בתוך פסקת פירוש (CSS). הטקסט עצמו לא משתנה, ולכן הסימונים נשארים במקומם. */
   const pr = [];
   if (!gloss && typeof txt === "string" && txt.includes("(")) { const re = /\([^()\n]{1,90}\)/g; let m; while ((m = re.exec(txt))) pr.push([m.index, m.index + m[0].length]); }
-  if (!mk && !pend && kara == null && !gloss && !pr.length) return txt;
+  const bad = !gloss && typeof txt === "string" && ZV_BAD.size ? ZV_BAD.get(txt) || [] : [];
+  if (!mk && !pend && kara == null && !gloss && !pr.length && !bad.length) return txt;
   const base = {};
   if (mk) {
     if (mk.b) base.fontWeight = 800;
@@ -1982,13 +1983,14 @@ function renderMarked(txt, mk, pend, kara, gloss) {
     if (mk.hl) base.background = HL_COLORS[mk.hl];
   }
   if (gloss) return renderGlossed(txt, w, base, kara, gloss);
-  if (!w.length && !pend && kara == null && !pr.length) return <span style={base}>{txt}</span>;
+  if (!w.length && !pend && kara == null && !pr.length && !bad.length) return <span style={base}>{txt}</span>;
   const pts = new Set([0, txt.length]);
   const clamp = (n) => Math.max(0, Math.min(n, txt.length));
   w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
   if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
   if (kara != null) pts.add(clamp(kara));
   pr.forEach(([a, b]) => { pts.add(a); pts.add(b); });
+  bad.forEach(([a, b]) => { pts.add(clamp(a)); pts.add(clamp(b)); });
   const arr = [...pts].sort((a, b) => a - b);
   const nodes = [];
   for (let k = 0; k < arr.length - 1; k++) {
@@ -2006,7 +2008,8 @@ function renderMarked(txt, mk, pend, kara, gloss) {
     if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
     const done = kara != null && e <= clamp(kara);
     const inPr = pr.some(([a, b]) => a <= s && b >= e);
-    const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : "", inPr ? "pr" : ""].filter(Boolean).join(" ") || undefined;
+    const isBad = bad.some(([a, b]) => clamp(a) <= s && clamp(b) >= e);
+    const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : "", inPr ? "pr" : "", isBad ? "vf" : ""].filter(Boolean).join(" ") || undefined;
     nodes.push(<span key={k} className={cls} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
   }
   return nodes;
@@ -2329,6 +2332,127 @@ async function fetchZoharArticle(en, he, from, to, name, onProgress) {
     return [`${hebNum(n)}) ${ar || "(לשון הזוהר לאות הזאת לא נמצאה בספריא)"}`, ...segs.map((s) => "הסולם: " + s)].join("\n\n");
   });
   return `${name}\nזוהר ${he} · אותיות ${hebNum(from)}–${hebNum(to)} · מספריא\n\n${parts.join("\n\n")}`;
+}
+/* ─── 🔍 אימות מול מקור (צ'אט 27) ───
+   גוף הזוהר שנסרק מושווה מילה במילה מול ספריא. ההשוואה היא קוד ולא מודל: מתעלמת מניקוד ומכתיב מלא/חסר,
+   ומחזירה רק את המקומות השונים. ההכרעה בכל מקום — של הלומד: לקבל את המקור, להשאיר, או לתקן ביד. */
+const ZV_BAD = new Map(); // נוסח משפט → טווחי תווים שלא אומתו (לצביעה בתצוגה)
+const zvStrip = (w) => String(w || "").replace(/[֑-ׇ]/g, "").replace(/[^א-ת]/g, "");
+function zvCanon(w) {
+  const x = zvStrip(w);
+  if (x === "יי" || x === "ה" || x === "יהוה") return "יהוה";
+  return x.replace(/[וי]/g, "") || x;
+}
+const zvWords = (t) => String(t || "").split(/\s+/).filter((w) => zvStrip(w));
+/* נוסח ספריא: בלי תגיות, בלי סוגריים (מראי מקום, חילופי נוסח), בלי פיסוק */
+const zvCleanRef = (t) => stripTags(t).replace(/\([^()]*\)/g, " ").replace(/[.,:;!?׃]/g, " ").replace(/\s+/g, " ").trim();
+/* הבדלים בין מילות הסריקה למילות המקור (LCS). מחזיר { ok, total, diffs: [{ a0, a1, b0, b1 }] } */
+function zvDiff(A, B) {
+  const a = A.map(zvCanon), b = B.map(zvCanon), n = a.length, m = b.length;
+  const W = m + 1, T = new Uint16Array((n + 1) * W);
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) T[i * W + j] = a[i] === b[j] ? T[(i + 1) * W + j + 1] + 1 : Math.max(T[(i + 1) * W + j], T[i * W + j + 1]);
+  const diffs = [];
+  let i = 0, j = 0, cur = null;
+  const flush = () => { if (cur) { diffs.push(cur); cur = null; } };
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) { flush(); i++; j++; continue; }
+    if (!cur) cur = { a0: i, a1: i, b0: j, b1: j };
+    if (j >= m || (i < n && T[(i + 1) * W + j] >= T[i * W + j + 1])) { i++; cur.a1 = i; } else { j++; cur.b1 = j; }
+  }
+  flush();
+  return { ok: T[0], total: m, diffs };
+}
+/* פסקאות הזוהר שבפרק: [{ n, label, pi (מספר הפסקה), text (בלי הסימון) }] */
+function zvParas(chText) {
+  const out = [];
+  String(chText || "").split(/\n{2,}/).forEach((p, pi) => {
+    const m = p.trim().match(/^([א-ת]{1,4})['׳]?\)\s*([\s\S]*)$/);
+    if (!m || SULAM_RE.test(p.trim())) return;
+    const n = gematria(m[1]);
+    const letters = (m[2].match(/[א-ת]/g) || []).length;
+    if (n && letters >= 8 && (m[2].match(/[ְ-ׇּׁׂ]/g) || []).length / letters > 0.3) out.push({ n, label: m[1], pi, text: m[2] });
+  });
+  return out;
+}
+/* לשון הזוהר מספריא לאותיות שהתבקשו: { n: טקסט }. פרשה רגילה — דרך הקישורים של הסולם; השמטות — לפי המספר הרץ בכרך. */
+async function fetchZoharSource(en, ns) {
+  const enc = encodeURIComponent(en.replace(/ /g, "_"));
+  const j = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(`ספריא השיבה ${r.status}`); return r.json(); };
+  const out = {};
+  if (isZoharAddenda(en)) {
+    const sh = await j(`${SEFARIA}/shape/Zohar,_${enc}`);
+    const lens = (Array.isArray(sh) ? sh[0] : sh)?.chapters || [];
+    const pos = [];
+    lens.forEach((len, si) => { for (let k = 0; k < len; k++) pos.push([si + 1, k]); });
+    const need = [...new Set(ns.filter((n) => pos[n - 1]).map((n) => pos[n - 1][0]))];
+    const secs = {};
+    await Promise.all(need.map(async (si) => { const r = await j(`${SEFARIA}/v3/texts/Zohar,_${enc}.${si}?version=hebrew`); const t = r?.versions?.[0]?.text; secs[si] = Array.isArray(t) ? t.flat(3) : [t]; }));
+    for (const n of ns) { const q = pos[n - 1]; if (q && secs[q[0]]?.[q[1]]) out[n] = zvCleanRef(secs[q[0]][q[1]]); }
+  } else {
+    await Promise.all(ns.map(async (n) => {
+      const links = await j(`${SEFARIA}/links/Sulam_on_Zohar,_${enc}.${n}?with_text=1`).catch(() => []);
+      const zl = (Array.isArray(links) ? links : []).find((l) => /^Zohar,/.test(l.ref || ""));
+      let ar = zl ? zl.he : "";
+      if (Array.isArray(ar)) ar = ar.flat(3).join(" ");
+      if (ar) out[n] = zvCleanRef(ar);
+    }));
+  }
+  return out;
+}
+/* מחשב את מצב האימות של פרק מול נוסחי מקור שמורים (refs: { n: טקסט }, skip: הבדלים שהלומד בחר להשאיר) */
+function zvCompute(chText, refs, skip) {
+  const items = [];
+  let ok = 0, total = 0;
+  for (const p of zvParas(chText)) {
+    const ref = refs?.[p.n];
+    if (!ref) { items.push({ ...p, missing: true, diffs: [] }); continue; }
+    const A = zvWords(p.text), B = zvWords(ref);
+    const d = zvDiff(A, B);
+    const diffs = d.diffs.map((x) => ({ ...x, got: A.slice(x.a0, x.a1).join(" "), want: B.slice(x.b0, x.b1).join(" ") }))
+      .map((x) => ({ ...x, id: `${p.n}|${zvStrip(x.got)}|${zvStrip(x.want)}` }));
+    const open = diffs.filter((x) => !skip?.[x.id]);
+    const kept = diffs.length - open.length;
+    total += Math.max(d.total, A.length);
+    ok += Math.max(d.total, A.length) - open.reduce((t, x) => t + Math.max(x.a1 - x.a0, x.b1 - x.b0), 0);
+    items.push({ ...p, words: A, diffs: open, kept });
+  }
+  return { items, ok: Math.max(0, ok), total };
+}
+/* מחליף בפסקת האות את המילים a0..a1 בנוסח חדש. הפיסוק של הסריקה נשמר (כדי שחלוקת המשפטים לא תזוז). מחזיר את נוסח הפרק החדש. */
+function zvApply(chText, pi, a0, a1, repl) {
+  const paras = String(chText || "").split(/(\n{2,})/); // שומר על המפרידים
+  let k = -1, idx = -1;
+  for (let x = 0; x < paras.length; x += 2) { if (paras[x].trim()) k++; else continue; if (k === pi) { idx = x; break; } }
+  /* pi נספר כמו ב-zvParas: לפי split(/\n{2,}/) כולל פסקאות ריקות */
+  const plain = String(chText || "").split(/\n{2,}/);
+  const target = plain[pi];
+  if (target == null) return chText;
+  const m = target.match(/^(\s*[א-ת]{1,4}['׳]?\)\s*)([\s\S]*)$/);
+  if (!m) return chText;
+  const toks = m[2].split(/(\s+)/); // מילים ורווחים לסירוגין
+  const wordIdx = [];
+  toks.forEach((t, x) => { if (t.trim() && zvStrip(t)) wordIdx.push(x); });
+  const END = /[.,:;!?׃]+["'״׳)\]]*$/;
+  const newWords = String(repl || "").replace(/[.!?׃]/g, "").split(/\s+/).filter(Boolean);
+  if (a1 > a0) {
+    const first = wordIdx[a0], last = wordIdx[a1 - 1];
+    if (first == null || last == null) return chText;
+    const tail = (toks[last].match(END) || [""])[0];
+    if (newWords.length) { newWords[newWords.length - 1] = newWords[newWords.length - 1].replace(END, "") + tail; toks.splice(first, last - first + 1, newWords.join(" ")); }
+    else {
+      /* מחיקה: הפיסוק עובר למילה שלפני; מוחקים גם רווח אחד */
+      if (tail && a0 > 0) toks[wordIdx[a0 - 1]] = toks[wordIdx[a0 - 1]].replace(END, "") + tail;
+      toks.splice(first, last - first + 1 + (toks[last + 1] != null && !toks[last + 1].trim() ? 1 : 0));
+    }
+  } else if (newWords.length) {
+    /* הוספה לפני המילה a0 (או בסוף) */
+    const at = wordIdx[a0];
+    if (at == null) toks.push(" " + newWords.join(" ")); else toks.splice(at, 0, newWords.join(" ") + " ");
+  }
+  plain[pi] = m[1] + toks.join("");
+  /* מרכיבים מחדש עם המפרידים המקוריים */
+  const seps = String(chText || "").match(/\n{2,}/g) || [];
+  return plain.map((x, q) => x + (seps[q] || "")).join("");
 }
 function paraKind(sentences, groups, pi) {
   if (isSulamPara(sentences, groups[pi])) return " sulam";
@@ -4219,7 +4343,7 @@ export default function LearningTV() {
   /* כל טקסט הספר כמשפטים (מקובצים לפסקאות) — למצב המגילה.
      סימון ברמת משפט: כל לחיצה בוחרת משפט, כך שאפשר לסמן קטע מדויק
      גם כשהספר נקלט כפסקה אחת ארוכה (למשל מקובץ וורד). */
-  const { sentences, paraGroups, chapterRanges } = useMemo(() => bookSentences(book), [book?.id, book?.chapters?.length]);
+  const { sentences, paraGroups, chapterRanges } = useMemo(() => bookSentences(book), [book?.id, book?.chapters?.length, book?.flex?.textRev]);
   /* שלב 2: שפת הספר קובעת את כיוון הטקסט, את קול ההקראה, ואם ניקוד ומילון ארמי רלוונטיים */
   const bookLang = useMemo(() => textLang(sentences.slice(0, 40).join(" ")), [sentences]);
   const textDir = bookLang === "he" || bookLang === "ar" ? "rtl" : "ltr";
@@ -5503,6 +5627,74 @@ export default function LearningTV() {
  
   const active = CHANNELS.find((c) => c.id === channel);
   const cur = book?.chapters?.[chIdx];
+  /* ── 🔍 אימות מול מקור ── */
+  const [vfP, setVfP] = useState(-1);          // הפרשה שנבחרה לאימות (-1 = לפי מה שנשמר / ברירת המחדל)
+  const [vfBusy, setVfBusy] = useState("");
+  const [vfEdit, setVfEdit] = useState(null);  // { id, val } — תיקון ביד
+  const vfData = book?.flex?.verify?.[chIdx] || null; // { en, he, at, refs: { n: טקסט }, skip: { id: 1 } }
+  const vfParas = useMemo(() => (view === "tv" && channel === "read" ? zvParas(cur?.text) : []), [view, channel, cur?.text]);
+  const vfState = useMemo(() => (vfData && vfParas.length ? zvCompute(cur?.text, vfData.refs, vfData.skip) : null), [vfData, cur?.text, vfParas.length]);
+  /* צביעה בטקסט: לכל הבדל פתוח — טווח התווים במשפט שבו הוא נמצא */
+  useMemo(() => {
+    ZV_BAD.clear();
+    if (!vfState) return;
+    const plain = String(cur?.text || "").split(/\n{2,}/);
+    for (const it of vfState.items) {
+      if (!it.diffs?.length) continue;
+      const para = (plain[it.pi] || "").trim();
+      const sents = chapterSentences(para).sentences;
+      /* מיקום כל מילה של האות בתוך הפסקה */
+      const head = para.match(/^[א-ת]{1,4}['׳]?\)\s*/)?.[0].length || 0;
+      const wpos = [];
+      const re = /\S+/g; let m;
+      while ((m = re.exec(para))) if (m.index >= head && zvStrip(m[0])) wpos.push([m.index, m.index + m[0].length]);
+      let from = 0;
+      const spos = sents.map((t) => { const at = para.indexOf(t, from); from = at >= 0 ? at + t.length : from; return at; });
+      for (const d of it.diffs) {
+        const a0 = d.a1 > d.a0 ? d.a0 : Math.max(0, d.a0 - 1), a1 = d.a1 > d.a0 ? d.a1 : Math.min(wpos.length, d.a0 + 1);
+        for (let k = a0; k < a1; k++) {
+          const w = wpos[k]; if (!w) continue;
+          const si = spos.findIndex((at, q) => at >= 0 && w[0] >= at && w[1] <= at + sents[q].length);
+          if (si < 0) continue;
+          const arr = ZV_BAD.get(sents[si]) || [];
+          arr.push([w[0] - spos[si], w[1] - spos[si]]);
+          ZV_BAD.set(sents[si], arr);
+        }
+      }
+    }
+  }, [vfState, cur?.text]);
+  const vfSave = async (patch, newText) => {
+    const b = bookRef.current; if (!b) return;
+    const flex = { ...(b.flex || {}), verify: { ...(b.flex?.verify || {}), [chIdx]: { ...(b.flex?.verify?.[chIdx] || {}), ...patch } } };
+    if (newText == null) { await persist({ ...b, flex }); return; }
+    /* עריכת הנוסח: חלוקת המשפטים חייבת להישאר — אחרת הסימונים וההערות של הלומד יזוזו */
+    const oldS = chapterSentences(b.chapters[chIdx].text).sentences, newS = chapterSentences(newText).sentences;
+    if (oldS.length !== newS.length) { setError(tx("התיקון הזה משנה את חלוקת המשפטים — לא בוצע, כדי לא להזיז סימונים והערות.")); return; }
+    const marks = { ...(b.marks || {}) };
+    const base = bookSentences(b).chapterRanges[chIdx]?.[0] || 0;
+    const k = oldS.findIndex((t, q) => t !== newS[q]);
+    if (k >= 0 && marks[base + k]?.w?.length) {
+      const o = oldS[k], n2 = newS[k]; let p0 = 0; while (p0 < o.length && p0 < n2.length && o[p0] === n2[p0]) p0++;
+      const delta = n2.length - o.length;
+      marks[base + k] = { ...marks[base + k], w: marks[base + k].w.map((r) => (r.s >= p0 ? { ...r, s: Math.max(0, r.s + delta), e: Math.max(0, r.e + delta) } : r.e > p0 ? { ...r, e: Math.max(r.s, r.e + delta) } : r)) };
+    }
+    const chapters = b.chapters.map((c, q) => (q === chIdx ? { ...c, text: newText } : c));
+    await persist({ ...b, chapters, marks, flex: { ...flex, textRev: (b.flex?.textRev || 0) + 1 } }, { k: "full" });
+  };
+  const vfRun = async () => {
+    const b = bookRef.current; if (!b || !vfParas.length) return;
+    const pIdx = vfP >= 0 ? vfP : Math.max(0, ZOHAR_PARSHIOT.findIndex(([en]) => en === vfData?.en));
+    const [en, he] = ZOHAR_PARSHIOT[pIdx] || ZOHAR_PARSHIOT[0];
+    setError(null); setVfBusy(tx("🔍 מושך את לשון הזוהר מספריא…"));
+    try {
+      const refs = await fetchZoharSource(en, [...new Set(vfParas.map((x) => x.n))]);
+      if (!Object.keys(refs).length) throw new Error(tx("לא נמצא נוסח לאותיות האלה בפרשה שנבחרה."));
+      await vfSave({ en, he, at: Date.now(), refs, skip: {} });
+    } catch (e) { setError(tx("האימות נכשל: ") + (e?.message || e)); }
+    setVfBusy("");
+  };
+  const vfFix = async (it, d, repl) => { setVfEdit(null); await vfSave({}, zvApply(bookRef.current.chapters[chIdx].text, it.pi, d.a0, d.a1, repl)); };
+  const vfKeep = async (d) => { setVfEdit(null); await vfSave({ skip: { ...(vfData?.skip || {}), [d.id]: 1 } }); };
   const transTo = channel === "trans" && cur ? (transLang || defaultTransLang(cur.text)) : null;
   const data = channel && book ? book.results[key(chIdx, channel === "trans" ? "trans:" + transTo : channel)] : null;
   const multi = book?.chapters?.length > 1;
@@ -6373,6 +6565,50 @@ export default function LearningTV() {
                       ? tx("✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה.")
                       : tx("קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף.")}
                   </p>
+                  {vfParas.length > 0 && (
+                    <div className="vf-box" dir="rtl">
+                      <div className="vf-row">
+                        <b>{tx("🔍 אימות מול מקור")}</b>
+                        <select className="scan-mode-select" value={vfP >= 0 ? vfP : Math.max(0, ZOHAR_PARSHIOT.findIndex(([en]) => en === vfData?.en))} onChange={(e) => setVfP(+e.target.value)} aria-label={tx("פרשה")}>
+                          {ZOHAR_PARSHIOT.map(([en, he], i) => <option key={en} value={i}>{he}</option>)}
+                        </select>
+                        <button className="mark-btn" onClick={vfRun} disabled={!!vfBusy}>{vfBusy || (vfData ? tx("אמת שוב מול ספריא") : tx("אמת מול ספריא"))}</button>
+                        {vfState && vfState.total > 0 && (
+                          <>
+                            <span className="vf-bar" aria-hidden="true"><i style={{ width: Math.round((vfState.ok / vfState.total) * 100) + "%" }} /></span>
+                            <span>{tx("{p}% אומת · {n} לבדיקה", { p: Math.floor((vfState.ok / vfState.total) * 100), n: vfState.items.reduce((t, it) => t + it.diffs.length, 0) })}</span>
+                          </>
+                        )}
+                      </div>
+                      {vfState && vfData && <div style={{ opacity: 0.75, marginTop: 4 }}>{tx("המקור: ספריא · זוהר {he} · אותיות {a}–{b}. מה שמסומן באדום בדף לא תואם למקור.", { he: vfData.he, a: vfState.items[0]?.label, b: vfState.items[vfState.items.length - 1]?.label })}</div>}
+                      {vfState && vfState.items.some((it) => it.missing) && <div style={{ color: "#a33", marginTop: 4 }}>{tx("לא נמצא מקור לאותיות: ") + vfState.items.filter((it) => it.missing).map((it) => it.label).join(", ")}</div>}
+                      {vfState && (
+                        <ul className="vf-list">
+                          {vfState.items.flatMap((it) => it.diffs.map((d) => (
+                            <li className="vf-item" key={d.id + ":" + d.a0}>
+                              <span>{tx("אות")} {it.label}</span>
+                              {d.got ? <span>{tx("נסרק:")} <b className="vf-got">{d.got}</b></span> : <span>{tx("חסר בסריקה, אחרי")} <b>{it.words[d.a0 - 1] || "—"}</b></span>}
+                              {d.want ? <span>{tx("במקור:")} <b className="vf-want">{d.want}</b></span> : <span>{tx("אין במקור")}</span>}
+                              {vfEdit?.id === d.id ? (
+                                <>
+                                  <input className="vf-in" dir="rtl" value={vfEdit.val} autoFocus onChange={(e) => setVfEdit({ id: d.id, val: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") vfFix(it, d, vfEdit.val); }} aria-label={tx("תיקון ביד")} />
+                                  <button className="mark-btn" onClick={() => vfFix(it, d, vfEdit.val)}>{tx("שמור")}</button>
+                                  <button className="mark-btn" onClick={() => setVfEdit(null)}>{tx("בטל")}</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button className="mark-btn" onClick={() => vfFix(it, d, d.want)}>{d.want ? tx("✓ כמו במקור") : tx("✓ מחק")}</button>
+                                  <button className="mark-btn" onClick={() => vfKeep(d)}>{tx("השאר כמו בספר שלי")}</button>
+                                  <button className="mark-btn" onClick={() => setVfEdit({ id: d.id, val: d.got || d.want })}>{tx("✎ תקן ביד")}</button>
+                                </>
+                              )}
+                            </li>
+                          )))}
+                        </ul>
+                      )}
+                      {vfState && vfState.total > 0 && vfState.items.every((it) => !it.diffs.length && !it.missing) && <div style={{ color: "#2f8f6b", fontWeight: 700, marginTop: 6 }}>{tx("✓ לשון הזוהר אומתה במלואה.")}{vfState.items.some((it) => it.kept) ? " " + tx("(כולל מקומות שבחרת להשאיר כמו בספר שלך)") : ""}</div>}
+                    </div>
+                  )}
                   {layerOn && (rangeIdx || wordSel) && (
                     <FloatingMarkBar anchorIdx={wordSel ? wordSel.i : rangeIdx[1]} word={!!wordSel}>
                       <span className="mark-title">{tx("✍️ שכבת הלומד:")}</span>
@@ -7480,6 +7716,17 @@ const css = `
 .gloss-btn.busy{animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .scroll-para.zohar{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.2em;color:#1a1408;margin-bottom:6px}
+.vf{background:#ffe3dd;box-shadow:0 2px 0 #d9534f;border-radius:3px}
+.vf-box{margin:8px 0 14px;padding:10px 12px;border:1.5px solid #e0c98f;border-radius:12px;background:#fffaf0;font-family:'Heebo',sans-serif;font-size:.9rem;color:#3a2c14}
+.vf-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.vf-bar{flex:1 1 140px;height:8px;border-radius:99px;background:#eadfc6;overflow:hidden;min-width:100px}
+.vf-bar i{display:block;height:100%;background:#2f8f6b}
+.vf-list{margin:10px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.vf-item{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 8px;border-radius:8px;background:#fff;border:1px solid #eadfc6}
+.vf-item b{font-family:'Frank Ruhl Libre',serif;font-size:1.08em}
+.vf-got{background:#ffe3dd;border-radius:4px;padding:0 4px}
+.vf-want{background:#dff3e6;border-radius:4px;padding:0 4px}
+.vf-in{flex:1 1 140px;font:inherit;font-family:'Frank Ruhl Libre',serif;padding:3px 8px;border:1px solid #c9b88a;border-radius:6px;background:#fff}
 .scroll-para.sulam .pr{font-size:.8em;color:#a39a86;font-weight:400}
 .scroll-para.sulam,.read-sents .scroll-para.sulam{color:#4d4636;border-inline-start:3px solid var(--amber);padding-inline-start:12px;margin-bottom:22px}
 .read-mark-hint{margin:0}
