@@ -904,7 +904,8 @@ function joinOverlap(a, b) {
   return a + (zsOtLine(b) ? "\n" : " ") + b;
 }
 const zsFlow = (a, b) => (!a ? b : !b ? a : a + (zsOtLine(b) ? "\n" : " ") + b);
-function zsSplitByOt(text) {
+/* allowed: קבוצת האותיות שמותר לפתוח בהן קטע (בפירוש — רק אותיות שיש להן ארמית בצילומים). בלי allowed: אות עולה, בקפיצה של עד 3. */
+function zsSplitByOt(text, allowed) {
   const segs = [];
   let cur = { n: 0, label: "", body: [] }, last = 0;
   for (const raw of String(text || "").split("\n")) {
@@ -913,22 +914,22 @@ function zsSplitByOt(text) {
     const m = line.match(/^([א-ת]{1,4})['׳]?\)\s*(.*)$/);
     const g = m ? gematria(m[1]) : 0;
     if (m && g && g === last) { if (m[2]) cur.body.push(m[2]); continue; } // אותה אות פעמיים (חפיפה) — המשך
-    if (m && g && (last === 0 || g === last + 1)) { segs.push(cur); cur = { n: g, label: m[1], body: m[2] ? [m[2]] : [] }; last = g; continue; }
+    const ok = m && g && (allowed && allowed.size ? allowed.has(g) && g > last : last === 0 || (g > last && g - last <= 3));
+    if (ok) { segs.push(cur); cur = { n: g, label: m[1], body: m[2] ? [m[2]] : [] }; last = g; continue; }
     cur.body.push(line);
   }
   segs.push(cur);
   return segs.filter((x) => x.n || x.body.length);
 }
-/* pieces: לכל עמוד — מערך הקטעים שלו מלמעלה למטה. מחזיר טקסט במבנה של דף הזוהר: "אות) ארמית" ואחריה פסקאות "הסולם: …" */
-function assembleZohar(pages) {
-  let src = "", com = "";
-  for (const pieces of pages) {
-    const P = pieces.map(parseZoharPiece);
-    const lay = (k) => P.reduce((acc, x) => joinOverlap(acc, x[k]), "");
-    src = zsFlow(src, lay("src"));
-    com = zsFlow(zsFlow(com, lay("right")), lay("left"));
-  }
-  const S = zsSplitByOt(src), C = zsSplitByOt(com);
+/* המנוע לפעמים מחזיר הסבר במקום טקסט ("התמונה אינה מציגה טקסט…") — זה לא נכנס לספר */
+const ZS_META = /התמונה אינה|אין בתמונה|בתמונה זו|אינה מכילה טקסט|לא נראה טקסט|^\s*\[?ריק\]?\s*$/;
+const zsCleanPiece = (t) => String(t || "").split("\n").filter((l) => l.trim() && !ZS_META.test(l)).join("\n").trim();
+/* srcAll: גוף הזוהר (ארמית) ברצף · comAll: הפירוש ברצף, לפי סדר הקריאה. מחזיר "אות) ארמית" ואחריה פסקאות "הסולם: …" */
+function assembleZoharText(srcAll, comAll) {
+  const src = String(srcAll || "").replace(/[•*]|\(\s*\)/g, "").replace(/[ \t]+/g, " ");
+  const com = String(comAll || "").replace(/[֑-ׇ]/g, "").replace(/[ \t]+/g, " "); // הפירוש אינו מנוקד — גם אם המנוע ניקד
+  const S = zsSplitByOt(src);
+  const C = zsSplitByOt(com, new Set(S.map((x) => x.n).filter(Boolean)));
   const ns = [...new Set([...S, ...C].map((x) => x.n))].sort((x, y) => x - y);
   const out = [];
   for (const n of ns) {
@@ -940,6 +941,91 @@ function assembleZohar(pages) {
     for (const c of cg) for (const para of c.body) out.push("הסולם: " + para);
   }
   return out.join("\n\n");
+}
+/* מסלול הגיבוי (פסים מתויגים): pieces לכל עמוד, מלמעלה למטה */
+function bandsToLayers(pieces) {
+  const P = pieces.map(parseZoharPiece);
+  const lay = (k) => P.reduce((acc, x) => joinOverlap(acc, x[k]), "");
+  return { src: lay("src"), com: zsFlow(lay("right"), lay("left")) };
+}
+
+/* ── מבנה הדף (צ'אט 27, גרסה שלישית) ──
+   חיתוך לפסים אופקיים נכשל בדף זוהר: המנוע קרא לרוחב שני הטורים, ניקד את הפירוש, וקרא שורות פעמיים.
+   כאן: קריאה אחת מאתרת איפה הארמית ואיפה הפירוש; הקוד מדייק את הרווח שבין הטורים לפי הפיקסלים; וכל שכבה וכל טור נחתכים ונקראים לבדם, ברזולוציה מלאה. */
+function cropToJpeg(img, x0, y0, x1, y1, maxSide = 1568) {
+  const c = (v) => Math.min(1, Math.max(0, v));
+  x0 = c(x0); y0 = c(y0); x1 = c(x1); y1 = c(y1);
+  const sx = Math.round(img.width * x0), sy = Math.round(img.height * y0);
+  const sw = Math.max(8, Math.round(img.width * (x1 - x0))), sh = Math.max(8, Math.round(img.height * (y1 - y0)));
+  const scale = Math.min(1, maxSide / Math.max(sw, sh));
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(sw * scale); cv.height = Math.round(sh * scale);
+  cv.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, cv.width, cv.height);
+  return cv.toDataURL("image/jpeg", 0.88).split(",")[1];
+}
+/* מפת בהירות מוקטנת של העמוד — לאיתור הרווח בין הטורים */
+function pageLuma(img, w = 800) {
+  const h = Math.max(1, Math.round((img.height / img.width) * w));
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  const d = ctx.getImageData(0, 0, w, h).data;
+  const L = new Uint8Array(w * h);
+  for (let i = 0, j = 0; i < d.length; i += 4, j++) L[j] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+  return { L, w, h };
+}
+/* מדייק את ה-x של הרווח בין הטורים בתחום גובה נתון: מחפש סביב ההערכה את רצועת העמודות הריקה ביותר מדיו. מחזיר שבר (0–1), או את ההערכה אם אין רווח ברור. */
+function snapGutter(lum, gx, y0, y1, span = 0.06) {
+  const { L, w, h } = lum;
+  const r0 = Math.max(0, Math.floor(y0 * h)), r1 = Math.min(h, Math.ceil(y1 * h));
+  const c0 = Math.max(0, Math.floor((gx - span) * w)), c1 = Math.min(w - 1, Math.ceil((gx + span) * w));
+  if (r1 - r0 < 4 || c1 - c0 < 4) return gx;
+  /* סף דיו: יחסית לבהירות הנייר באזור (אחוזון 85) */
+  const sample = [];
+  for (let y = r0; y < r1; y += 2) for (let x = c0; x <= c1; x += 2) sample.push(L[y * w + x]);
+  sample.sort((p, q) => p - q);
+  const paper = sample[Math.floor(sample.length * 0.85)] || 200;
+  const thr = paper * 0.68;
+  const ink = [];
+  for (let x = c0; x <= c1; x++) { let n = 0; for (let y = r0; y < r1; y++) if (L[y * w + x] < thr) n++; ink.push(n); }
+  const min = Math.min(...ink), lim = min + Math.max(1, (r1 - r0) * 0.03);
+  let best = null;
+  for (let i = 0; i < ink.length; ) {
+    if (ink[i] > lim) { i++; continue; }
+    let j = i; while (j + 1 < ink.length && ink[j + 1] <= lim) j++;
+    const mid = (i + j) / 2, len = j - i + 1, dist = Math.abs(c0 + mid - gx * w);
+    const score = len - dist * 0.15; // רצועה רחבה, עם העדפה קלה לקרבה להערכה
+    if (!best || score > best.score) best = { score, mid, len };
+    i = j + 1;
+  }
+  if (!best || best.len < 2) return gx;
+  return (c0 + best.mid) / w;
+}
+const ZS_LAYOUT_PROMPT =
+  'לפניך צילום של עמוד מספר הזוהר עם פירוש. אל תתמלל. החזר אובייקט JSON אחד בלבד, שמתאר איפה כל חלק נמצא בתמונה. כל המספרים הם שברים עשרוניים בין 0 ל-1: x נמדד מהקצה השמאלי של התמונה (0) לימני (1), y מהקצה העליון (0) לתחתון (1). המבנה: {"aramaic": {"top": y, "bottom": y, "left": x, "right": x}, "commentary": {"top": y, "bottom": y, "left": x, "right": x}, "columns": 1 או 2, "gutter": x}. ' +
+  '"aramaic" — המלבן שמקיף את כל גוף הזוהר: הטקסט הארמי המנוקד באותיות הגדולות, כולל שורות בראש העמוד שהן המשך מהעמוד הקודם. בלי כותרת העמוד ובלי ההערות הקטנות שמתחתיו ("מסורת הזהר", "חלופי גרסאות"). אם אין ארמית בעמוד: null. ' +
+  '"commentary" — המלבן שמקיף את הפירוש העברי באותיות הקטנות ("הסולם" / "מעלות הסולם"), מהשורה הראשונה שמתחת לכותרת הפירוש ועד השורה האחרונה בעמוד. אם אין פירוש בעמוד: null. ' +
+  '"columns" — בכמה טורים מודפס הפירוש. "gutter" — ה-x של אמצע הרווח הלבן שבין שני הטורים (אם columns הוא 2). ' +
+  'התייחס רק לעמוד הראשי שבמרכז הצילום, ולא לעמוד שכן שנראה בשוליים.';
+const ZS_SRC_PROMPT =
+  "לפניך קטע מגוף ספר הזוהר: ארמית מנוקדת באותיות גדולות. תמלל אותו מילה במילה עם הניקוד, בדיוק כפי שהוא מודפס — בלי להשלים מהזיכרון ובלי לתקן. כל אות מסומנת (כמו א) ב) ג)) פותחת שורה חדשה, והטקסט שלה נכתב ברצף בשורה אחת. טקסט שלפני הסימון הראשון נכתב בשורה ראשונה בלי סימון. דלג על: כותרות ממורכזות (שם המאמר, שם הפרשה, כותרת העמוד), אותיות-הערה קטנות וכוכביות שבין המילים, והערות באותיות קטנות. שורה שחתוכה בקצה העליון או התחתון של התמונה — דלג עליה. מילה שאינה קריאה סמן […]. אם אין בתמונה טקסט ארמי כזה — החזר רק את המילה: ריק";
+const ZS_COM_PROMPT =
+  "לפניך קטע מטור אחד של פירוש עברי: אותיות קטנות, בלי ניקוד, והציטוטים מהזוהר מודגשים. תמלל אותו מילה במילה, בלי ניקוד, בלי לתקן ובלי להשלים מהזיכרון. כתוב כל פסקה כשורה אחת רצופה; שורה שמתחילה בהזחה פותחת פסקה חדשה, בשורה חדשה. פסקה שנפתחת בסימון אות — למשל: ג) וההוא טהירו וכו': — הסימון נשאר בראש השורה. דלג על: כותרת ממורכזת, שורת ההפניה הקטנה שבסוגריים בתחתית הטור (כגון דפו\"י), מילה בודדת בתחתית העמוד, הערות \"מסורת הזהר\" ו\"חלופי גרסאות\", ואותיות חתוכות מטור שכן שנראות בקצה. שורה שחתוכה בקצה העליון או התחתון של התמונה — דלג עליה. מילה שאינה קריאה סמן […]. אם אין בתמונה טקסט — החזר רק את המילה: ריק";
+const zsNum = (v) => (typeof v === "number" && isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && isFinite(+v) ? +v : NaN);
+function zsBox(b) {
+  if (!b || typeof b !== "object") return null;
+  const t = zsNum(b.top), bo = zsNum(b.bottom), l = zsNum(b.left), r = zsNum(b.right);
+  if ([t, bo, l, r].some((v) => isNaN(v) || v < -0.02 || v > 1.02)) return null;
+  if (bo - t < 0.02 || r - l < 0.15) return null;
+  return { top: Math.max(0, t), bottom: Math.min(1, bo), left: Math.max(0, l), right: Math.min(1, r) };
+}
+/* מחלק תחום גובה לקטעים חופפים */
+function zsSlices(top, bottom, maxH, ov) {
+  const h = bottom - top;
+  if (h <= maxH) return [[top, bottom]];
+  const n = Math.ceil((h - ov) / (maxH - ov)), step = (h - maxH) / (n - 1);
+  return Array.from({ length: n }, (_, k) => [top + k * step, top + k * step + maxH]);
 }
 
 async function smartScanImages(files, mode, onProgress) {
@@ -978,25 +1064,85 @@ async function smartScanImages(files, mode, onProgress) {
       }
       throw lastErr;
     };
-    const pages = [];
+    /* תור משותף: עד שלוש קריאות במקביל */
+    const pool = async (jobs, onDone) => {
+      const res = new Array(jobs.length);
+      let next = 0, done = 0;
+      const worker = async () => { while (next < jobs.length) { const k = next++; res[k] = await jobs[k](); onDone?.(++done, jobs.length); } };
+      await Promise.all([worker(), worker(), worker()]);
+      return res;
+    };
+    /* קריאת קטע חתוך (שכבה אחת), עם ניסיונות חוזרים; קטע שנקטע בזמן מתפצל לשניים */
+    const readCrop = async (img, prompt, x0, y0, x1, y1, depth) => {
+      const go = () => askClaude(prompt, 1400, false, cropToJpeg(img, x0, y0, x1, y1), "image/jpeg", true);
+      let lastErr;
+      for (let at = 0; at < 4; at++) {
+        if (at) await new Promise((r) => setTimeout(r, at * 3000));
+        try { return [zsCleanPiece(await go())]; }
+        catch (e) {
+          lastErr = e;
+          if (isEmptyErr(e)) { if (at >= 1) return [""]; continue; }
+          if (isTimeoutErr(e)) {
+            if (depth >= 2) continue;
+            const mid = (y0 + y1) / 2, ov = Math.min(0.015, (y1 - y0) / 4);
+            const [p1, p2] = await Promise.all([readCrop(img, prompt, x0, y0, x1, mid + ov, depth + 1), readCrop(img, prompt, x0, mid - ov, x1, y1, depth + 1)]);
+            return [...p1, ...p2];
+          }
+          if (!isNetErr(e) && !isRetryableScanErr(e)) throw e;
+        }
+      }
+      throw lastErr;
+    };
+    /* המסלול הראשי: מבנה הדף ← חיתוך שכבה-שכבה וטור-טור. מחזיר null אם המבנה לא זוהה (ואז עוברים לפסים). */
+    const readPageByLayout = async (img, i) => {
+      onProgress?.(i + 1, files.length, " · מאתר את מבנה הדף");
+      let lay;
+      try { lay = await askClaude(ZS_LAYOUT_PROMPT, 500, false, imgToJpegBase64(img, 1400), "image/jpeg", false); }
+      catch (e) { if (/login|quota|מכסה|להיכנס|החיבור/.test(String(e?.message || e))) throw e; return null; }
+      const A = zsBox(lay?.aramaic), C = zsBox(lay?.commentary);
+      if (!A && !C) return null;
+      const two = C && +lay.columns !== 1;
+      let g = two ? zsNum(lay.gutter) : NaN;
+      if (two && (isNaN(g) || g <= C.left + 0.08 || g >= C.right - 0.08)) g = (C.left + C.right) / 2;
+      const lum = two ? pageLuma(img) : null;
+      const jobs = [], kinds = [];
+      if (A) for (const [y0, y1] of zsSlices(Math.max(0, A.top - 0.012), Math.min(1, A.bottom + 0.012), 0.085, 0.03)) {
+        jobs.push(() => readCrop(img, ZS_SRC_PROMPT, A.left - 0.025, y0, A.right + 0.025, y1, 0)); kinds.push("src");
+      }
+      const gutters = [];
+      if (C) {
+        const sl = zsSlices(Math.max(0, C.top - 0.008), Math.min(1, C.bottom + 0.012), 0.115, 0.03);
+        if (two) {
+          /* הרווח נמדד בכל קטע לחוד — כך גם צילום עקום נחתך נכון; קצות הטורים זזים יחד איתו */
+          const gs = sl.map(([y0, y1]) => snapGutter(lum, g, y0, y1));
+          const gm = gs.slice().sort((p, q) => p - q)[Math.floor(gs.length / 2)];
+          gutters.push(...gs.map((v) => +v.toFixed(4)));
+          sl.forEach(([y0, y1], k) => { const dx = gs[k] - gm; jobs.push(() => readCrop(img, ZS_COM_PROMPT, gs[k] + 0.004, y0, C.right + dx + 0.022, y1, 0)); kinds.push("right"); });
+          sl.forEach(([y0, y1], k) => { const dx = gs[k] - gm; jobs.push(() => readCrop(img, ZS_COM_PROMPT, C.left + dx - 0.022, y0, gs[k] - 0.004, y1, 0)); kinds.push("left"); });
+        } else for (const [y0, y1] of sl) { jobs.push(() => readCrop(img, ZS_COM_PROMPT, C.left - 0.022, y0, C.right + 0.022, y1, 0)); kinds.push("right"); }
+      }
+      const res = await pool(jobs, (d, n) => onProgress?.(i + 1, files.length, ` · קטע ${d}/${n}`));
+      const layer = (kind) => res.filter((_, k) => kinds[k] === kind).flat().reduce((acc, x) => joinOverlap(acc, x), "");
+      return { src: layer("src"), com: zsFlow(layer("right"), layer("left")), debug: { layout: lay, gutters, pieces: res.map((r, k) => [kinds[k], ...r]) } };
+    };
+    const readPageByBands = async (img, i) => {
+      const res = await pool(BANDS.map((b) => () => readRegion(img, b[0], b[1], 0)), (d, n) => onProgress?.(i + 1, files.length, ` · חלק ${d}/${n}`));
+      const pieces = res.flat();
+      return { ...bandsToLayers(pieces), debug: { bands: pieces } };
+    };
+    let srcAll = "", comAll = "";
+    const debug = [];
     for (let i = 0; i < files.length; i++) {
       const img = await loadImageEl(files[i]);
-      const res = new Array(N_BANDS);
-      let next = 0, done = 0;
-      onProgress?.(i + 1, files.length, ` · חלק 0/${N_BANDS}`);
-      const worker = async () => {
-        while (next < N_BANDS) {
-          const k = next++;
-          res[k] = await readRegion(img, BANDS[k][0], BANDS[k][1], 0);
-          onProgress?.(i + 1, files.length, ` · חלק ${++done}/${N_BANDS}`);
-        }
-      };
-      await Promise.all([worker(), worker(), worker()]);
-      pages.push(res.flat());
+      const page = (await readPageByLayout(img, i)) || (await readPageByBands(img, i));
+      srcAll = zsFlow(srcAll, page.src);
+      comAll = zsFlow(comAll, page.com);
+      debug.push({ file: files[i].name, w: img.width, h: img.height, ...page.debug });
     }
-    const text = assembleZohar(pages);
+    const text = assembleZoharText(srcAll, comAll);
     if (text.replace(/\s/g, "").length < 30) throw new Error("המנוע לא הצליח לפענח טקסט מהצילומים. נסה צילום חד, ישר ומואר יותר.");
-    return text;
+    /* debug נשמר עם הספר (book.flex.scan) ונכנס לגיבוי — כדי שאפשר יהיה לראות מה המנוע החזיר לכל קטע */
+    return { text, debug: { v: 3, at: new Date().toISOString(), pages: debug } };
   }
   let out = "";
   for (let i = 0; i < files.length; i++) {
@@ -1692,7 +1838,10 @@ function applyWordPatch(w, s, e, patch) {
 /* מציג משפט עם סגנון פר-משפט + טווחי מילים + הבהוב הסימון הממתין (txt = הנוסח המוצג) */
 function renderMarked(txt, mk, pend, kara, gloss) {
   const w = (mk && Array.isArray(mk.w)) ? mk.w : [];
-  if (!mk && !pend && kara == null && !gloss) return txt;
+  /* סוגריים (מראי מקום, הפניות) מקבלים מחלקה "pr" — מוצגים קטנים ובהירים רק בתוך פסקת פירוש (CSS). הטקסט עצמו לא משתנה, ולכן הסימונים נשארים במקומם. */
+  const pr = [];
+  if (!gloss && typeof txt === "string" && txt.includes("(")) { const re = /\([^()\n]{1,90}\)/g; let m; while ((m = re.exec(txt))) pr.push([m.index, m.index + m[0].length]); }
+  if (!mk && !pend && kara == null && !gloss && !pr.length) return txt;
   const base = {};
   if (mk) {
     if (mk.b) base.fontWeight = 800;
@@ -1700,12 +1849,13 @@ function renderMarked(txt, mk, pend, kara, gloss) {
     if (mk.hl) base.background = HL_COLORS[mk.hl];
   }
   if (gloss) return renderGlossed(txt, w, base, kara, gloss);
-  if (!w.length && !pend && kara == null) return <span style={base}>{txt}</span>;
+  if (!w.length && !pend && kara == null && !pr.length) return <span style={base}>{txt}</span>;
   const pts = new Set([0, txt.length]);
   const clamp = (n) => Math.max(0, Math.min(n, txt.length));
   w.forEach((r) => { pts.add(clamp(r.s)); pts.add(clamp(r.e)); });
   if (pend) { pts.add(clamp(pend.s)); pts.add(clamp(pend.e)); }
   if (kara != null) pts.add(clamp(kara));
+  pr.forEach(([a, b]) => { pts.add(a); pts.add(b); });
   const arr = [...pts].sort((a, b) => a - b);
   const nodes = [];
   for (let k = 0; k < arr.length - 1; k++) {
@@ -1722,7 +1872,8 @@ function renderMarked(txt, mk, pend, kara, gloss) {
     }
     if (isPend) { if (!st.background) st.background = "#fdeed3"; st.boxShadow = "0 2px 0 var(--amber)"; }
     const done = kara != null && e <= clamp(kara);
-    const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : ""].filter(Boolean).join(" ") || undefined;
+    const inPr = pr.some(([a, b]) => a <= s && b >= e);
+    const cls = [isPend ? "ws-pend" : "", done ? "kara-done" : "", inPr ? "pr" : ""].filter(Boolean).join(" ") || undefined;
     nodes.push(<span key={k} className={cls} style={Object.keys(st).length ? st : undefined}>{piece}</span>);
   }
   return nodes;
@@ -4615,13 +4766,15 @@ export default function LearningTV() {
     document.addEventListener("visibilitychange", onVis);
     const releaseWake = () => { document.removeEventListener("visibilitychange", onVis); try { wake?.release?.(); } catch {} };
     try {
-      const text = await smartScanImages(files, smartMode, (n, total, extra) =>
+      const scanned = await smartScanImages(files, smartMode, (n, total, extra) =>
         setFileBusy(tx("📸 המנוע קורא ומארגן את הדף {a}/{b}{x}... (עד דקה לעמוד)", { a: n, b: total, x: extra || "" }))
       );
+      const text = typeof scanned === "string" ? scanned : scanned.text;
+      const scanExtra = typeof scanned === "string" || !scanned.debug ? null : { flex: { scan: scanned.debug } };
       const base = files[0].name.replace(/\.[^.]+$/, "");
       const givenTitle = titleRef.current?.value?.trim();
       setFileBusy(null);
-      await buildBook(text, givenTitle || tx("דף חכם — ") + base);
+      await buildBook(text, givenTitle || tx("דף חכם — ") + base, false, null, scanExtra);
     } catch (err) {
       console.error("smart scan failed", err);
       setError(err.message || tx("פענוח הדף נכשל."));
@@ -7193,6 +7346,7 @@ const css = `
 .gloss-btn.busy{animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
 .scroll-para.zohar{font-family:'Frank Ruhl Libre',serif;font-weight:700;font-size:1.2em;color:#1a1408;margin-bottom:6px}
+.scroll-para.sulam .pr{font-size:.8em;color:#a39a86;font-weight:400}
 .scroll-para.sulam,.read-sents .scroll-para.sulam{color:#4d4636;border-inline-start:3px solid var(--amber);padding-inline-start:12px;margin-bottom:22px}
 .read-mark-hint{margin:0}
 .scan-mode-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#f2ecff;border:1.5px solid #c9b8f2;border-radius:10px;padding:10px 14px;margin:10px 0;font-size:.98rem;color:#3a2a63}
