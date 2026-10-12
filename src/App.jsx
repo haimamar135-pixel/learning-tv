@@ -549,6 +549,46 @@ async function idbKeys() {
     rq.onerror = () => reject(rq.error);
   });
 }
+/* 📤 הקלטת השיעור עצמה (לא רק התמלול) — נשמרת במכשיר בלבד, לצד הספר שנוצר ממנה.
+   "pending" = הקלטה שעוד לא הפכה לספר (נשמרת מיד בעצירה, כדי ששיעור לא יאבד אם התמלול נכשל). */
+const REC_PREFIX = "ltv-rec-";
+const REC_PENDING = "pending";
+const recKey = (id) => REC_PREFIX + id;
+const recExt = (mime) => { const m = String(mime || "").toLowerCase(); return /mp4|m4a|aac/.test(m) ? "m4a" : /mpeg|mp3/.test(m) ? "mp3" : /ogg/.test(m) ? "ogg" : /wav/.test(m) ? "wav" : "webm"; };
+const recClock = (sec) => { const s = Math.max(0, Math.round(sec || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const recFileName = (title, mime) => (String(title || "").replace(/[\\/:*?"<>|\n\r]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || "lesson") + "." + recExt(mime);
+/* המלל של ספר כקובץ טקסט פשוט (UTF-8 עם BOM — כדי שהעברית תיפתח נכון בכל תוכנה) */
+const bookAsText = (b) => {
+  const chs = (b?.chapters || []).filter((c) => c && (c.text || "").trim());
+  const many = chs.length > 1;
+  return "\uFEFF" + (b?.title || "") + "\n\n" + chs.map((c) => (many && c.title ? c.title + "\n\n" : "") + String(c.text || "").trim()).join("\n\n\n") + "\n";
+};
+/* ZIP מינימלי בלי דחיסה (שמע כבר דחוס) — כדי שבמחשב ההקלטה והמלל ירדו כקובץ אחד */
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = (u8) => { let c = 0xffffffff; for (let i = 0; i < u8.length; i++) c = CRC_T[(c ^ u8[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+async function zipStore(files) {
+  const enc = new TextEncoder(), parts = [], central = [];
+  let off = 0;
+  const d = new Date(), dd = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(), dt = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  for (const f of files) {
+    const data = new Uint8Array(await f.arrayBuffer()), name = enc.encode(f.name), crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, dt, true); h.setUint16(12, dd, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+    h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+    parts.push(h.buffer, name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+    c.setUint16(12, dt, true); c.setUint16(14, dd, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+    c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+    central.push(c.buffer, name);
+    off += 30 + name.length + data.length;
+  }
+  const csize = central.reduce((n, p) => n + p.byteLength, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, e.buffer], { type: "application/zip" });
+}
 /* הגירה חד-פעמית מ-localStorage. רצה פעם אחת לפני הטעינה הראשונה. */
 let migratedPromise = null;
 function migrateFromLocalStorage() {
@@ -3905,6 +3945,19 @@ export default function LearningTV() {
   const recRef = useRef(null); // הקלטה חיה — MediaRecorder פעיל
   const [recOn, setRecOn] = useState(false);
   const [recSec, setRecSec] = useState(0);
+  const [recIds, setRecIds] = useState(() => new Set()); // 📤 לאילו ספרים יש הקלטה שמורה במכשיר (וגם "pending")
+  const [recPend, setRecPend] = useState(null);          // פרטי ההקלטה שעוד לא תומללה: {sec, bytes, at}
+  const [recReady, setRecReady] = useState(null);        // מזהה שהקובץ שלו כבר נטען וממתין ללחיצה שנייה (ספארי)
+  const recFileRef = useRef(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const keys = (await idbKeys()).filter((k) => typeof k === "string" && k.startsWith(REC_PREFIX)).map((k) => k.slice(REC_PREFIX.length));
+        setRecIds(new Set(keys));
+        if (keys.includes(REC_PENDING)) { const r = await idbGet(recKey(REC_PENDING)); if (r?.blob) setRecPend({ sec: r.sec || 0, bytes: r.blob.size, at: r.at || 0 }); }
+      } catch {}
+    })();
+  }, []);
   const [fontScale, setFontScale] = useState(() => {
     try { const v = parseFloat(localStorage.getItem("lomedtv-fontscale")); return v >= 0.7 && v <= 1.8 ? v : 1; } catch { return 1; }
   });
@@ -5042,7 +5095,7 @@ export default function LearningTV() {
   };
 
   /* זרימה משותפת לשער הקול: קובץ שנבחר או הקלטה חיה ← תמלול ← ליטוש (רשות) ← ספר */
-  const processMedia = async (blob, fallbackBase) => {
+  const processMedia = async (blob, fallbackBase, fromRec = false) => {
     try {
       const givenTitle = titleRef.current?.value?.trim();
       const hint = givenTitle ? "תמלול בעברית. הנושא: " + givenTitle : "";
@@ -5061,12 +5114,83 @@ export default function LearningTV() {
         );
       }
       setFileBusy(null);
-      await buildBook(text, givenTitle || tx("תמלול — ") + fallbackBase);
+      const nb = await buildBook(text, givenTitle || tx("תמלול — ") + fallbackBase);
+      if (fromRec && nb?.id) {
+        try {
+          const r = await idbGet(recKey(REC_PENDING));
+          if (r?.blob) {
+            await idbSet(recKey(nb.id), r);
+            await idbDel(recKey(REC_PENDING));
+            setRecIds((s) => { const n = new Set(s); n.delete(REC_PENDING); n.add(nb.id); return n; });
+            setRecPend(null);
+          }
+        } catch (e) { console.warn("rec attach", e); }
+      }
     } catch (err) {
       console.error("transcribe failed", err);
-      setError(err.message || tx("התמלול נכשל."));
+      setError((err.message || tx("התמלול נכשל.")) + (fromRec ? " " + tx("ההקלטה עצמה שמורה במכשיר — אפשר לשלוח אותה או לתמלל שוב.") : ""));
       setFileBusy(null);
     }
+  };
+
+  /* 📤 שליחת קובץ ההקלטה: בטלפון — גיליון השיתוף (וואטסאפ, מייל, AirDrop); במחשב — הורדה לתיקיית ההורדות */
+  const sendRec = async (id, title) => {
+    setError(null);
+    try {
+      let file = recFileRef.current && recFileRef.current.id === id ? recFileRef.current.file : null;
+      if (!file) {
+        const r = await idbGet(recKey(id));
+        if (!r?.blob) { setError(tx("ההקלטה לא נמצאה במכשיר הזה. היא נשמרת רק במכשיר שבו הוקלטה.")); return; }
+        const mime = String(r.mime || r.blob.type || "audio/webm").split(";")[0];
+        file = new File([r.blob], recFileName(title || r.title || tx("הקלטת שיעור"), mime), { type: mime });
+      }
+      /* המלל של הספר מצטרף להקלטה (להקלטה שעוד לא תומללה אין מלל) */
+      let textFile = null;
+      if (id !== REC_PENDING) {
+        try {
+          const b = book && book.id === id ? book : await loadBook(id);
+          if (b?.chapters?.length) textFile = new File([bookAsText(b)], file.name.replace(/\.[^.]+$/, "") + ".txt", { type: "text/plain" });
+        } catch {}
+      }
+      const mobile = IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent);
+      if (mobile && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          const both = textFile && navigator.canShare({ files: [file, textFile] }) ? [file, textFile] : [file];
+          await navigator.share({ files: both, title: title || tx("הקלטת שיעור") });
+          recFileRef.current = null; setRecReady(null);
+          return;
+        } catch (e) {
+          if (e?.name === "AbortError") { recFileRef.current = null; setRecReady(null); return; }
+          /* ספארי דורש שהשיתוף ייפתח ישירות מלחיצה: הקובץ כבר טעון — לחיצה שנייה תפתח מיד */
+          if (e?.name === "NotAllowedError" && recReady !== id) { recFileRef.current = { id, file }; setRecReady(id); return; }
+        }
+      }
+      recFileRef.current = null; setRecReady(null);
+      /* במחשב: הקלטה + מלל יורדים יחד כקובץ ZIP אחד; הקלטה בלי מלל — קובץ השמע עצמו */
+      let out = file;
+      if (textFile) { try { out = new File([await zipStore([file, textFile])], file.name.replace(/\.[^.]+$/, "") + ".zip", { type: "application/zip" }); } catch (e) { console.warn("zip", e); } }
+      const url = URL.createObjectURL(out);
+      const a = document.createElement("a");
+      a.href = url; a.download = out.name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      console.error("sendRec failed", e);
+      setError(tx("שליחת ההקלטה נכשלה."));
+    }
+  };
+  const retryRec = async () => {
+    if (fileBusy || recOn) return;
+    setError(null);
+    const r = await idbGet(recKey(REC_PENDING)).catch(() => null);
+    if (!r?.blob) { setRecPend(null); return; }
+    await processMedia(r.blob, tx("הקלטה חיה"), true);
+  };
+  const dropRec = async () => {
+    if (!window.confirm(tx("למחוק את ההקלטה שלא תומללה? אי אפשר לשחזר אותה."))) return;
+    try { await idbDel(recKey(REC_PENDING)); } catch {}
+    setRecIds((s) => { const n = new Set(s); n.delete(REC_PENDING); return n; });
+    setRecPend(null);
   };
 
   const onMediaPicked = async (e) => {
@@ -5080,8 +5204,10 @@ export default function LearningTV() {
   /* 🎙 הקלטה חיה: מקליטים מהמיקרופון, ובסיום — אותו צינור תמלול בדיוק */
   const startRec = async () => {
     if (recOn || fileBusy) return;
+    if (recPend && !window.confirm(tx("יש הקלטה קודמת שעוד לא תומללה. הקלטה חדשה תחליף אותה. להמשיך?"))) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const t0 = Date.now();
       const mr = new MediaRecorder(stream);
       const chunks = [];
       mr.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
@@ -5092,7 +5218,16 @@ export default function LearningTV() {
         setRecOn(false);
         const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
         if (blob.size < 4000) { setError(tx("ההקלטה קצרה מדי — נסה שוב.")); return; }
-        await processMedia(blob, tx("הקלטה חיה"));
+        /* קודם כול שומרים את ההקלטה במכשיר — רק אחר כך מתמללים */
+        let kept = false;
+        try {
+          const sec = Math.round((Date.now() - t0) / 1000);
+          await idbSet(recKey(REC_PENDING), { blob, mime: blob.type, sec, at: Date.now() });
+          setRecIds((s) => new Set(s).add(REC_PENDING));
+          setRecPend({ sec, bytes: blob.size, at: Date.now() });
+          kept = true;
+        } catch (e) { console.warn("rec keep", e); }
+        await processMedia(blob, tx("הקלטה חיה"), kept);
       };
       recRef.current = { mr, iv: setInterval(() => setRecSec((s) => s + 1), 1000) };
       setRecSec(0);
@@ -5134,6 +5269,8 @@ export default function LearningTV() {
     setIndex(nextIdx);
     setDeleteArm(null);
     await deleteBookFromStorage(id);
+    try { await idbDel(recKey(id)); } catch {}
+    setRecIds((s) => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
     await saveIndex(nextIdx);
     if (starterBook(id)) { try { localStorage.setItem("lomedtv-starter-" + id, "removed"); } catch {} } // ספר פתיחה שנמחק — לא חוזר
     clearSyncStamp(id);
@@ -6154,6 +6291,15 @@ export default function LearningTV() {
                     </span>
                   </div>
 
+                  {recPend && !fileBusy && !recOn && (
+                    <div className="rec-pend">
+                      <span>{tx("🎙 הקלטה שעוד לא תומללה")} · {recClock(recPend.sec)}</span>
+                      <button className="rec-btn" onClick={() => sendRec(REC_PENDING, titleRef.current?.value?.trim() || tx("הקלטת שיעור"))}>{recReady === REC_PENDING ? tx("📤 לחץ שוב לשליחה") : tx("📤 שלח הקלטה")}</button>
+                      <button className="rec-btn" onClick={retryRec}>{tx("🔁 תמלל שוב")}</button>
+                      <button className="del" onClick={dropRec} title={tx("מחק הקלטה")}>✕</button>
+                    </div>
+                  )}
+
                   <div className="or-divider"><span>{tx("או הדבק טקסט")}</span></div>
  
                   <textarea ref={inputRef} className="intake-text" placeholder={tx("הדבק את הטקסט כאן...")} />
@@ -6181,6 +6327,14 @@ export default function LearningTV() {
                   {fileBusy && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px" }}>⏳ {fileBusy}</div>}
                   {!fileBusy && recOn && <div className="busy-line" style={{ display: "block", margin: "2px 0 12px", color: "#ff8a8a" }}>{tx("● מקליט… לסיום לחץ ⏹ למטה")}</div>}
                   {error && <div className="err">{error}</div>}
+                  {recPend && !fileBusy && !recOn && (
+                    <div className="rec-pend">
+                      <span>{tx("🎙 הקלטה שעוד לא תומללה")} · {recClock(recPend.sec)}</span>
+                      <button className="rec-btn" onClick={() => sendRec(REC_PENDING, titleRef.current?.value?.trim() || tx("הקלטת שיעור"))}>{recReady === REC_PENDING ? tx("📤 לחץ שוב לשליחה") : tx("📤 שלח הקלטה")}</button>
+                      <button className="rec-btn" onClick={retryRec}>{tx("🔁 תמלל שוב")}</button>
+                      <button className="del" onClick={dropRec} title={tx("מחק הקלטה")}>✕</button>
+                    </div>
+                  )}
                   {index.map((b) => (
                     <div className="book-row" key={b.id}>
                       <button className="book-main" onClick={() => openBook(b.id)}>
@@ -6195,6 +6349,11 @@ export default function LearningTV() {
                       {(b.talk || 0) >= MIRROR_MIN && (
                         <button className="mirror-btn" onClick={() => openMirror(b.id)} title={tx("🎧 שיקוף — {n} הערות וסימונים בספר הזה", { n: b.talk })} aria-label={tx("שיקוף")}>
                           🎧<small>{tx("שיקוף")}</small>
+                        </button>
+                      )}
+                      {recIds.has(b.id) && (
+                        <button className="mirror-btn" onClick={() => sendRec(b.id, b.title)} title={tx("ייצוא: הקלטת השיעור יחד עם המלל (ההקלטה שמורה במכשיר הזה)")} aria-label={tx("שלח הקלטה")}>
+                          📤<small>{recReady === b.id ? tx("לחץ שוב") : tx("ייצוא")}</small>
                         </button>
                       )}
                       {deleteArm === b.id ? (
@@ -7406,6 +7565,9 @@ const css = `
 }
 .mirror-btn small{font-size:.62rem;font-weight:700;letter-spacing:.02em}
 .mirror-btn:hover{border-color:var(--amber-deep);background:#fff3d6}
+.rec-pend{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 12px;padding:10px 12px;border:1.5px dashed #6f96d0;border-radius:12px;background:rgba(63,111,181,.10);font-family:'Heebo',sans-serif;font-size:.95rem}
+.rec-pend > span{flex:1 1 180px;font-weight:600}
+.rec-pend .del{min-height:38px}
 .ch-key.mirror{background:linear-gradient(180deg,#3a2b12,#241a0c);border-color:#6b4d1c;color:#f3e2bd}
 .ch-key.mirror .key-num{color:var(--amber)}
 .mirror{display:flex;flex-direction:column;gap:14px}
