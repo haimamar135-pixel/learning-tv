@@ -953,13 +953,21 @@ async function smartScanImages(files, mode, onProgress) {
     const NOTES = [NOTE_TOP, NOTE_MID, NOTE_MID, NOTE_BOT];
     const readBand = async (img, b) => {
       const go = () => scanPiece(spec, imgToJpegBase64(img, 1568, BANDS[b]), NOTES[b], 2000);
-      /* פס שאין בו טקסט (שוליים, כותרת בלבד) חוזר ריק — זו לא תקלה, ואסור שיפיל את כל הסריקה */
+      /* עד 4 ניסיונות לכל פס, עם המתנה ביניהם: תקלת רשת רגעית (מסך שנרדם, ניתוק) או timeout לא מפילים סריקה של כמה דקות.
+         פס שאין בו טקסט (שוליים, כותרת בלבד) חוזר ריק — זו לא תקלה. */
       const empty = (e) => /ריקה/.test(String(e?.message || e));
-      try { return await go(); }
-      catch (e) {
-        if (!isRetryableScanErr(e)) throw e;
-        try { return await go(); } catch (e2) { if (empty(e2)) return ""; throw e2; }
+      const retryable = (e) => isRetryableScanErr(e) || /רשת|network|Load failed|Failed to fetch|502|503|529/i.test(String(e?.message || e));
+      let lastErr;
+      for (let at = 0; at < 4; at++) {
+        if (at) await new Promise((r) => setTimeout(r, at * 4000));
+        try { return await go(); }
+        catch (e) {
+          lastErr = e;
+          if (empty(e) && at >= 1) return "";
+          if (!retryable(e)) throw e;
+        }
       }
+      throw lastErr;
     };
     const pages = [];
     for (let i = 0; i < files.length; i++) {
@@ -4583,6 +4591,13 @@ export default function LearningTV() {
     if (!files.length) return;
     setError(null);
     setFileBusy(tx("📸 טוען {b} צילומים…", { b: files.length })); // מיד עם הבחירה — שיהיה ברור שהעבודה התחילה
+    /* המסך לא נרדם בזמן הסריקה (צ'אט 27: סריקה של כמה דקות נפלה כשהמק כיבה את הצג). הנעילה משתחררת בסוף; אם הלשונית הוסתרה וחזרה — מבקשים שוב. */
+    let wake = null;
+    const keepAwake = async () => { try { wake = await navigator.wakeLock?.request?.("screen"); } catch {} };
+    const onVis = () => { if (document.visibilityState === "visible") keepAwake(); };
+    await keepAwake();
+    document.addEventListener("visibilitychange", onVis);
+    const releaseWake = () => { document.removeEventListener("visibilitychange", onVis); try { wake?.release?.(); } catch {} };
     try {
       const text = await smartScanImages(files, smartMode, (n, total, extra) =>
         setFileBusy(tx("📸 המנוע קורא ומארגן את הדף {a}/{b}{x}... (עד דקה לעמוד)", { a: n, b: total, x: extra || "" }))
@@ -4596,6 +4611,7 @@ export default function LearningTV() {
       setError(err.message || tx("פענוח הדף נכשל."));
       setFileBusy(null);
     }
+    releaseWake();
   };
 
   /* זרימה משותפת לשער הקול: קובץ שנבחר או הקלטה חיה ← תמלול ← ליטוש (רשות) ← ספר */
