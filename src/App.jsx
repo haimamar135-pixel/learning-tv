@@ -5637,7 +5637,7 @@ export default function LearningTV() {
   /* צביעה בטקסט: לכל הבדל פתוח — טווח התווים במשפט שבו הוא נמצא */
   useMemo(() => {
     ZV_BAD.clear();
-    if (!vfState) return;
+    if (!vfState || (vfState.total > 0 && vfState.ok / vfState.total < 0.5)) return;
     const plain = String(cur?.text || "").split(/\n{2,}/);
     for (const it of vfState.items) {
       if (!it.diffs?.length) continue;
@@ -5681,9 +5681,36 @@ export default function LearningTV() {
     const chapters = b.chapters.map((c, q) => (q === chIdx ? { ...c, text: newText } : c));
     await persist({ ...b, chapters, marks, flex: { ...flex, textRev: (b.flex?.textRev || 0) + 1 } }, { k: "full" });
   };
-  const vfRun = async () => {
+  const vfSel = vfP >= 0 ? vfP : ZOHAR_PARSHIOT.findIndex(([en]) => en === vfData?.en); // -1 = עוד לא נבחרה פרשה
+  const vfRatio = vfState && vfState.total ? vfState.ok / vfState.total : 0;
+  const vfLow = !!vfState && vfState.total > 0 && vfRatio < 0.5; // התאמה נמוכה = כנראה לא המקור הנכון; לא מציעים תיקונים
+  /* זיהוי המקור לבד: האות הראשונה שבדף מושווית מול אותה אות בכל פרשה (שש בקשות במקביל), ונבחרת ההתאמה הטובה ביותר */
+  const vfAuto = async () => {
     const b = bookRef.current; if (!b || !vfParas.length) return;
-    const pIdx = vfP >= 0 ? vfP : Math.max(0, ZOHAR_PARSHIOT.findIndex(([en]) => en === vfData?.en));
+    const first = vfParas[0], A = zvWords(first.text);
+    setError(null);
+    let next = 0, done = 0, best = { r: 0, i: -1 };
+    const worker = async () => {
+      while (next < ZOHAR_PARSHIOT.length) {
+        const i = next++;
+        try {
+          const refs = await fetchZoharSource(ZOHAR_PARSHIOT[i][0], [first.n]);
+          if (refs[first.n]) { const B = zvWords(refs[first.n]); const d = zvDiff(A, B); const r = d.ok / Math.max(A.length, B.length, 1); if (r > best.r) best = { r, i }; }
+        } catch {}
+        setVfBusy(tx("🔎 מחפש את המקור בספריא… {a}/{b}", { a: ++done, b: ZOHAR_PARSHIOT.length }));
+      }
+    };
+    setVfBusy(tx("🔎 מחפש את המקור בספריא…"));
+    await Promise.all(Array.from({ length: 6 }, worker));
+    setVfBusy("");
+    if (best.i < 0 || best.r < 0.6) { setError(tx("לא נמצא בספריא מקור שמתאים לדף הזה. אפשר לבחור פרשה ביד.")); return; }
+    setVfP(best.i);
+    await vfRun(best.i);
+  };
+  const vfRun = async (forceIdx) => {
+    const b = bookRef.current; if (!b || !vfParas.length) return;
+    const pIdx = typeof forceIdx === "number" ? forceIdx : vfSel;
+    if (pIdx < 0) { await vfAuto(); return; }
     const [en, he] = ZOHAR_PARSHIOT[pIdx] || ZOHAR_PARSHIOT[0];
     setError(null); setVfBusy(tx("🔍 מושך את לשון הזוהר מספריא…"));
     try {
@@ -6569,20 +6596,23 @@ export default function LearningTV() {
                     <div className="vf-box" dir="rtl">
                       <div className="vf-row">
                         <b>{tx("🔍 אימות מול מקור")}</b>
-                        <select className="scan-mode-select" value={vfP >= 0 ? vfP : Math.max(0, ZOHAR_PARSHIOT.findIndex(([en]) => en === vfData?.en))} onChange={(e) => setVfP(+e.target.value)} aria-label={tx("פרשה")}>
+                        <select className="scan-mode-select" value={vfSel} onChange={(e) => setVfP(+e.target.value)} aria-label={tx("פרשה")}>
+                          <option value={-1}>{tx("המקור: זהה לבד")}</option>
                           {ZOHAR_PARSHIOT.map(([en, he], i) => <option key={en} value={i}>{he}</option>)}
                         </select>
-                        <button className="mark-btn" onClick={vfRun} disabled={!!vfBusy}>{vfBusy || (vfData ? tx("אמת שוב מול ספריא") : tx("אמת מול ספריא"))}</button>
-                        {vfState && vfState.total > 0 && (
+                        <button className="mark-btn" onClick={() => vfRun()} disabled={!!vfBusy}>{vfBusy || (vfData ? tx("אמת שוב מול ספריא") : tx("אמת מול ספריא"))}</button>
+                        {vfData && <button className="mark-btn" onClick={vfAuto} disabled={!!vfBusy}>{tx("🔎 זהה את המקור לבד")}</button>}
+                        {vfState && vfState.total > 0 && !vfLow && (
                           <>
                             <span className="vf-bar" aria-hidden="true"><i style={{ width: Math.round((vfState.ok / vfState.total) * 100) + "%" }} /></span>
                             <span>{tx("{p}% אומת · {n} לבדיקה", { p: Math.floor((vfState.ok / vfState.total) * 100), n: vfState.items.reduce((t, it) => t + it.diffs.length, 0) })}</span>
                           </>
                         )}
                       </div>
-                      {vfState && vfData && <div style={{ opacity: 0.75, marginTop: 4 }}>{tx("המקור: ספריא · זוהר {he} · אותיות {a}–{b}. מה שמסומן באדום בדף לא תואם למקור.", { he: vfData.he, a: vfState.items[0]?.label, b: vfState.items[vfState.items.length - 1]?.label })}</div>}
+                      {vfLow && <div style={{ color: "#a33", fontWeight: 700, marginTop: 6 }}>{tx("ההתאמה למקור שנבחר נמוכה מאוד ({p}%) — כנראה זו לא הפרשה הנכונה, ולכן לא מוצעים תיקונים. בחר פרשה אחרת, או לחץ \"🔎 זהה את המקור לבד\".", { p: Math.floor(vfRatio * 100) })}</div>}
+                      {vfState && vfData && !vfLow && <div style={{ opacity: 0.75, marginTop: 4 }}>{tx("המקור: ספריא · זוהר {he} · אותיות {a}–{b}. מה שמסומן באדום בדף לא תואם למקור.", { he: vfData.he, a: vfState.items[0]?.label, b: vfState.items[vfState.items.length - 1]?.label })}</div>}
                       {vfState && vfState.items.some((it) => it.missing) && <div style={{ color: "#a33", marginTop: 4 }}>{tx("לא נמצא מקור לאותיות: ") + vfState.items.filter((it) => it.missing).map((it) => it.label).join(", ")}</div>}
-                      {vfState && (
+                      {vfState && !vfLow && (
                         <ul className="vf-list">
                           {vfState.items.flatMap((it) => it.diffs.map((d) => (
                             <li className="vf-item" key={d.id + ":" + d.a0}>
