@@ -31,6 +31,21 @@ const IS_NATIVE = (() => {
 })();
 const API_BASE = IS_NATIVE ? SITE_URL : "";
 
+/* ─── ענף ───
+   השורש (האפליקציה כפי שהיא בחנות) בלי ספרייה מובנית: הלומד מביא את הטקסט שלו.
+   ענף הקבלה — ארון 70 הספרים ושער הזוהר מספריא — נפתח רק באתר, בקישור ?branch=kabbalah,
+   ונשמר בדפדפן. ?branch=root (או כל ערך אחר) סוגר אותו. באפליקציה המקורית (iOS) אין ענף כלל:
+   מה שאפל בודקת הוא מה שהמשתמש מקבל — בלי יכולות נסתרות. */
+const BRANCH = (() => {
+  if (IS_NATIVE) return "";
+  try {
+    const q = new URLSearchParams(location.search).get("branch");
+    if (q !== null) { if (q === "kabbalah") localStorage.setItem("lomedtv-branch", "kabbalah"); else localStorage.removeItem("lomedtv-branch"); }
+    return localStorage.getItem("lomedtv-branch") || "";
+  } catch { return ""; }
+})();
+const KABBALAH = BRANCH === "kabbalah";
+
 /* ─── הגשר: מהארון אל הלימוד ───
    הארון הוא אתר נפרד בלי כותרות CORS, לכן הנתונים נקראים דרך /shelf-data —
    proxy של נטליפיי (netlify.toml) שמגיש את data/ של הארון מאותו מקור.
@@ -237,10 +252,19 @@ for (const k of Object.keys(PROMPTS)) { const f = PROMPTS[k]; PROMPTS[k] = (t, .
 const loginMsg = () => tx("כדי להשתמש בערוצי הלימוד יש להיכנס לחשבון — לחץ על ☁ למעלה");
 /* שגיאת שער (כניסה/מכסה) מסומנת ב-gate — כך מזהים אותה בכל שפה, ולא לפי מילים בעברית */
 const gateErr = (m) => Object.assign(new Error(m), { gate: true });
+/* הסכמה חד-פעמית לשליחת תוכן לספקי עיבוד חיצוניים, ובהם שירותי AI (דרישת אפל 5.1.2(i)).
+   נשאלת לפני הקריאה הראשונה לכלי שרת, ונשמרת במכשיר. בלי הסכמה — הכלים לא רצים; הקריאה והסימון עובדים כרגיל. */
+function processingConsent() {
+  try { if (localStorage.getItem("lomedtv-ai-consent") === "1") return true; } catch {}
+  const ok = window.confirm(tx("כדי להפעיל את הכלים (סיכום, מבחן, תרגום, פענוח צילום, תמלול, הקראה ווידאו משותף), האפליקציה שולחת את התוכן שאתה מעבד — טקסט, צילום דף או הקלטה — לספקי עיבוד חיצוניים, ובהם שירותי בינה מלאכותית: Anthropic (Claude), Groq ו-ElevenLabs.\nהתוכן משמש רק לביצוע הבקשה שלך. הפרטים במדיניות הפרטיות.\n\nלהסכים ולהמשיך?"));
+  if (ok) { try { localStorage.setItem("lomedtv-ai-consent", "1"); } catch {} }
+  return ok;
+}
 async function authHeaders() {
   let token = null;
   try { token = (await supa.auth.getSession()).data?.session?.access_token || null; } catch {}
   if (!token) throw gateErr(loginMsg());
+  if (!processingConsent()) throw new Error(tx("הכלי לא הופעל: לא ניתנה הסכמה לשליחת התוכן לעיבוד."));
   return { "Content-Type": "application/json", Authorization: "Bearer " + token };
 }
 const isGateError = (e) => !!e?.gate || /להיכנס לחשבון|פג|המכסה/.test(e?.message || "");
@@ -2938,7 +2962,7 @@ function HelpView({ onClose }) {
   const stopAll = () => { runRef.current++; window.speechSynthesis?.cancel(); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setSpeaking(false); };
   useEffect(() => { kRef.current = k; try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} }, [k]);
   useEffect(() => () => { stopAll(); }, []);
-  const steps = data?.steps || [];
+  const steps = (data?.steps || []).filter((s) => KABBALAH || s.id !== "shelf");
   const st = steps[k];
   const beats = st ? (st.beats?.length ? st.beats : [{ say: st.text || "" }]) : [];
   const bt = beats[Math.min(beat, beats.length - 1)] || {};
@@ -4017,6 +4041,9 @@ export default function LearningTV() {
   const [showCloud, setShowCloud] = useState(false);
   const [cloudEmail, setCloudEmail] = useState("");
   const [cloudMsg, setCloudMsg] = useState("");
+  const [cloudPwOn, setCloudPwOn] = useState(false); // כניסה בסיסמה (לחשבון שהוגדרה לו סיסמה)
+  const [cloudPw, setCloudPw] = useState("");
+  const [delBusy, setDelBusy] = useState(false);
   const [cloudCode, setCloudCode] = useState("");      // קוד כניסה מהמייל (מובייל)
   const [cloudSent, setCloudSent] = useState(false);   // נשלח מייל — להציג שדה קוד
   const [authReady, setAuthReady] = useState(false);   // כבר יודעים אם יש חשבון מחובר (לא שואלים לפני כן)
@@ -4103,6 +4130,51 @@ export default function LearningTV() {
   async function cloudSignOut() {
     await supa.auth.signOut();
     setCloudMsg("");
+  }
+  /* כניסה בסיסמה — לחשבון שהוגדרה לו סיסמה (למשל חשבון הדגמה). הדרך הרגילה נשארת קישור למייל. */
+  async function signInPassword() {
+    const email = cloudEmail.trim();
+    if (!email || !email.includes("@") || !cloudPw) { setCloudMsg(tx("הזן מייל וסיסמה")); return; }
+    setCloudMsg(tx("נכנס..."));
+    const { error } = await supa.auth.signInWithPassword({ email, password: cloudPw });
+    if (error) { setCloudMsg(tx("שגיאת כניסה: ") + error.message); return; }
+    setCloudPw(""); setCloudPwOn(false);
+    setCloudMsg(tx("✅ מחובר!"));
+  }
+  /* מחיקת חשבון: מוחק מהענן את החשבון ואת כל מה ששמור תחתיו (ספרים, הערות, תוצרים, קבצי קול),
+     ואחר כך מנקה את המכשיר הזה. בלתי הפיך. המחיקה בענן נעשית בפונקציית מסד הנתונים
+     delete_my_account (supabase/delete_account.sql) — היא מוחקת רק את מי שקרא לה. */
+  async function deleteAccount() {
+    const u = cloudRef.current;
+    if (!u || delBusy) return;
+    if (!window.confirm(tx("למחוק את החשבון לצמיתות?\nכל הספרים, ההערות, התוצרים וההקלטות ששמורים בענן ובמכשיר הזה יימחקו. אי אפשר לשחזר."))) return;
+    if (!window.confirm(tx("אישור אחרון: למחוק את החשבון ואת כל הנתונים?"))) return;
+    setDelBusy(true);
+    setCloudMsg(tx("מוחק את החשבון..."));
+    try {
+      /* קבצי הקול בענן: voice/<uid>/<ספר>/<קובץ> */
+      try {
+        const st = supa.storage.from("voice");
+        const { data: dirs } = await st.list(u.id, { limit: 1000 });
+        for (const d of dirs || []) {
+          const { data: files } = await st.list(u.id + "/" + d.name, { limit: 1000 });
+          const paths = (files || []).map((f) => u.id + "/" + d.name + "/" + f.name);
+          if (paths.length) await st.remove(paths); else await st.remove([u.id + "/" + d.name]);
+        }
+      } catch (e) { console.warn("voice cleanup", e); }
+      const { error } = await supa.rpc("delete_my_account");
+      if (error) throw new Error(error.message);
+      /* המכשיר הזה: כל מה שהאפליקציה שמרה */
+      try { for (const k of await idbKeys()) if (typeof k === "string" && k.startsWith("ltv-")) await idbDel(k); } catch {}
+      try { const lang = localStorage.getItem("lomedtv-lang"); for (const k of Object.keys(localStorage)) if (k.startsWith("lomedtv-") || k.startsWith("sb-")) localStorage.removeItem(k); if (lang) localStorage.setItem("lomedtv-lang", lang); } catch {}
+      try { await supa.auth.signOut({ scope: "local" }); } catch {}
+      window.alert(tx("החשבון וכל הנתונים נמחקו."));
+      location.reload();
+    } catch (e) {
+      console.error("deleteAccount failed", e);
+      setCloudMsg(tx("המחיקה נכשלה: ") + (e.message || "") + " · " + tx("אפשר לפנות אלינו ונמחק ידנית:") + " haimamar135@gmail.com");
+      setDelBusy(false);
+    }
   }
 
   /* ─── שלב 3: מנוע הסנכרון ───
@@ -4903,7 +4975,7 @@ export default function LearningTV() {
   };
 
   useEffect(() => {
-    if (view !== "intake") return;
+    if (view !== "intake" || !KABBALAH) return;
     const [en] = ZOHAR_PARSHIOT[zoharForm.p] || [];
     if (!en) return;
     let live = true;
@@ -4919,6 +4991,7 @@ export default function LearningTV() {
 
   /* ── הגשר: מהארון אל הלימוד ── */
   const openShelf = async () => {
+    if (!KABBALAH) return;
     setError(null);
     setShelfErr(null);
     setShelfPick(null);
@@ -5993,7 +6066,7 @@ export default function LearningTV() {
                 <button className="font-btn print-btn" onClick={() => window.print()} title={tx("הדפסת התוכן המוצג")} aria-label={tx("הדפסה")}>🖨</button>
                 <button className="font-btn" onClick={downloadBackup} title={tx("גיבוי: הורדת כל הספרים, ההערות והמרקרים לקובץ")} aria-label={tx("גיבוי")}>⬇</button>
                 <button className="font-btn" onClick={pickRestoreFile} title={tx("שחזור מקובץ גיבוי")} aria-label={tx("שחזור")}>⬆</button>
-                <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? tx("חזרה ללימוד") : tx("המדריך: איך משתמשים")} aria-label={tx("המדריך")}>❔</button>
+                {getLang() === "he" && <button className={"font-btn help-btn" + (helpOn ? " on" : "")} onClick={() => setHelpOn((v) => !v)} title={helpOn ? tx("חזרה ללימוד") : tx("המדריך: איך משתמשים")} aria-label={tx("המדריך")}>❔</button>}
                 {textIsHe && <button className={"font-btn layer-btn gloss-btn" + (glossOn ? " on" : "") + (glossBusy ? " busy" : "")} onClick={() => setGlossOn((v) => !v)} title={glossBusy || (glossOn ? tx("המילון הארמי מוצג — לחץ להסתיר") : tx("מילון ארמי: פירוש עברי קצר מתחת לכל מילה ארמית"))} aria-label={tx("מילון ארמי")} aria-pressed={glossOn}>📖</button>}
                 {textIsHe && <button className={"font-btn layer-btn nikud-btn" + (nikudOn ? " on" : "")} onClick={toggleNikud} title={nikudOn ? tx("הניקוד מוצג — לחץ להסתיר") : tx("הוסף ניקוד לטקסט שאינו מנוקד (הסולם, פירושים)")} aria-label={tx("ניקוד")} aria-pressed={nikudOn}>{tx("בְּ")}</button>}
                 <button className={"font-btn layer-btn" + (layerOn ? " on" : "")} onClick={toggleLayer} title={layerOn ? tx("שכבת הלומד מוצגת — לחץ להסתיר") : tx("שכבת הלומד מוסתרת — לחץ להציג")} aria-label={tx("שכבת הלומד")}>✍️</button>
@@ -6068,6 +6141,11 @@ export default function LearningTV() {
                         <button className="cloud-btn ghost" onClick={() => setShowCloud(false)} disabled={migrating}>{tx("סגור")}</button>
                         <button className="cloud-btn ghost" onClick={cloudSignOut} disabled={migrating}>{tx("התנתק")}</button>
                       </div>
+                      <p style={{ fontSize: ".8rem", marginTop: 14, textAlign: "center" }}>
+                        <a href="#" className="cloud-del" onClick={(e) => { e.preventDefault(); deleteAccount(); }} style={{ pointerEvents: delBusy || migrating ? "none" : "auto" }}>{delBusy ? tx("מוחק את החשבון...") : tx("מחיקת החשבון וכל הנתונים")}</a>
+                        {" · "}
+                        <a href={SITE_URL + "/privacy/"} target="_blank" rel="noopener noreferrer" className="cloud-link">{tx("מדיניות פרטיות")}</a>
+                      </p>
                     </>
                   ) : (
                     <>
@@ -6103,6 +6181,27 @@ export default function LearningTV() {
                           </div>
                         </>
                       )}
+                      {cloudPwOn && (
+                        <>
+                          <input
+                            className="cloud-input"
+                            type="password"
+                            autoComplete="current-password"
+                            dir="ltr"
+                            placeholder={tx("סיסמה")}
+                            value={cloudPw}
+                            onChange={(e) => setCloudPw(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") signInPassword(); }}
+                          />
+                          <div className="cloud-actions">
+                            <button className="cloud-btn" onClick={signInPassword}>{tx("🔑 כניסה בסיסמה")}</button>
+                          </div>
+                        </>
+                      )}
+                      <p style={{ fontSize: ".8rem", marginTop: 14, textAlign: "center" }}>
+                        {!cloudPwOn && <><a href="#" className="cloud-link" onClick={(e) => { e.preventDefault(); setCloudPwOn(true); }}>{tx("יש לי סיסמה")}</a>{" · "}</>}
+                        <a href={SITE_URL + "/privacy/"} target="_blank" rel="noopener noreferrer" className="cloud-link">{tx("מדיניות פרטיות")}</a>
+                      </p>
                     </>
                   )}
                   {cloudMsg && <p className="cloud-msg">{cloudMsg}</p>}
@@ -6221,9 +6320,9 @@ export default function LearningTV() {
                     onChange={onSmartPicked}
                   />
                   <div className="scan-mode-row">
-                    <span className="scan-mode-title">{tx("📸 צלם דף חכם (AI · לדפי זוהר ודפים מפורשים) — תבנית:")}</span>
+                    <span className="scan-mode-title">{KABBALAH ? tx("📸 צלם דף חכם (AI · לדפי זוהר ודפים מפורשים) — תבנית:") : tx("📸 צלם דף חכם (AI · לדפים עם פירוש) — תבנית:")}</span>
                     <select className="scan-mode-select" value={smartMode} onChange={(e) => setSmartMode(e.target.value)}>
-                      {Object.entries(SCAN_MODES).map(([k, v]) => (
+                      {Object.entries(SCAN_MODES).filter(([k]) => k !== "zohar" || KABBALAH).map(([k, v]) => (
                         <option key={k} value={k}>{v.label}</option>
                       ))}
                     </select>
@@ -6241,7 +6340,7 @@ export default function LearningTV() {
                     {error && !fileBusy && <span className="err" role="alert">{error}</span>}
                   </div>
 
-                  <div className="scan-mode-row zohar-row">
+                  {KABBALAH && <div className="scan-mode-row zohar-row">
                     <span className="scan-mode-title">{tx("📜 זוהר עם סולם צמוד — מאמר מספריא:")}</span>
                     <select className="scan-mode-select" value={zoharForm.p} onChange={(e) => setZoharForm((f) => ({ ...f, p: +e.target.value }))} aria-label={tx("פרשה")}>
                       {ZOHAR_PARSHIOT.map(([en, he], i) => (
@@ -6261,7 +6360,7 @@ export default function LearningTV() {
                     <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
                       {tx("הארמית והסולם לפי האותיות שבספר · מאמר חדש מצטרף לספר של אותה פרשה")}
                     </span>
-                  </div>
+                  </div>}
                   <div className="scan-mode-row yt-row">
                     <span className="scan-mode-title">{tx("▶ סרטון יוטיוב — קישור ותמליל:")}</span>
                     <input className="zohar-in wide" dir="ltr" placeholder="https://youtu.be/…" value={ytForm.url} onChange={(e) => setYtForm((f) => ({ ...f, url: e.target.value }))} aria-label={tx("קישור לסרטון")} />
@@ -6751,7 +6850,7 @@ export default function LearningTV() {
                       ? tx("✓ סומן קטע — בחר בסרגל: מרקר, הדגשה או 📝 הערה.")
                       : tx("קרא חופשי. גרור על מילה או כמה מילים לסימון עדין — או לחץ על משפט התחלה ואז על משפט סוף.")}
                   </p>
-                  {vfParas.length > 0 && (
+                  {KABBALAH && vfParas.length > 0 && (
                     <div className="vf-box" dir="rtl">
                       <div className="vf-row">
                         <b>{tx("🔍 אימות מול מקור")}</b>
@@ -7017,7 +7116,7 @@ export default function LearningTV() {
             <span className="key-num">🎬</span>
             <span className="key-label">{tx("אודיו/וידאו")}</span>
           </label>
-          <button
+          {KABBALAH && <button
             className="ch-key shelf"
             onClick={openShelf}
             disabled={!!fileBusy}
@@ -7025,7 +7124,7 @@ export default function LearningTV() {
           >
             <span className="key-num">📚</span>
             <span className="key-label">{tx("ארון הספרים")}</span>
-          </button>
+          </button>}
         </div>
       )}
 
@@ -7565,6 +7664,8 @@ const css = `
 }
 .mirror-btn small{font-size:.62rem;font-weight:700;letter-spacing:.02em}
 .mirror-btn:hover{border-color:var(--amber-deep);background:#fff3d6}
+.cloud-link{color:inherit;opacity:.75;text-decoration:underline}
+.cloud-del{color:#ff9a9a;text-decoration:underline}
 .rec-pend{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 12px;padding:10px 12px;border:1.5px dashed #6f96d0;border-radius:12px;background:rgba(63,111,181,.10);font-family:'Heebo',sans-serif;font-size:.95rem}
 .rec-pend > span{flex:1 1 180px;font-weight:600}
 .rec-pend .del{min-height:38px}
