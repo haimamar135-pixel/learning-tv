@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
 import { tx, getLang, setLang, langDir, LANGS } from "./i18n.js";
 import { STARTER } from "./starter.js";
+import { searchFeatures, buildIndex, searchContent, snippet as searchSnippet } from "./search.js";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
    המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
@@ -3821,6 +3822,99 @@ export default function LearningTV() {
   const shown = useMemo(() => index.filter((b) => b.pin !== false), [index]);
   const archived = useMemo(() => index.filter((b) => b.pin === false), [index]);
   /* 📌 להשאיר על המסך / להעביר לארכיון. הסימון נשמר עם הספר ומסתנכרן לענן. */
+  /* ── 🔍 חיפוש: פיצ'רים (מילון ב-search.js) ותוכן (אינדקס במכשיר) ── */
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQ, setFindQ] = useState("");
+  const [findRes, setFindRes] = useState({ feats: [], hits: [], busy: false });
+  const [listening, setListening] = useState(false);
+  const [libHint, setLibHint] = useState("");
+  const findInRef = useRef(null), findTimer = useRef(null), recogRef = useRef(null);
+  const runFind = (q) => {
+    clearTimeout(findTimer.current);
+    if (!q.trim()) { setFindRes({ feats: [], hits: [], busy: false }); return; }
+    findTimer.current = setTimeout(async () => {
+      const feats = searchFeatures(q, tx);
+      setFindRes((r) => ({ ...r, feats, busy: true }));
+      try { await buildIndex(index, loadBook, bookSentences); } catch (e) { console.warn("index", e); }
+      setFindRes({ feats, hits: searchContent(q), busy: false });
+    }, 160);
+  };
+  const openFind = (q = "") => { setFindOpen(true); setFindQ(q); runFind(q); setTimeout(() => findInRef.current?.focus(), 60); };
+  const closeFind = () => { setFindOpen(false); try { recogRef.current?.stop(); } catch {} setListening(false); };
+  /* 🎤 חיפוש קולי: זיהוי הדיבור של הדפדפן (ספארי, כרום). מה שנאמר נכנס לשדה ומחפש. */
+  const voiceSearch = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setLibHint(tx("הדפדפן הזה לא תומך בחיפוש קולי — אפשר להקליד.")); return; }
+    if (listening) { try { recogRef.current?.stop(); } catch {} setListening(false); return; }
+    const rec = new SR();
+    rec.lang = { he: "he-IL", en: "en-US", ar: "ar-SA", fr: "fr-FR", es: "es-ES", ru: "ru-RU", de: "de-DE" }[getLang()] || "he-IL";
+    rec.interimResults = true; rec.continuous = false;
+    rec.onresult = (ev) => { let t = ""; for (const r of ev.results) t += r[0].transcript; setFindQ(t); runFind(t); };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    recogRef.current = rec;
+    try { rec.start(); setListening(true); } catch { setListening(false); }
+  };
+  const hintFor = (ms = 7000) => (t) => { setLibHint(t); setTimeout(() => setLibHint(""), ms); };
+  /* ניווט לפיצ'ר: פותח את המסך הנכון ומהבהב */
+  const goFeature = (f) => {
+    const g = f.go || {}; const hint = hintFor();
+    closeFind(); setError(null);
+    const needBook = () => { setView("library"); hint(tx("קודם פותחים ספר ופרק — ואז {n}", { n: tx(f.name) })); };
+    if (g.gate) { enterFromOpening(false, g.gate); if (g.gate === "rec") hint(tx("למטה: 🎙 הקלט שיעור חי")); return; }
+    if (g.view === "intake") { setView("intake"); if (g.focus === "yt") setTimeout(() => document.querySelector(".yt-row")?.scrollIntoView({ behavior: "smooth", block: "center" }), 200); flick(); return; }
+    if (g.view === "library") { backToLibrary(); if (g.hint === "export") hint(tx("📤 ייצוא מופיע ליד ספר שנוצר מהקלטה חיה במכשיר הזה")); if (g.hint === "archive") { setArchiveOpen(true); hint(tx("▾ ליד ספר מוריד אותו לארכיון · ☑ בחר — קבוצה שלמה")); } flick(); return; }
+    if (g.ch) { if (!book) return needBook(); setChannel(g.ch); setView("tv"); flick(); if (g.hint === "mark") hint(tx("לחץ על משפט התחלה ואז על משפט סוף — ואז מרקר, קו או 📝 הערה")); return; }
+    switch (g.act) {
+      case "scroll": return book ? openScroll() : needBook();
+      case "mirror": return book ? openMirror(book.id) : needBook();
+      case "share": return book ? (share ? backToShare() : startShare()) : needBook();
+      case "join": return joinByCode();
+      case "nikud": if (!book) return needBook(); setView("tv"); if (!nikudOn) toggleNikud(); return;
+      case "gloss": if (!book) return needBook(); setView("tv"); setGlossOn(true); return;
+      case "cloud": return setShowCloud(true);
+      case "backup": return downloadBackup();
+      case "restore": return pickRestoreFile();
+      case "lang": setTimeout(() => document.querySelector(".lang-pick")?.focus(), 100); return hint(tx("תיבת השפה בשורה העליונה"));
+      case "font": bumpFont(0.1); return hint(tx("א− / א+ בשורה העליונה"));
+      case "bg": return setBgOpen(true);
+      case "focus": return book ? setFocus(true) : needBook();
+      case "print": return window.print();
+      case "help": return setHelpOn(true);
+      case "privacy": return window.open(SITE_URL + "/privacy/", "_blank");
+      case "opening": return setShowOpening(true);
+      default: return;
+    }
+  };
+  /* ניווט לתוצאת תוכן: פותח את הספר בפרק, ובמשפט */
+  const goHit = async (h) => {
+    closeFind(); setError(null);
+    const b = (book && book.id === h.bookId) ? book : await loadBook(h.bookId);
+    if (!b) return;
+    setBook(b); setChIdx(h.ch); setChannel(h.kind === "result" && h.channel ? h.channel : "read"); clearSelection(); flick(); setView("tv");
+    if (h.kind !== "result") setTimeout(() => { const el = document.querySelector(`[data-si="${h.si}"]`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("search-hit"); setTimeout(() => el.classList.remove("search-hit"), 2600); } }, 450);
+  };
+  /* ☑ בחירה מרובה: "בחר" מציג תיבות; "סמן הכול"; "לארכיון" / "למסך" פועלים על המסומנים בלבד. */
+  const [selMode, setSelMode] = useState(false);
+  const [selIds, setSelIds] = useState(() => new Set());
+  const toggleSel = (id) => setSelIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const setPinMany = async (ids, pin) => {
+    if (!ids.length) return;
+    let nextIdx = index;
+    for (const id of ids) {
+      const b = await loadBook(id);
+      if (!b || isPinned(b) === pin) continue;
+      const nb = { ...b, flex: { ...(b.flex || {}), pin } };
+      await saveBookToStorage(nb);
+      nextIdx = nextIdx.map((e) => e.id === id ? { ...e, pin } : e);
+      if (book && book.id === id) setBook(nb);
+      queueSync({ k: "meta", book: nb });
+    }
+    setIndex(nextIdx);
+    await saveIndex(nextIdx);
+    setSelIds(new Set());
+    setSelMode(false);
+  };
   const togglePin = async (id) => {
     const b = await loadBook(id);
     if (!b) return;
@@ -6078,6 +6172,7 @@ export default function LearningTV() {
               </span>
               <span id="reader-slot" className="reader-slot" />
               <span className="font-btns">
+                <button className="font-btn search-btn" onClick={() => openFind("")} title={tx("חיפוש: בספרים, בהערות ובכלים")} aria-label={tx("חיפוש")}>🔍</button>
                 <select className="font-btn lang-pick" value={getLang()} onChange={(e) => changeLang(e.target.value)} aria-label="Language · שפה" title="Language · שפה">{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
                 {(view === "tv" || view === "scroll") && book && <button className="font-btn focus-in" onClick={() => setFocus(true)} title={tx("מסך קריאה — רק התוכן, על כל המסך")} aria-label={tx("מסך קריאה")}>⤢</button>}
                 <button className="font-btn" onClick={() => bumpFont(-0.1)} title={tx("הקטנת טקסט")} aria-label={tx("הקטנת טקסט")}>{tx("אַ−")}</button>
@@ -6137,6 +6232,49 @@ export default function LearningTV() {
                     <button className="cloud-btn ghost" onClick={dropPendingJoin}>{tx("לא עכשיו")}</button>
                   </div>
                   <p style={{ fontSize: ".78rem", opacity: 0.7, marginTop: 8 }}>{tx("כאורח לא נשמר לך דבר לפעם הבאה. כניסה במייל שומרת את הסימונים וההערות.")}</p>
+                </div>
+              </div>
+            )}
+            {findOpen && (
+              <div className="cloud-overlay search-overlay" onClick={closeFind}>
+                <div className="search-box" dir={langDir()} onClick={(e) => e.stopPropagation()}>
+                  <div className="search-row">
+                    <input ref={findInRef} id="search-input" className="search-in" dir="auto" value={findQ} placeholder={tx("מה אתה מחפש? מילה, נושא, או כלי…")} onChange={(e) => { setFindQ(e.target.value); runFind(e.target.value); }} onKeyDown={(e) => { if (e.key === "Escape") closeFind(); if (e.key === "Enter") { const f = findRes.feats[0], h = findRes.hits[0]; if (f && !h) goFeature(f); else if (h) goHit(h); } }} />
+                    <button className={"mark-btn mic" + (listening ? " on" : "")} onClick={voiceSearch} title={tx("חיפוש קולי")}>{listening ? "● " + tx("מקשיב…") : "🎤"}</button>
+                    <button className="mark-btn" onClick={closeFind} aria-label={tx("סגור")}>✕</button>
+                  </div>
+                  {libHint && <div className="lib-hint">{libHint}</div>}
+                  <div className="search-results">
+                    {!findQ.trim() && (
+                      <div className="search-empty">
+                        <p>{tx("אפשר לחפש מילה מתוך ספר או הערה, או שם של כלי: \"הקלטה\", \"ייצוא\", \"תרגום\", \"לימוד משותף\".")}</p>
+                        <div className="search-chips">{["הקלט שיעור", "ייצוא", "תרגום", "לימוד משותף", "ארכיון", "מחיקת חשבון"].map((c) => <button key={c} className="ghost-btn" onClick={() => { setFindQ(tx(c)); runFind(tx(c)); }}>{tx(c)}</button>)}</div>
+                      </div>
+                    )}
+                    {findRes.feats.length > 0 && (
+                      <div className="search-group">
+                        <div className="search-h">{tx("כלים")}</div>
+                        {findRes.feats.map((f) => (
+                          <button key={f.id} className="search-item feat" onClick={() => goFeature(f)}>
+                            <b>{tx(f.name)}</b><span>{tx(f.desc)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {findQ.trim() && (
+                      <div className="search-group">
+                        <div className="search-h">{findRes.busy ? tx("מחפש בספרים…") : tx("בספרים שלך ({n})", { n: findRes.hits.length })}</div>
+                        {findRes.hits.map((h, k) => { const [a, b, c] = searchSnippet(h.text, findQ); return (
+                          <button key={k} className={"search-item hit" + (h.pin ? "" : " arch")} onClick={() => goHit(h)}>
+                            <b>{h.title}{!h.pin && " · 📚"}</b>
+                            <small>{h.kind === "note" ? tx("📝 הערה שלך") : h.kind === "result" ? tx("תוצר: {c}", { c: tx((CHANNELS.find((x) => x.id === h.channel) || {}).label || h.channel) }) : tx("פרק {n}", { n: h.ch + 1 })}</small>
+                            <span dir="auto">{a}<mark>{b}</mark>{c}</span>
+                          </button>
+                        ); })}
+                        {!findRes.busy && !findRes.hits.length && !findRes.feats.length && <p className="search-none">{tx("לא נמצא. נסה מילה אחרת, או קצרה יותר.")}</p>}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -6455,9 +6593,30 @@ export default function LearningTV() {
                       <button className="del" onClick={dropRec} title={tx("מחק הקלטה")}>✕</button>
                     </div>
                   )}
+                  <button className="search-bar" onClick={() => openFind("")}>
+                    <span>🔍 {tx("חיפוש בספרים, בהערות ובכלים…")}</span>
+                    <span className="search-mic" onClick={(e) => { e.stopPropagation(); openFind(""); setTimeout(voiceSearch, 120); }} title={tx("חיפוש קולי")}>🎤</span>
+                  </button>
+                  {libHint && <div className="lib-hint">{libHint}</div>}
+                  {index.length > 1 && (
+                    <div className="sel-bar">
+                      {!selMode ? (
+                        <button className="ghost-btn" onClick={() => { setSelMode(true); setSelIds(new Set()); }}>{tx("☑ בחר")}</button>
+                      ) : (
+                        <>
+                          <button className="ghost-btn" onClick={() => setSelIds(new Set(shown.map((b) => b.id)))}>{tx("סמן הכול על המסך")}</button>
+                          {archiveOpen && archived.length > 0 && <button className="ghost-btn" onClick={() => setSelIds(new Set(archived.map((b) => b.id)))}>{tx("סמן הכול בארכיון")}</button>}
+                          <button className="ghost-btn on" disabled={![...selIds].some((id) => shown.some((b) => b.id === id))} onClick={() => setPinMany([...selIds].filter((id) => shown.some((b) => b.id === id)), false)}>{tx("▾ לארכיון ({n})", { n: [...selIds].filter((id) => shown.some((b) => b.id === id)).length })}</button>
+                          {archived.length > 0 && <button className="ghost-btn on" disabled={![...selIds].some((id) => archived.some((b) => b.id === id))} onClick={() => setPinMany([...selIds].filter((id) => archived.some((b) => b.id === id)), true)}>{tx("📌 למסך ({n})", { n: [...selIds].filter((id) => archived.some((b) => b.id === id)).length })}</button>}
+                          <button className="ghost-btn" onClick={() => { setSelMode(false); setSelIds(new Set()); }}>{tx("ביטול")}</button>
+                        </>
+                      )}
+                    </div>
+                  )}
                   {shown.map((b) => (
-                    <div className="book-row" key={b.id}>
-                      <button className="book-main" onClick={() => openBook(b.id)}>
+                    <div className={"book-row" + (selMode && selIds.has(b.id) ? " sel" : "")} key={b.id}>
+                      {selMode && <input type="checkbox" className="sel-box" checked={selIds.has(b.id)} onChange={() => toggleSel(b.id)} aria-label={b.title} />}
+                      <button className="book-main" onClick={() => selMode ? toggleSel(b.id) : openBook(b.id)}>
                         <span className="book-title">{b.title}</span>
                         <span className="book-meta">
                           {tx("{a}/{b} פרקים הושלמו", { a: b.done, b: b.chapters })}
@@ -6492,8 +6651,9 @@ export default function LearningTV() {
                         <span className="archive-arrow">{archiveOpen ? "▴" : "▾"}</span>
                       </button>
                       {archiveOpen && archived.map((b) => (
-                        <div className="book-row archived" key={b.id}>
-                          <button className="book-main" onClick={() => openBook(b.id)}>
+                        <div className={"book-row archived" + (selMode && selIds.has(b.id) ? " sel" : "")} key={b.id}>
+                          {selMode && <input type="checkbox" className="sel-box" checked={selIds.has(b.id)} onChange={() => toggleSel(b.id)} aria-label={b.title} />}
+                          <button className="book-main" onClick={() => selMode ? toggleSel(b.id) : openBook(b.id)}>
                             <span className="book-title">{b.title}</span>
                             <span className="book-meta">{tx("{a}/{b} פרקים הושלמו", { a: b.done, b: b.chapters })}</span>
                           </button>
@@ -7702,6 +7862,33 @@ const css = `
 }
 .del.confirm{background:#fbe6e0;border-color:#e2a493;color:#8c3a25;font-weight:600;padding:0 10px}
 .del.pin{color:#7a5410;font-size:1.05rem}
+.search-bar{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 10px;font-family:'Heebo',sans-serif;font-size:1rem;color:#6b5a3e;cursor:text;text-align:start}
+.search-bar:hover{border-color:var(--amber-deep)}
+.search-mic{font-size:1.15rem;padding:0 4px;cursor:pointer}
+.lib-hint{background:#fff3d6;border:1px solid #d8b06a;color:#5a3a10;border-radius:10px;padding:8px 12px;margin:0 0 10px;font-size:.95rem}
+.search-overlay{align-items:flex-start;padding-top:max(24px,env(safe-area-inset-top,0px))}
+.search-box{background:#fffdf8;color:#1b2238;border-radius:16px;width:min(720px,94%);max-height:86vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,.5);overflow:hidden}
+.search-row{display:flex;gap:6px;padding:12px;border-bottom:1px solid var(--line);align-items:center}
+.search-in{flex:1;min-width:0;font-family:'Heebo',sans-serif;font-size:1.1rem;padding:10px 12px;border:1.5px solid #c9b8f2;border-radius:10px;background:#fff;color:#1b2238}
+.search-in:focus{outline:none;border-color:var(--amber-deep)}
+.search-row .mic.on{background:#fbe6e0;border-color:#e2a493;color:#8c3a25}
+.search-results{overflow-y:auto;padding:8px 12px 16px}
+.search-h{font-size:.8rem;letter-spacing:.06em;color:#8a7a5e;margin:10px 4px 4px;text-transform:uppercase}
+.search-item{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:start;background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:4px 0;font-family:'Heebo',sans-serif;cursor:pointer;color:#1b2238}
+.search-item:hover{border-color:var(--amber-deep);background:#fff8e6}
+.search-item b{font-size:1rem}.search-item span{font-size:.92rem;color:#4b4a5a;line-height:1.45}.search-item small{font-size:.78rem;color:#8a7a5e}
+.search-item.feat{border-color:#d8b06a;background:#fffaf0}
+.search-item.arch{opacity:.8}
+.search-item mark{background:#ffe08a;color:inherit;padding:0 2px;border-radius:3px}
+.search-empty{padding:10px 4px;color:#6b5a3e}.search-empty p{margin:0 0 8px;font-size:.95rem}
+.search-chips{display:flex;flex-wrap:wrap;gap:6px}
+.search-none{color:#8a7a5e;padding:8px 4px}
+.scroll-sent.search-hit{background:#ffe08a !important;transition:background .4s}
+.sel-bar{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.sel-bar .ghost-btn:disabled{opacity:.45;cursor:default}
+.sel-bar .ghost-btn.on{background:#fff3d6;border-color:#d8b06a;color:#7a5410;font-weight:700}
+.sel-box{width:22px;height:22px;align-self:center;accent-color:#c8871c;flex:none}
+.book-row.sel .book-main{border-color:#c8871c;background:#fff8e6}
 .del.pin.on{background:#fff8e6;border-color:#d8b06a}
 .archive{margin-top:18px;border-top:1px dashed var(--line);padding-top:8px}
 .archive-head{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-family:'Heebo',sans-serif;font-size:.95rem;color:#6b5a3e;cursor:pointer}
