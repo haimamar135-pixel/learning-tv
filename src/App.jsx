@@ -3829,11 +3829,15 @@ export default function LearningTV() {
   const [listening, setListening] = useState(false);
   const [libHint, setLibHint] = useState("");
   const findInRef = useRef(null), findTimer = useRef(null), recogRef = useRef(null);
+
   const runFind = (q) => {
     clearTimeout(findTimer.current);
     if (!q.trim()) { setFindRes({ feats: [], hits: [], busy: false }); return; }
     findTimer.current = setTimeout(async () => {
       const feats = searchFeatures(q, tx);
+      /* שם של שפה בשאילתה → כלי "החלף שפה" */
+      const qn = q.trim().toLowerCase();
+      for (const [id, name] of LANGS) if (qn.length >= 2 && id !== getLang() && (name.toLowerCase().startsWith(qn) || qn.startsWith(name.toLowerCase()))) feats.unshift({ id: "lang-" + id, name: "🌐 " + name, desc: tx("החלף את שפת המסך"), go: { act: "lang", lang: id } });
       setFindRes((r) => ({ ...r, feats, busy: true }));
       try { await buildIndex(index, loadBook, bookSentences); } catch (e) { console.warn("index", e); }
       setFindRes({ feats, hits: searchContent(q), busy: false });
@@ -3868,6 +3872,7 @@ export default function LearningTV() {
     switch (g.act) {
       case "scroll": return book ? openScroll() : needBook();
       case "mirror": return book ? openMirror(book.id) : needBook();
+      case "lang": return changeLang(g.lang);
       case "share": return book ? (share ? backToShare() : startShare()) : needBook();
       case "join": return joinByCode();
       case "nikud": if (!book) return needBook(); setView("tv"); if (!nikudOn) toggleNikud(); return;
@@ -6241,6 +6246,7 @@ export default function LearningTV() {
                   <div className="search-row">
                     <input ref={findInRef} id="search-input" className="search-in" dir="auto" value={findQ} placeholder={tx("מה אתה מחפש? מילה, נושא, או כלי…")} onChange={(e) => { setFindQ(e.target.value); runFind(e.target.value); }} onKeyDown={(e) => { if (e.key === "Escape") closeFind(); if (e.key === "Enter") { const f = findRes.feats[0], h = findRes.hits[0]; if (f && !h) goFeature(f); else if (h) goHit(h); } }} />
                     <button className={"mark-btn mic" + (listening ? " on" : "")} onClick={voiceSearch} title={tx("חיפוש קולי")}>{listening ? "● " + tx("מקשיב…") : "🎤"}</button>
+                    <select className="voice-lang" value={getLang()} onChange={(e) => { try { recogRef.current?.stop(); } catch {} setListening(false); changeLang(e.target.value); }} title={tx("שפת החיפוש והמסך")}>{LANGS.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select>
                     <button className="mark-btn" onClick={closeFind} aria-label={tx("סגור")}>✕</button>
                   </div>
                   {libHint && <div className="lib-hint">{libHint}</div>}
@@ -7871,6 +7877,7 @@ const css = `
 .search-row{display:flex;gap:6px;padding:12px;border-bottom:1px solid var(--line);align-items:center}
 .search-in{flex:1;min-width:0;font-family:'Heebo',sans-serif;font-size:1.1rem;padding:10px 12px;border:1.5px solid #c9b8f2;border-radius:10px;background:#fff;color:#1b2238}
 .search-in:focus{outline:none;border-color:var(--amber-deep)}
+.search-row .voice-lang{font-family:'Heebo',sans-serif;font-size:.85rem;padding:6px 4px;border:1.5px solid #c9b8f2;border-radius:10px;background:#fff;color:#1b2238;max-width:92px}
 .search-row .mic.on{background:#fbe6e0;border-color:#e2a493;color:#8c3a25}
 .search-results{overflow-y:auto;padding:8px 12px 16px}
 .search-h{font-size:.8rem;letter-spacing:.06em;color:#8a7a5e;margin:10px 4px 4px;text-transform:uppercase}

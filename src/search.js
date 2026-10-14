@@ -23,7 +23,14 @@ function wordHit(q, w) {
   for (const v of variants(w)) if (v.startsWith(q)) return true;
   return false;
 }
-function tokens(s) { return norm(s).split(" ").filter((t) => t.length >= 2); }
+/* מילות קישור שמסננים משאילתה בלשון דיבור ("כל מה שקשור בצמצום", "find everything about contraction") */
+const STOP = new Set(("כל מה שקשור קשור בנושא נושא על את לי תמצא תמצאי מצא חפש חפשי תחפש תחפשי תראה תראי הראה איפה איפוא יש האם אפשר רוצה אני בבקשה של עם זה זאת הזה הזאת כלום משהו דבר דברים הכל הכול לגבי בעניין "
++ "the a an of for to in on about all everything anything something find search show me my please what where is are there i want can you with this that it").split(" "));
+function tokens(s) {
+  const all = norm(s).split(" ").filter((t) => t.length >= 2);
+  const core = all.filter((t) => !STOP.has(t));
+  return core.length ? core : all;
+}
 /* האם כל מילות השאילתה נמצאות במשפט (כל אחת כתחילית של מילה כלשהי) */
 export function matches(qTokens, text) {
   const words = norm(text).split(" ");

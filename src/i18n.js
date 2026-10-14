@@ -633,6 +633,9 @@ const T = [
  ["מה נשמר, לאן נשלח ואיך מוחקים", "What is stored, where it is sent, and how to delete", "ما يُحفظ، وإلى أين يُرسل، وكيف يُحذف", "Ce qui est conservé, où c'est envoyé et comment supprimer", "Qué se guarda, adónde se envía y cómo se elimina", "Что хранится, куда отправляется и как удалить", "Was gespeichert wird, wohin es gesendet wird und wie man löscht"],
  ["❓ השאלה שאתה נושא", "❓ The question you carry", "❓ السؤال الذي تحمله", "❓ La question que vous portez", "❓ La pregunta que llevas", "❓ Вопрос, который вы несёте", "❓ Die Frage, die Sie tragen"],
  ["השאלה ממסך הפתיחה נכנסת לסיכום ולמבחן", "The question from the opening screen goes into the summary and the quiz", "سؤال شاشة البداية يدخل في الملخّص والاختبار", "La question de l'écran d'ouverture entre dans le résumé et le quiz", "La pregunta de la pantalla inicial entra en el resumen y el cuestionario", "Вопрос с начального экрана попадает в конспект и тест", "Die Frage vom Startbildschirm fließt in Zusammenfassung und Quiz ein"],
+ ["החלף את שפת המסך", "Switch the screen language", "تغيير لغة الشاشة", "Changer la langue de l'écran", "Cambiar el idioma de la pantalla", "Сменить язык экрана", "Bildschirmsprache wechseln"],
+ ["שפת ההאזנה — לחץ להחלפה", "Listening language — tap to change", "لغة الاستماع — اضغط للتغيير", "Langue d'écoute — touchez pour changer", "Idioma de escucha — toca para cambiar", "Язык распознавания — нажмите, чтобы сменить", "Hörsprache — zum Wechseln tippen"],
+ ["שפת החיפוש והמסך", "Search and screen language", "لغة البحث والشاشة", "Langue de recherche et d'écran", "Idioma de búsqueda y pantalla", "Язык поиска и экрана", "Such- und Bildschirmsprache"],
 ];
 
 const STR = {};
