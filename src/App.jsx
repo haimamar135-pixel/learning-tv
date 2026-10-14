@@ -1950,6 +1950,7 @@ function ShareBar({ share, peers, me, onTake, onFollow, onLeave, onCopy, copied,
       <span className="share-title">{tx("🕯 לימוד משותף")}</span>
       <span className="share-code" title={tx("קוד ההזמנה")}>{share.code}</span>
       <button className="mark-btn share-copy" onClick={onCopy}>{copied ? tx("✓ הועתק") : tx("🔗 העתק קישור")}</button>
+      <button className="mark-btn share-invite" onClick={onCopy} title={tx("🔗 העתק קישור")}>{copied ? tx("✓ הועתק") : tx("🔗 הזמן")}</button>
       <span className="share-who">{online.length ? online.map((p) => <span key={p.uid} className="share-peer" style={{ "--c": p.color }}>{p.name}</span>) : <span className="share-wait">{tx("מחכה לחבר…")}</span>}</span>
       <span className="share-holder">{tx("מחזיק הדף:")} <b>{holderName}</b></span>
       {share.holder !== me && <button className="mark-btn" onClick={onTake}>{tx("✋ קח את הדף")}</button>}
@@ -7815,6 +7816,7 @@ const css = `
 /* 🕯 לימוד משותף */
 .share-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#fff8e6;border:1.5px solid var(--amber);border-radius:12px;padding:7px 12px;margin:0 0 12px;font-size:.9rem;color:#4a3a1a}
 .share-title{font-weight:800}
+.share-invite{display:none}
 .share-code{font-family:'IBM Plex Mono',monospace;letter-spacing:.12em;background:#fff;border:1px solid #e0c98f;border-radius:6px;padding:2px 8px;font-weight:600}
 .share-who{display:flex;gap:6px;flex-wrap:wrap}
 .share-peer{background:var(--c);color:#fff;border-radius:999px;padding:1px 9px;font-size:.82rem;font-weight:600}
@@ -7826,7 +7828,7 @@ const css = `
 .screen>.share-bar{margin:0;border-radius:0;border-width:0 0 1.5px;flex:none}
 .share-bar.share-min{width:100%;cursor:pointer;font:inherit;font-size:.78rem;padding:2px 12px;gap:10px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;text-align:start}
 .share-min .share-min-open{margin-inline-start:auto;opacity:.7}
-@media (max-width:640px){.screen>.share-bar{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;gap:6px;padding:5px 8px;font-size:.8rem;-webkit-overflow-scrolling:touch}.screen>.share-bar>*{flex:none}.screen>.share-bar .mark-btn{padding:3px 8px;font-size:.8rem;order:-1}.screen>.share-bar .share-title,.screen>.share-bar .share-copy{display:none}}
+@media (max-width:640px){.screen>.share-bar{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;gap:6px;padding:5px 8px;font-size:.8rem;-webkit-overflow-scrolling:touch}.screen>.share-bar>*{flex:none}.screen>.share-bar .mark-btn{padding:3px 8px;font-size:.8rem;order:-1}.screen>.share-bar .share-title,.screen>.share-bar .share-copy{display:none}.screen>.share-bar .share-invite{display:inline-block;order:-2;background:var(--amber-deep,#c8871c);color:#fff;border-color:transparent;font-weight:800}}
 .share-msg{max-width:860px;margin:10px auto;background:#fff8e6;border:1px solid #e0c98f;border-radius:10px;padding:8px 12px;color:#4a3a1a;display:flex;gap:10px;align-items:center;justify-content:space-between}
 .ch-key.share{border-color:#b7a6f2}
 .scroll-sent.peer-hl{box-shadow:inset 0 -3px 0 var(--peer,#4aa3ff);border-radius:3px}
