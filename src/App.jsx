@@ -613,6 +613,9 @@ async function zipStore(files) {
   e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
   return new Blob([...parts, ...central, e.buffer], { type: "application/zip" });
 }
+/* 📌 על המסך / בארכיון: ספר נשאר בספרייה אלא אם הוסר ממנה (book.flex.pin === false).
+   הסימון נשמר ב-flex ולכן מסתנכרן לענן — אותו מסך במק ובטלפון. הארכיון הוא רק תצוגה; שום דבר לא נמחק. */
+const isPinned = (b) => !(b && b.flex && b.flex.pin === false);
 /* הגירה חד-פעמית מ-localStorage. רצה פעם אחת לפני הטעינה הראשונה. */
 let migratedPromise = null;
 function migrateFromLocalStorage() {
@@ -3814,6 +3817,22 @@ export default function LearningTV() {
   const [error, setError] = useState(null);
   const [staticFx, setStaticFx] = useState(false);
   const [deleteArm, setDeleteArm] = useState(null);
+  const [archiveOpen, setArchiveOpen] = useState(false); // 📚 הארכיון (ספרים שהוסרו מהמסך) פתוח?
+  const shown = useMemo(() => index.filter((b) => b.pin !== false), [index]);
+  const archived = useMemo(() => index.filter((b) => b.pin === false), [index]);
+  /* 📌 להשאיר על המסך / להעביר לארכיון. הסימון נשמר עם הספר ומסתנכרן לענן. */
+  const togglePin = async (id) => {
+    const b = await loadBook(id);
+    if (!b) return;
+    const pin = !isPinned(b);
+    const nb = { ...b, flex: { ...(b.flex || {}), pin } };
+    await saveBookToStorage(nb);
+    const nextIdx = index.map((e) => e.id === id ? { ...e, pin } : e);
+    setIndex(nextIdx);
+    await saveIndex(nextIdx);
+    if (book && book.id === id) setBook(nb);
+    queueSync({ k: "meta", book: nb });
+  };
   const [fileBusy, setFileBusy] = useState(null); // הודעת סטטוס בזמן קריאת קובץ
 
   /* ── ארון הספרים → ייבוא ללימוד ── */
@@ -4434,7 +4453,7 @@ export default function LearningTV() {
       for (let i = 0; i < list.length; i++) {
         setPullMsg(tx("מוריד {a}/{b}: {t}...", { a: i + 1, b: list.length, t: list[i].title || "" }));
         const { book: nb, updatedAt } = await pullBook(list[i].id, cloudUser.id);
-        const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), talk: talkCount(nb), updatedAt };
+        const entry = { id: nb.id, title: nb.title, chapters: nb.chapters.length, done: doneCount(nb), talk: talkCount(nb), pin: isPinned(nb), updatedAt };
         idx = [entry, ...idx.filter((b) => b.id !== nb.id)];
         if (book && book.id === nb.id) setBook(nb);
       }
@@ -4549,8 +4568,8 @@ export default function LearningTV() {
     (async () => {
       let idx = await loadIndex();
       /* שיקוף: ספרים שנשמרו לפני שהאינדקס ידע לספור הערות וסימונים — משלימים פעם אחת */
-      if (idx.some((b) => b.talk === undefined)) {
-        idx = await Promise.all(idx.map(async (b) => b.talk === undefined ? { ...b, talk: talkCount(await loadBook(b.id)) } : b));
+      if (idx.some((b) => b.talk === undefined || b.pin === undefined)) {
+        idx = await Promise.all(idx.map(async (b) => (b.talk === undefined || b.pin === undefined) ? (async () => { const bk = await loadBook(b.id); return { ...b, talk: b.talk === undefined ? talkCount(bk) : b.talk, pin: isPinned(bk) }; })() : b));
         await saveIndex(idx);
       }
       idx = await seedStarter(idx);
@@ -4576,6 +4595,7 @@ export default function LearningTV() {
       chapters: nextBook.chapters.length,
       done: doneCount(nextBook),
       talk: talkCount(nextBook),
+      pin: isPinned(nextBook),
       updatedAt: Date.now(),
     };
     const nextIdx = [entry, ...index.filter((b) => b.id !== nextBook.id)];
@@ -6033,7 +6053,7 @@ export default function LearningTV() {
             <p className="serif">{tx("יש כאן מי שמחכה ללמוד איתך.")}</p>
             <p>{tx("בְּפִיךָ וּבִלְבָבְךָ · הלימוד קרוב")}</p>
             {index.length > 0 && (
-              <button className="op-lib" onClick={() => enterFromOpening(false, null)}>{tx("↩ לספרייה שלי ({n})", { n: index.length })}</button>
+              <button className="op-lib" onClick={() => enterFromOpening(false, null)}>{tx("↩ לספרייה שלי ({n})", { n: index.filter((b) => b.pin !== false).length || index.length })}</button>
             )}
           </footer>
         </div>
@@ -6435,7 +6455,7 @@ export default function LearningTV() {
                       <button className="del" onClick={dropRec} title={tx("מחק הקלטה")}>✕</button>
                     </div>
                   )}
-                  {index.map((b) => (
+                  {shown.map((b) => (
                     <div className="book-row" key={b.id}>
                       <button className="book-main" onClick={() => openBook(b.id)}>
                         <span className="book-title">{b.title}</span>
@@ -6456,6 +6476,7 @@ export default function LearningTV() {
                           📤<small>{recReady === b.id ? tx("לחץ שוב") : tx("ייצוא")}</small>
                         </button>
                       )}
+                      <button className="del pin" onClick={() => togglePin(b.id)} title={tx("הסר מהמסך (הספר נשמר בארכיון)")} aria-label={tx("לארכיון")}>▾</button>
                       {deleteArm === b.id ? (
                         <button className="del confirm" onClick={() => removeBook(b.id)}>{tx("בטוח?")}</button>
                       ) : (
@@ -6463,6 +6484,29 @@ export default function LearningTV() {
                       )}
                     </div>
                   ))}
+                  {!shown.length && archived.length > 0 && <p className="intake-tip" style={{ textAlign: "center" }}>{tx("המסך פנוי. הספרים שלך בארכיון למטה — 📌 מחזיר ספר למסך.")}</p>}
+                  {archived.length > 0 && (
+                    <div className={"archive" + (archiveOpen ? " open" : "")}>
+                      <button className="archive-head" onClick={() => setArchiveOpen((v) => !v)} aria-expanded={archiveOpen}>
+                        <span>{tx("📚 ארכיון · {n} ספרים", { n: archived.length })}</span>
+                        <span className="archive-arrow">{archiveOpen ? "▴" : "▾"}</span>
+                      </button>
+                      {archiveOpen && archived.map((b) => (
+                        <div className="book-row archived" key={b.id}>
+                          <button className="book-main" onClick={() => openBook(b.id)}>
+                            <span className="book-title">{b.title}</span>
+                            <span className="book-meta">{tx("{a}/{b} פרקים הושלמו", { a: b.done, b: b.chapters })}</span>
+                          </button>
+                          <button className="del pin on" onClick={() => togglePin(b.id)} title={tx("📌 החזר למסך")} aria-label={tx("📌 החזר למסך")}>📌</button>
+                          {deleteArm === b.id ? (
+                            <button className="del confirm" onClick={() => removeBook(b.id)}>{tx("בטוח?")}</button>
+                          ) : (
+                            <button className="del" onClick={() => setDeleteArm(b.id)} title={tx("מחק ספר")}>✕</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {error && <div className="err">{error}</div>}
                 </div>
               )}
@@ -7657,6 +7701,13 @@ const css = `
   color:#8c6a5a;cursor:pointer;font-size:1rem;font-family:'Heebo',sans-serif;
 }
 .del.confirm{background:#fbe6e0;border-color:#e2a493;color:#8c3a25;font-weight:600;padding:0 10px}
+.del.pin{color:#7a5410;font-size:1.05rem}
+.del.pin.on{background:#fff8e6;border-color:#d8b06a}
+.archive{margin-top:18px;border-top:1px dashed var(--line);padding-top:8px}
+.archive-head{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-family:'Heebo',sans-serif;font-size:.95rem;color:#6b5a3e;cursor:pointer}
+.archive.open .archive-head{border-bottom-left-radius:0;border-bottom-right-radius:0;background:#f7f2e6}
+.archive .book-row.archived{margin-top:6px;opacity:.85}
+.archive .book-row.archived .book-main{background:#fbf8f1}
  
 /* 🎧 שיקוף */
 .mirror-btn{
