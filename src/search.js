@@ -19,8 +19,10 @@ function variants(w) {
   return out;
 }
 /* מילת שאילתה q תואמת מילת טקסט w אם q היא תחילית של אחת הגרסאות של w (או להפך לשאילתה עם אות שימוש) */
-function wordHit(q, w) {
-  for (const v of variants(w)) if (v.startsWith(q)) return true;
+/* כתיב מלא/חסר: "תפילה" מול "תפלה", "אור" מול "אר" — משווים גם בלי י/ו פנימיות (לא בתחילת המילה) */
+const skel = (w) => w.length < 4 ? w : w[0] + w.slice(1).replace(/[יו]/g, "");
+function wordHit(q, w, loose) {
+  for (const v of variants(w)) { if (v.startsWith(q)) return true; if (loose && skel(v).startsWith(skel(q))) return true; }
   return false;
 }
 /* מילות קישור שמסננים משאילתה בלשון דיבור ("כל מה שקשור בצמצום", "find everything about contraction") */
@@ -32,12 +34,12 @@ function tokens(s) {
   return core.length ? core : all;
 }
 /* האם כל מילות השאילתה נמצאות במשפט (כל אחת כתחילית של מילה כלשהי) */
-export function matches(qTokens, text) {
+export function matches(qTokens, text, loose = false) {
   const words = norm(text).split(" ");
   for (const q of qTokens) {
     const qs = variants(q);
     let ok = false;
-    for (const w of words) { for (const qv of qs) if (wordHit(qv, w)) { ok = true; break; } if (ok) break; }
+    for (const w of words) { for (const qv of qs) if (wordHit(qv, w, loose)) { ok = true; break; } if (ok) break; }
     if (!ok) return false;
   }
   return true;
@@ -107,6 +109,7 @@ export function indexBook(book, meta, bookSentences) {
   const { sentences, chapterRanges } = bookSentences(book);
   const chOf = (si) => { for (let c = 0; c < chapterRanges.length; c++) { const [a, b] = chapterRanges[c]; if (si >= a && si < b) return c; } return 0; };
   const base = { bookId: book.id, title: book.title || "", pin: !(book.flex && book.flex.pin === false) };
+  if (base.title) entries.push({ ...base, kind: "title", ch: 0, si: 0, text: base.title });
   sentences.forEach((t, si) => { if (t && t.length > 1) entries.push({ ...base, kind: "text", ch: chOf(si), si, text: t }); });
   for (const k of Object.keys(book.notes || {})) {
     const n = book.notes[k]; const t = n && (n.t || "").trim();
@@ -130,23 +133,26 @@ export async function buildIndex(indexList, loadBook, bookSentences) {
     const stamp = String(m.updatedAt || 0) + ":" + (m.pin === false ? 0 : 1);
     const c = cache.get(m.id);
     if (c && c.stamp === stamp) continue;
-    const b = await loadBook(m.id);
-    cache.set(m.id, { stamp, entries: indexBook(b, m, bookSentences) });
+    let entries = [];
+    try { const b = await loadBook(m.id); entries = indexBook(b, m, bookSentences); }
+    catch (e) { console.warn("index book failed", m.id, e); }
+    cache.set(m.id, { stamp, entries });
   }
   for (const id of [...cache.keys()]) if (!indexList.some((m) => m.id === id)) cache.delete(id);
 }
+/* כמה ספרים וכמה פריטים יש באינדקס — לשורת המצב בחלון החיפוש */
+export function indexStats() { let n = 0; for (const c of cache.values()) n += c.entries.length; return { books: cache.size, entries: n }; }
 export function invalidateBook(id) { cache.delete(id); }
 export function searchContent(query, limit = 40) {
   const q = tokens(query);
   if (!q.length) return [];
   const hits = [];
-  for (const { entries } of cache.values()) {
-    for (const e of entries) {
-      if (matches(q, e.text)) { hits.push(e); if (hits.length >= limit * 4) break; }
-    }
-  }
+  const scan = (loose) => { for (const { entries } of cache.values()) for (const e of entries) { if (matches(q, e.text, loose)) { hits.push(e); if (hits.length >= limit * 4) return; } } };
+  scan(false);
+  /* אין תוצאות בכתיב המדויק? מנסים גם כתיב מלא/חסר (רק לעברית) */
+  if (!hits.length && q.some((t) => /[\u05d0-\u05ea]/.test(t))) scan(true);
   /* הערות ותוצרים לפני טקסט; על המסך לפני ארכיון */
-  const rank = (e) => (e.kind === "note" ? 0 : e.kind === "result" ? 1 : 2) + (e.pin ? 0 : 3);
+  const rank = (e) => (e.kind === "title" ? 0 : e.kind === "note" ? 1 : e.kind === "result" ? 2 : 3) + (e.pin ? 0 : 4);
   hits.sort((a, b) => rank(a) - rank(b));
   return hits.slice(0, limit);
 }

@@ -5,7 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import { App as CapApp } from "@capacitor/app";
 import { tx, getLang, setLang, langDir, LANGS } from "./i18n.js";
 import { STARTER } from "./starter.js";
-import { searchFeatures, buildIndex, searchContent, snippet as searchSnippet } from "./search.js";
+import { searchFeatures, buildIndex, searchContent, indexStats, snippet as searchSnippet } from "./search.js";
 
 /* ─── ענן (Supabase) — שלב 1: חשבון משתמש ───
    המפתח הזה ציבורי בכוונה (publishable); ההגנה היא Row Level Security
@@ -3833,6 +3833,7 @@ export default function LearningTV() {
   const runFind = (q) => {
     clearTimeout(findTimer.current);
     if (!q.trim()) { setFindRes({ feats: [], hits: [], busy: false }); return; }
+    setFindRes((r) => ({ ...r, busy: true }));
     findTimer.current = setTimeout(async () => {
       const feats = searchFeatures(q, tx);
       /* שם של שפה בשאילתה → כלי "החלף שפה" */
@@ -6269,11 +6270,11 @@ export default function LearningTV() {
                     )}
                     {findQ.trim() && (
                       <div className="search-group">
-                        <div className="search-h">{findRes.busy ? tx("מחפש בספרים…") : tx("בספרים שלך ({n})", { n: findRes.hits.length })}</div>
+                        <div className="search-h">{findRes.busy ? tx("מחפש בספרים…") : tx("בספרים שלך ({n})", { n: findRes.hits.length })}{!findRes.busy && <span className="search-stat"> · {tx("נסרקו {b} ספרים, {e} פריטים", indexStats().books !== undefined ? { b: indexStats().books, e: indexStats().entries } : {})}</span>}</div>
                         {findRes.hits.map((h, k) => { const [a, b, c] = searchSnippet(h.text, findQ); return (
                           <button key={k} className={"search-item hit" + (h.pin ? "" : " arch")} onClick={() => goHit(h)}>
                             <b>{h.title}{!h.pin && " · 📚"}</b>
-                            <small>{h.kind === "note" ? tx("📝 הערה שלך") : h.kind === "result" ? tx("תוצר: {c}", { c: tx((CHANNELS.find((x) => x.id === h.channel) || {}).label || h.channel) }) : tx("פרק {n}", { n: h.ch + 1 })}</small>
+                            <small>{h.kind === "title" ? tx("שם הספר") : h.kind === "note" ? tx("📝 הערה שלך") : h.kind === "result" ? tx("תוצר: {c}", { c: tx((CHANNELS.find((x) => x.id === h.channel) || {}).label || h.channel) }) : tx("פרק {n}", { n: h.ch + 1 })}</small>
                             <span dir="auto">{a}<mark>{b}</mark>{c}</span>
                           </button>
                         ); })}
@@ -7878,6 +7879,7 @@ const css = `
 .search-in{flex:1;min-width:0;font-family:'Heebo',sans-serif;font-size:1.1rem;padding:10px 12px;border:1.5px solid #c9b8f2;border-radius:10px;background:#fff;color:#1b2238}
 .search-in:focus{outline:none;border-color:var(--amber-deep)}
 .search-row .voice-lang{font-family:'Heebo',sans-serif;font-size:.85rem;padding:6px 4px;border:1.5px solid #c9b8f2;border-radius:10px;background:#fff;color:#1b2238;max-width:92px}
+.search-stat{font-weight:400;opacity:.7;font-size:.8em}
 .search-row .mic.on{background:#fbe6e0;border-color:#e2a493;color:#8c3a25}
 .search-results{overflow-y:auto;padding:8px 12px 16px}
 .search-h{font-size:.8rem;letter-spacing:.06em;color:#8a7a5e;margin:10px 4px 4px;text-transform:uppercase}

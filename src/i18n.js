@@ -636,6 +636,8 @@ const T = [
  ["החלף את שפת המסך", "Switch the screen language", "تغيير لغة الشاشة", "Changer la langue de l'écran", "Cambiar el idioma de la pantalla", "Сменить язык экрана", "Bildschirmsprache wechseln"],
  ["שפת ההאזנה — לחץ להחלפה", "Listening language — tap to change", "لغة الاستماع — اضغط للتغيير", "Langue d'écoute — touchez pour changer", "Idioma de escucha — toca para cambiar", "Язык распознавания — нажмите, чтобы сменить", "Hörsprache — zum Wechseln tippen"],
  ["שפת החיפוש והמסך", "Search and screen language", "لغة البحث والشاشة", "Langue de recherche et d'écran", "Idioma de búsqueda y pantalla", "Язык поиска и экрана", "Such- und Bildschirmsprache"],
+ ["שם הספר", "Book title", "اسم الكتاب", "Titre du livre", "Título del libro", "Название книги", "Buchtitel"],
+ ["נסרקו {b} ספרים, {e} פריטים", "{b} books scanned, {e} items", "تم فحص {b} كتب، {e} عنصرًا", "{b} livres parcourus, {e} éléments", "{b} libros revisados, {e} elementos", "Просмотрено книг: {b}, элементов: {e}", "{b} Bücher durchsucht, {e} Einträge"],
 ];
 
 const STR = {};
