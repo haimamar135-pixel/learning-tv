@@ -3893,11 +3893,13 @@ export default function LearningTV() {
     }
   };
   /* ניווט לתוצאת תוכן: פותח את הספר בפרק, ובמשפט */
+  const hitGuardRef = useRef(0); // אחרי ניווט מתוצאת חיפוש: לחיצות על משפטים נבלעות לרגע, כדי שלא ייפתח מצב בחירת טווח
   const goHit = async (h) => {
-    closeFind(); setError(null);
+    closeFind(); setError(null); hitGuardRef.current = Date.now();
     const b = (book && book.id === h.bookId) ? book : await loadBook(h.bookId);
     if (!b) return;
     setBook(b); setChIdx(h.ch); setChannel(h.kind === "result" && h.channel ? h.channel : "read"); clearSelection(); flick(); setView("tv");
+    hitGuardRef.current = Date.now();
     if (h.kind !== "result") setTimeout(() => { const el = document.querySelector(`[data-si="${h.si}"]`); if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.classList.add("search-hit"); setTimeout(() => el.classList.remove("search-hit"), 2600); } }, 450);
   };
   /* ☑ בחירה מרובה: "בחר" מציג תיבות; "סמן הכול"; "לארכיון" / "למסך" פועלים על המסומנים בלבד. */
@@ -4124,6 +4126,14 @@ export default function LearningTV() {
     setLang(l); setLangTick((n) => n + 1);
     (async () => { const idx = await loadIndex(); const next = await seedStarter(idx); if (next !== idx) setIndex(next); })();
   };
+  /* תגי הבחירה ("⌈ התחלה", "סוף ⌋") מצוירים ב-CSS; המילים נכנסות דרך משתני CSS כדי שיתורגמו עם שפת המסך */
+  useEffect(() => {
+    const st = document.documentElement.style;
+    st.setProperty("--sel-a", JSON.stringify(tx("⌈ התחלה")));
+    st.setProperty("--sel-z", JSON.stringify(tx("סוף ⌋")));
+    st.setProperty("--sel-q", JSON.stringify(tx("סוף?")));
+    st.setProperty("--sel-w", JSON.stringify(tx("⌈ התחלה · לחץ על משפט הסוף")));
+  });
   const [showOpening, setShowOpening] = useState(() => {
     try { return !localStorage.getItem("lomedtv-opened"); } catch { return true; }
   });
@@ -5554,6 +5564,7 @@ export default function LearningTV() {
      ולחיצה שלישית מתחילה סימון חדש. אותם מרקרים והערות של המגילה — אותו אחסון. */
   const onReadSentClick = (i) => {
     if (dragJustRef.current) { dragJustRef.current = false; return; }
+    if (Date.now() - hitGuardRef.current < 900) return;
     if (wordSel) setWordSel(null);
     if (selStart === null || selEnd !== null) {
       setSelStart(i);
@@ -8226,10 +8237,10 @@ const css = `
 .scroll-sent.sel-pre{background:#fcf9f0;box-shadow:-3px 0 0 #f1e2bd}
 .scroll-sent.sel-wait{background:#fbf0d6}
 .scroll-sent.sel-a::before,.scroll-sent.sel-z::after{font-family:'Heebo',sans-serif;font-size:.6rem;font-weight:700;letter-spacing:.02em;color:#fff;background:var(--amber);border-radius:4px;padding:1px 5px;vertical-align:middle;margin:0 3px;white-space:nowrap;line-height:1.2}
-.scroll-sent.sel-a::before{content:"⌈ התחלה"}
-.scroll-sent.sel-z::after{content:"סוף ⌋"}
-.scroll-sent.sel-pre.sel-z::after{content:"סוף?";background:#e3cfa0}
-.scroll-sent.sel-wait.sel-a::before{content:"⌈ התחלה · לחץ על משפט הסוף"}
+.scroll-sent.sel-a::before{content:var(--sel-a,"⌈ התחלה")}
+.scroll-sent.sel-z::after{content:var(--sel-z,"סוף ⌋")}
+.scroll-sent.sel-pre.sel-z::after{content:var(--sel-q,"סוף?");background:#e3cfa0}
+.scroll-sent.sel-wait.sel-a::before{content:var(--sel-w,"⌈ התחלה · לחץ על משפט הסוף")}
 .scroll-sent.was-read{color:#6c6449}
 .bookmark-line{
   display:flex;align-items:center;gap:8px;color:#1e7c6d;font-weight:700;font-size:.85rem;

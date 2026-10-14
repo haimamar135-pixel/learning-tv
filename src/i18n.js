@@ -638,6 +638,10 @@ const T = [
  ["שפת החיפוש והמסך", "Search and screen language", "لغة البحث والشاشة", "Langue de recherche et d'écran", "Idioma de búsqueda y pantalla", "Язык поиска и экрана", "Such- und Bildschirmsprache"],
  ["שם הספר", "Book title", "اسم الكتاب", "Titre du livre", "Título del libro", "Название книги", "Buchtitel"],
  ["נסרקו {b} ספרים, {e} פריטים", "{b} books scanned, {e} items", "تم فحص {b} كتب، {e} عنصرًا", "{b} livres parcourus, {e} éléments", "{b} libros revisados, {e} elementos", "Просмотрено книг: {b}, элементов: {e}", "{b} Bücher durchsucht, {e} Einträge"],
+ ["⌈ התחלה", "⌈ Start", "⌈ بداية", "⌈ Début", "⌈ Inicio", "⌈ Начало", "⌈ Anfang"],
+ ["סוף ⌋", "End ⌋", "نهاية ⌋", "Fin ⌋", "Fin ⌋", "Конец ⌋", "Ende ⌋"],
+ ["סוף?", "End?", "نهاية؟", "Fin ?", "¿Fin?", "Конец?", "Ende?"],
+ ["⌈ התחלה · לחץ על משפט הסוף", "⌈ Start · tap the last sentence", "⌈ بداية · اضغط على جملة النهاية", "⌈ Début · touchez la dernière phrase", "⌈ Inicio · toca la última frase", "⌈ Начало · нажмите на последнее предложение", "⌈ Anfang · tippen Sie auf den letzten Satz"],
 ];
 
 const STR = {};
