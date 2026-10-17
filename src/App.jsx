@@ -614,6 +614,203 @@ async function zipStore(files) {
   e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, csize, true); e.setUint32(16, off, true);
   return new Blob([...parts, ...central, e.buffer], { type: "application/zip" });
 }
+/* ─── 📤 ייצוא (צ'אט 30): תמונות ← JPG / PNG / PDF, ספר ← TXT / Word ───
+   הכול במכשיר, בלי שרת: הדפדפן מפענח את התמונה (גם HEIC באייפון) ומצייר ל-canvas; PDF ו-Word נכתבים ישירות
+   (PDF: עמוד לכל תמונה, JPEG בלי קידוד מחדש · Word: ZIP מינימלי עם document.xml, אותו zipStore של ההקלטה).
+   בטלפון — גיליון השיתוף; במחשב — הורדה (כמה קבצים ← ZIP אחד). */
+const safeFileName = (s, fallback = "lomedtv") => String(s || "").replace(/[\\/:*?"<>|\n\r]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) || fallback;
+const baseName = (name) => String(name || "").replace(/\.[^.]+$/, "");
+async function decodeImage(file) {
+  try { return await createImageBitmap(file); } catch {}
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => { URL.revokeObjectURL(url); res(im); };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(new Error("הדפדפן לא מצליח לפתוח את התמונה " + (file.name || ""))); };
+    im.src = url;
+  });
+}
+/* תמונה ← Blob בפורמט המבוקש; מוקטנת לצלע ארוכה של עד maxSide (3000 מספיק לדף מודפס) */
+async function imageToBlob(file, type, maxSide = 3000) {
+  const im = await decodeImage(file);
+  const w0 = im.width || im.naturalWidth, h0 = im.height || im.naturalHeight;
+  const k = Math.min(1, maxSide / Math.max(w0, h0, 1));
+  const w = Math.max(1, Math.round(w0 * k)), h = Math.max(1, Math.round(h0 * k));
+  const c = document.createElement("canvas"); c.width = w; c.height = h;
+  const g = c.getContext("2d");
+  if (type === "image/jpeg") { g.fillStyle = "#fff"; g.fillRect(0, 0, w, h); }
+  g.drawImage(im, 0, 0, w, h);
+  if (typeof im.close === "function") im.close();
+  const blob = await new Promise((r) => c.toBlob(r, type, 0.9));
+  if (!blob) throw new Error("canvas");
+  return { blob, w, h };
+}
+/* PDF מינימלי: עמוד לכל תמונה (JPEG), גודל העמוד לפי יחס התמונה, עד A4 */
+async function imagesToPdf(items) {
+  const enc = new TextEncoder(), parts = [], offs = [];
+  let pos = 0;
+  const push = (x) => { const u = typeof x === "string" ? enc.encode(x) : x; parts.push(u); pos += u.length; };
+  const obj = (n, body) => { offs[n] = pos; push(`${n} 0 obj\n${body}\nendobj\n`); };
+  push("%PDF-1.4\n"); push(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
+  const n = items.length, pageIds = items.map((_, i) => 5 + i * 3);
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, `<< /Type /Pages /Kids [${pageIds.map((p) => p + " 0 R").join(" ")}] /Count ${n} >>`);
+  for (let i = 0; i < n; i++) {
+    const { blob, w, h } = items[i], data = new Uint8Array(await blob.arrayBuffer());
+    const s = Math.min(595 / w, 842 / h), pw = (w * s).toFixed(2), ph = (h * s).toFixed(2);
+    const im = 3 + i * 3, ct = 4 + i * 3, pg = 5 + i * 3;
+    offs[im] = pos;
+    push(`${im} 0 obj\n<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${data.length} >>\nstream\n`);
+    push(data); push("\nendstream\nendobj\n");
+    const content = `q ${pw} 0 0 ${ph} 0 0 cm /Im${i} Do Q`;
+    obj(ct, `<< /Length ${enc.encode(content).length} >>\nstream\n${content}\nendstream`);
+    obj(pg, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] /Resources << /XObject << /Im${i} ${im} 0 R >> >> /Contents ${ct} 0 R >>`);
+  }
+  const total = 3 + n * 3, xref = pos;
+  let x = `xref\n0 ${total}\n0000000000 65535 f \n`;
+  for (let i = 1; i < total; i++) x += String(offs[i]).padStart(10, "0") + " 00000 n \n";
+  push(x + `trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(parts, { type: "application/pdf" });
+}
+/* Word (.docx) מינימלי: כותרת, פרקים ככותרות, פסקה לכל שורה; עברית/ערבית מימין לשמאל. אופציה: ההערות והסימונים בסוף */
+const xmlEsc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+async function bookAsDocx(book, withNotes) {
+  const isRtl = (s) => /[֐-׿؀-ۿ]/.test(s);
+  const para = (text, style) => {
+    const d = isRtl(text);
+    return `<w:p><w:pPr>${style ? `<w:pStyle w:val="${style}"/>` : ""}${d ? "<w:bidi/>" : ""}</w:pPr><w:r>${d ? "<w:rPr><w:rtl/></w:rPr>" : ""}<w:t xml:space="preserve">${xmlEsc(text)}</w:t></w:r></w:p>`;
+  };
+  let body = para(book.title || "", "Title");
+  const chs = (book.chapters || []).filter((c) => c && (c.text || "").trim()), many = chs.length > 1;
+  for (const c of chs) {
+    if (many && c.title) body += para(c.title, "Heading1");
+    for (const line of String(c.text).split(/\n+/)) { const t = line.trim(); if (t) body += para(t); }
+  }
+  if (withNotes) {
+    const m = mirrorMaterial(book);
+    if (m.marks.length || m.notes.length) {
+      body += para(tx("ההערות והסימונים שלי"), "Heading1");
+      for (const k of m.marks) body += para("▮ " + k.text);
+      for (const nt of m.notes) body += para("📝 " + (nt.src ? nt.src + " — " : "") + nt.text);
+    }
+  }
+  const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
+  const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ${W}><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>${isRtl(book.title || "") ? "<w:bidi/>" : ""}</w:sectPr></w:body></w:document>`;
+  const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W}><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="240"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="40"/><w:szCs w:val="40"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:keepNext/><w:spacing w:before="360" w:after="120"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:bCs/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style></w:styles>`;
+  const types = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const f = (name, s) => new File([s], name, { type: "application/xml" });
+  const zip = await zipStore([f("[Content_Types].xml", types), f("_rels/.rels", rels), f("word/document.xml", document), f("word/_rels/document.xml.rels", docRels), f("word/styles.xml", styles)]);
+  return new Blob([zip], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+const isMobileUA = () => IS_NATIVE || /iPhone|iPad|Android/i.test(navigator.userAgent);
+/* שיתוף או הורדה. מחזיר "shared" / "downloaded" / "cancel". חייב להיקרא ישירות מלחיצה (ספארי). */
+async function shareFiles(files, title) {
+  if (isMobileUA() && navigator.share && navigator.canShare && navigator.canShare({ files })) {
+    try { await navigator.share({ files, title }); return "shared"; } catch (e) { if (e?.name === "AbortError") return "cancel"; }
+  }
+  let out = files[0];
+  if (files.length > 1) out = new File([await zipStore(files)], safeFileName(title) + ".zip", { type: "application/zip" });
+  const url = URL.createObjectURL(out), a = document.createElement("a");
+  a.href = url; a.download = out.name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return "downloaded";
+}
+/* חלון הייצוא: לשונית "תמונות ודפים" (JPG · PNG · PDF) ולשונית "טקסט" (TXT · Word) כשיש ספר */
+function ExportDialog({ ctx, onClose, getBook }) {
+  const hasBook = !!ctx.id;
+  const [tab, setTab] = useState(hasBook && !ctx.images ? "text" : "images");
+  const [files, setFiles] = useState([]);
+  const [fmt, setFmt] = useState("jpg");
+  const [tfmt, setTfmt] = useState("docx");
+  const [withNotes, setWithNotes] = useState(true);
+  const [busy, setBusy] = useState("");
+  const [out, setOut] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const pick = (e) => { setFiles(Array.from(e.target.files || [])); setOut(null); setMsg(""); setErr(""); };
+  const switchTab = (t) => { setTab(t); setOut(null); setMsg(""); setErr(""); };
+  const convertImages = async () => {
+    if (!files.length) throw new Error(tx("קודם בוחרים תמונות."));
+    const stem = files.length === 1 ? baseName(files[0].name) : safeFileName(ctx.title, "pages");
+    if (fmt === "pdf") {
+      const items = [];
+      for (let i = 0; i < files.length; i++) { setBusy(tx("ממיר {a}/{b}…", { a: i + 1, b: files.length })); items.push(await imageToBlob(files[i], "image/jpeg")); }
+      setBusy(tx("כותב PDF…"));
+      return [new File([await imagesToPdf(items)], safeFileName(stem, "pages") + ".pdf", { type: "application/pdf" })];
+    }
+    const type = fmt === "png" ? "image/png" : "image/jpeg", ext = fmt === "png" ? ".png" : ".jpg", res = [];
+    for (let i = 0; i < files.length; i++) {
+      setBusy(tx("ממיר {a}/{b}…", { a: i + 1, b: files.length }));
+      const { blob } = await imageToBlob(files[i], type);
+      res.push(new File([blob], safeFileName(baseName(files[i].name), "image") + ext, { type }));
+    }
+    return res;
+  };
+  const makeText = async () => {
+    setBusy(tx("מכין את הקובץ…"));
+    const b = await getBook();
+    if (!b?.chapters?.length) throw new Error(tx("הספר לא נמצא."));
+    const stem = safeFileName(b.title, "book");
+    if (tfmt === "txt") return [new File([bookAsText(b)], stem + ".txt", { type: "text/plain" })];
+    return [new File([await bookAsDocx(b, withNotes)], stem + ".docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" })];
+  };
+  const run = async () => {
+    setOut(null); setMsg(""); setErr("");
+    try { setOut(tab === "images" ? await convertImages() : await makeText()); }
+    catch (e) { setErr(e?.message || tx("ההמרה נכשלה.")); }
+    finally { setBusy(""); }
+  };
+  const send = async () => {
+    try {
+      const r = await shareFiles(out, ctx.title || tx("ייצוא"));
+      setMsg(r === "downloaded" ? tx("הקובץ ירד לתיקיית ההורדות.") : r === "shared" ? tx("נשלח.") : "");
+    } catch (e) { setErr(tx("השיתוף נכשל — נסה שוב.")); }
+  };
+  const sizeOf = (f) => f.size > 1e6 ? (f.size / 1e6).toFixed(1) + " MB" : Math.round(f.size / 1e3) + " KB";
+  return (
+    <div className="cloud-overlay" onClick={onClose}>
+      <div className="cloud-box exp-box" dir={langDir()} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={tx("ייצוא")}>
+        <h3>📤 {tx("ייצוא")}{ctx.title ? " · " + ctx.title : ""}</h3>
+        {hasBook && (
+          <div className="exp-tabs" role="tablist">
+            <button className={"cloud-btn" + (tab === "text" ? "" : " ghost")} role="tab" aria-selected={tab === "text"} onClick={() => switchTab("text")}>{tx("📄 טקסט")}</button>
+            <button className={"cloud-btn" + (tab === "images" ? "" : " ghost")} role="tab" aria-selected={tab === "images"} onClick={() => switchTab("images")}>{tx("🖼 תמונות ודפים")}</button>
+          </div>
+        )}
+        {tab === "images" ? (
+          <div className="exp-body">
+            <p className="exp-hint">{tx("צילומים (גם HEIC מהאייפון) הופכים ל-JPG, ל-PNG, או ל-PDF אחד — דף לכל תמונה, לפי הסדר. הכול במכשיר הזה.")}</p>
+            <label className="cloud-btn exp-pick" htmlFor="exp-files">{tx("🖼 בחר תמונות")}<input id="exp-files" type="file" multiple accept="image/*,.heic,.heif" onChange={pick} hidden /></label>
+            {files.length > 0 && <ul className="exp-list">{files.map((f, i) => <li key={i}><span dir="ltr">{f.name}</span><small dir="ltr">{sizeOf(f)}</small></li>)}</ul>}
+            <label className="exp-row">{tx("פורמט:")}
+              <select className="scan-mode-select" value={fmt} onChange={(e) => { setFmt(e.target.value); setOut(null); }}>
+                <option value="jpg">JPG</option><option value="png">PNG</option><option value="pdf">PDF</option>
+              </select>
+            </label>
+          </div>
+        ) : (
+          <div className="exp-body">
+            <p className="exp-hint">{tx("הספר כקובץ לעריכה: טקסט פשוט, או Word עם פרקים ככותרות.")}</p>
+            <label className="exp-row">{tx("פורמט:")}
+              <select className="scan-mode-select" value={tfmt} onChange={(e) => { setTfmt(e.target.value); setOut(null); }}>
+                <option value="docx">Word (.docx)</option><option value="txt">{tx("טקסט")} (.txt)</option>
+              </select>
+            </label>
+            {tfmt === "docx" && <label className="exp-row"><input type="checkbox" checked={withNotes} onChange={(e) => { setWithNotes(e.target.checked); setOut(null); }} /> {tx("לכלול את ההערות והסימונים שלי")}</label>}
+          </div>
+        )}
+        <div className="exp-actions">
+          {!out && <button className="cloud-btn" onClick={run} disabled={!!busy || (tab === "images" && !files.length)}>{busy || (tab === "images" ? tx("המר") : tx("צור קובץ"))}</button>}
+          {out && <button className="cloud-btn exp-send" onClick={send}>{isMobileUA() ? tx("📤 שתף") : tx("⬇ הורד")} · {out.length === 1 ? out[0].name : tx("{n} קבצים", { n: out.length })}</button>}
+          <button className="cloud-btn ghost" onClick={onClose}>{tx("סגור")}</button>
+        </div>
+        {msg && <p className="exp-msg">{msg}</p>}
+        {err && <p className="exp-msg err">{err}</p>}
+      </div>
+    </div>
+  );
+}
 /* 📌 על המסך / בארכיון: ספר נשאר בספרייה אלא אם הוסר ממנה (book.flex.pin === false).
    הסימון נשמר ב-flex ולכן מסתנכרן לענן — אותו מסך במק ובטלפון. הארכיון הוא רק תצוגה; שום דבר לא נמחק. */
 const isPinned = (b) => !(b && b.flex && b.flex.pin === false);
@@ -2967,7 +3164,8 @@ function HelpView({ onClose }) {
   const stopAll = () => { runRef.current++; window.speechSynthesis?.cancel(); if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } setSpeaking(false); };
   useEffect(() => { kRef.current = k; try { sessionStorage.setItem("lomedtv-help-k", String(k)); } catch {} }, [k]);
   useEffect(() => () => { stopAll(); }, []);
-  const steps = (data?.steps || []).filter((s) => KABBALAH || s.id !== "shelf");
+  /* צעד או פעימה עם kabbalah:true שייכים לענף (ארון, מילון, אימות, סולם) — בשורש הם לא מוצגים (צ'אט 30) */
+  const steps = useMemo(() => (data?.steps || []).filter((s) => KABBALAH || (!s.kabbalah && s.id !== "shelf")).map((s) => KABBALAH || !s.beats ? s : { ...s, beats: s.beats.filter((b) => !b.kabbalah) }), [data]);
   const st = steps[k];
   const beats = st ? (st.beats?.length ? st.beats : [{ say: st.text || "" }]) : [];
   const bt = beats[Math.min(beat, beats.length - 1)] || {};
@@ -3868,7 +4066,7 @@ export default function LearningTV() {
     const needBook = () => { setView("library"); hint(tx("קודם פותחים ספר ופרק — ואז {n}", { n: tx(f.name) })); };
     if (g.gate) { enterFromOpening(false, g.gate); if (g.gate === "rec") hint(tx("למטה: 🎙 הקלט שיעור חי")); return; }
     if (g.view === "intake") { setView("intake"); if (g.focus === "yt") setTimeout(() => document.querySelector(".yt-row")?.scrollIntoView({ behavior: "smooth", block: "center" }), 200); flick(); return; }
-    if (g.view === "library") { backToLibrary(); if (g.hint === "export") hint(tx("📤 ייצוא מופיע ליד ספר שנוצר מהקלטה חיה במכשיר הזה")); if (g.hint === "archive") { setArchiveOpen(true); hint(tx("▾ ליד ספר מוריד אותו לארכיון · ☑ בחר — קבוצה שלמה")); } flick(); return; }
+    if (g.view === "library") { backToLibrary(); if (g.hint === "export") hint(tx("📤 ייצוא ליד כל ספר: Word, טקסט, או תמונות כ-JPG / PNG / PDF")); if (g.hint === "archive") { setArchiveOpen(true); hint(tx("▾ ליד ספר מוריד אותו לארכיון · ☑ בחר — קבוצה שלמה")); } flick(); return; }
     if (g.ch) { if (!book) return needBook(); setChannel(g.ch); setView("tv"); flick(); if (g.hint === "mark") hint(tx("לחץ על משפט התחלה ואז על משפט סוף — ואז מרקר, קו או 📝 הערה")); return; }
     switch (g.act) {
       case "scroll": return book ? openScroll() : needBook();
@@ -4093,6 +4291,7 @@ export default function LearningTV() {
   const [recSec, setRecSec] = useState(0);
   const [recIds, setRecIds] = useState(() => new Set()); // 📤 לאילו ספרים יש הקלטה שמורה במכשיר (וגם "pending")
   const [recPend, setRecPend] = useState(null);          // פרטי ההקלטה שעוד לא תומללה: {sec, bytes, at}
+  const [exportFor, setExportFor] = useState(null);    // 📤 חלון הייצוא: { id, title } לספר · { images: true } להמרת תמונות בלבד (צ'אט 30)
   const [recReady, setRecReady] = useState(null);        // מזהה שהקובץ שלו כבר נטען וממתין ללחיצה שנייה (ספארי)
   const recFileRef = useRef(null);
   useEffect(() => {
@@ -6296,6 +6495,10 @@ export default function LearningTV() {
                 </div>
               </div>
             )}
+            {exportFor && (
+              <ExportDialog ctx={exportFor} onClose={() => setExportFor(null)}
+                getBook={async () => (book && book.id === exportFor.id ? book : await loadBook(exportFor.id))} />
+            )}
             {showCloud && (
               <div className="cloud-overlay" onClick={() => setShowCloud(false)}>
                 <div className="cloud-box" onClick={(e) => e.stopPropagation()}>
@@ -6509,6 +6712,9 @@ export default function LearningTV() {
                     <label htmlFor="smart-scan-input" className="cam-btn" style={{ pointerEvents: fileBusy ? "none" : "auto", opacity: fileBusy ? 0.6 : 1 }}>
                       {tx("🖼 העלה צילומים — כמה יחד")}
                     </label>
+                    <button type="button" className="cam-btn convert-btn" onClick={() => setExportFor({ images: true })} title={tx("המרת צילומים ל-JPG, PNG או PDF — בלי ליצור ספר")}>
+                      {tx("🔄 המרת תמונות (JPG · PNG · PDF)")}
+                    </button>
                     <span className="scan-mode-title" style={{ opacity: 0.75, fontWeight: 400 }}>
                       {tx("כמה צילומים יחד נעשים מאמר אחד, לפי סדר שמות הקבצים (סדר הצילום).")}
                     </span>
@@ -6650,9 +6856,12 @@ export default function LearningTV() {
                       )}
                       {recIds.has(b.id) && (
                         <button className="mirror-btn" onClick={() => sendRec(b.id, b.title)} title={tx("ייצוא: הקלטת השיעור יחד עם המלל (ההקלטה שמורה במכשיר הזה)")} aria-label={tx("שלח הקלטה")}>
-                          📤<small>{recReady === b.id ? tx("לחץ שוב") : tx("ייצוא")}</small>
+                          🎙<small>{recReady === b.id ? tx("לחץ שוב") : tx("הקלטה")}</small>
                         </button>
                       )}
+                      <button className="mirror-btn export-btn" onClick={() => setExportFor({ id: b.id, title: b.title })} title={tx("ייצוא: הספר כ-Word או טקסט, או תמונות כ-JPG / PNG / PDF")} aria-label={tx("ייצוא")}>
+                        📤<small>{tx("ייצוא")}</small>
+                      </button>
                       <button className="del pin" onClick={() => togglePin(b.id)} title={tx("הסר מהמסך (הספר נשמר בארכיון)")} aria-label={tx("לארכיון")}>▾</button>
                       {deleteArm === b.id ? (
                         <button className="del confirm" onClick={() => removeBook(b.id)}>{tx("בטוח?")}</button>
@@ -7924,6 +8133,24 @@ const css = `
 .mirror-btn small{font-size:.62rem;font-weight:700;letter-spacing:.02em}
 .mirror-btn:hover{border-color:var(--amber-deep);background:#fff3d6}
 .cloud-link{color:inherit;opacity:.75;text-decoration:underline}
+/* ── 📤 חלון הייצוא (צ'אט 30) ── */
+.exp-box{max-width:420px;text-align:start}
+.exp-box h3{text-align:center}
+.exp-tabs{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+.exp-body{display:flex;flex-direction:column;gap:10px}
+.exp-hint{margin:0;font-size:.9rem;opacity:.8;line-height:1.45}
+.exp-pick{display:inline-block;width:max-content;max-width:100%}
+.exp-list{list-style:none;margin:0;padding:8px 10px;background:rgba(255,255,255,.06);border-radius:8px;max-height:130px;overflow:auto;font-size:.85rem}
+.exp-list li{display:flex;justify-content:space-between;gap:10px;padding:2px 0}
+.exp-list li span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.exp-list small{opacity:.65;flex:none}
+.exp-row{display:flex;align-items:center;gap:8px;font-size:.95rem}
+.exp-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:14px}
+.exp-send{background:#f2a33c;color:#0a1128;font-weight:700;border-color:#f2a33c}
+.exp-msg{margin:10px 0 0;font-size:.9rem;text-align:center}
+.exp-msg.err{color:#ff9a9a}
+.convert-btn{background:transparent}
+
 .cloud-del{color:#ff9a9a;text-decoration:underline}
 .rec-pend{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 12px;padding:10px 12px;border:1.5px dashed #6f96d0;border-radius:12px;background:rgba(63,111,181,.10);font-family:'Heebo',sans-serif;font-size:.95rem}
 .rec-pend > span{flex:1 1 180px;font-weight:600}

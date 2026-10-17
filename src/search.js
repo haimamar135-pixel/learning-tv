@@ -55,7 +55,7 @@ export const FEATURES = [
   { id: "video", name: "🎥 צלם וידאו", desc: "מצלמים שיעור בווידאו, התמלול הופך לספר", keys: "וידאו סרטון צלם וידאו video film", go: { gate: "video" } },
   { id: "media", name: "🎬 קובץ שמע או וידאו", desc: "מעלים הקלטה קיימת (MP3, M4A, MP4) לתמלול", keys: "אודיו שמע קובץ שמע mp3 m4a mp4 וידאו העלאה audio media file upload", go: { gate: "file" } },
   { id: "yt", name: "▶ סרטון יוטיוב", desc: "קישור ותמליל מיוטיוב נעשים ספר, הסרטון לצד הטקסט", keys: "יוטיוב youtube סרטון קישור תמליל link", go: { view: "intake", focus: "yt" } },
-  { id: "export", name: "📤 ייצוא הקלטה", desc: "שולחים את קובץ ההקלטה עם המלל (בספרייה, ליד הספר)", keys: "ייצוא ייצא לייצא שלח שליחה הקלטה וואטסאפ מייל קובץ שמע export share send recording whatsapp", go: { view: "library", hint: "export" } },
+  { id: "export", name: "📤 ייצוא", desc: "הספר כ-Word או טקסט, וצילומים כ-JPG / PNG / PDF (בספרייה, ליד הספר; המרה גם ב\"ספר חדש\")", keys: "ייצוא ייצא לייצא שלח שליחה הקלטה וואטסאפ מייל קובץ שמע המרה להמיר וורד word docx txt pdf jpg jpeg png heic תמונה תמונות export share send recording whatsapp convert", go: { view: "library", hint: "export" } },
   { id: "summary", name: "01 סיכום", desc: "סיכום הפרק, מפורט או קצר", keys: "סיכום סכם תקציר summary summarize", go: { ch: "summary" } },
   { id: "concepts", name: "02 מושגים וכללים", desc: "מונחי המפתח של הפרק מוסברים", keys: "מושגים מושג כללים הגדרות מונחים concepts rules terms definitions", go: { ch: "concepts" } },
   { id: "mindmap", name: "03 מפת חשיבה", desc: "מבנה הפרק כמפה", keys: "מפת חשיבה מפה מבנה mind map mindmap", go: { ch: "mindmap" } },
